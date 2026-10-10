@@ -57,7 +57,6 @@ describe("useReorderLock", () => {
     expect(latest().isReorderLocked).toBe(true); // 提交了但还没到下一帧
     runFrames();
     expect(latest().isReorderLocked).toBe(false);
-    expect(latest().reorderUnlockFrame.current).toBe(null);
   });
 
   it("挂着解锁帧时手动 unlock 会取消那一帧；再 lock 也取消", () => {
@@ -65,9 +64,8 @@ describe("useReorderLock", () => {
     act(() => latest().lockReorder());
     act(() => latest().unlockReorderAfterCommit());
     render(B2);
-    expect(latest().reorderUnlockFrame.current).not.toBe(null);
+    expect(frames.length).toBeGreaterThan(0);
     act(() => latest().lockReorder());
-    expect(latest().reorderUnlockFrame.current).toBe(null);
     runFrames();
     expect(latest().isReorderLocked).toBe(true);
   });
@@ -81,6 +79,6 @@ describe("useReorderLock", () => {
     expect(latest().reorderNotice).toBe("二");
     act(() => { vi.advanceTimersByTime(800); });
     expect(latest().reorderNotice).toBe("");
-    expect(latest().reorderNoticeTimer.current).toBe(null);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

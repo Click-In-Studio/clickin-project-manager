@@ -35,9 +35,7 @@ describe("剧本标签与整本并发加载（#650）", () => {
 
   it("失败按空处理：无论成败都整体覆盖，不给上一版的标签留在屏上", () => {
     // 条件写入（if (tgData?.groups) setTagGroups(...)）在切版本失败时会残留旧标签、同步基线错位
-    expect(editor).toMatch(/setTagGroups\(\(tgData\?\.groups \?\? \[\]\) as TagGroup\[\]\)/);
-    expect(editor).toMatch(/for \(const tag of \(btData\?\.tags \?\? \[\]\) as BlockTagValue\[\]\)/);
-    expect(editor).not.toMatch(/if \(tgData\?\.groups\) setTagGroups/);
-    expect(editor).not.toMatch(/if \(btData\?\.tags\) \{/);
+    expect(editor).toContain("script.loadTags((tgData?.groups ?? []) as TagGroup[], (btData?.tags ?? []) as BlockTagValue[]);");
+    expect(editor).not.toMatch(/setTagGroups|setBlockTagMap|syncedBlockTagMapRef/);
   });
 });

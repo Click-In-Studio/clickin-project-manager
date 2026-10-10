@@ -38,7 +38,7 @@ describe("手机端剧本块新增入口", () => {
     const insertion = editor.slice(start, end);
     expect(insertion).toContain("saveSnapshot()");
     expect(insertion).toContain("pendingCharOpen.current = newBlock.id");
-    expect(insertion).toContain("applyBlockStructureEdit(previousBlocks, updated");
+    expect(insertion).toContain("script.editBlockStructure(updated");
     expect(insertion).toContain("inheritTags(refId, newBlockId)");
   });
 });

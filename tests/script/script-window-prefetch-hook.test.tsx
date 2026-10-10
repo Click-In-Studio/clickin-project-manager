@@ -2,7 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useScriptWindowPrefetch, type ScriptWindowRequest } from "@/components/script/script-editor/use-script-window-prefetch";
+import { useScriptWindowPrefetch } from "@/components/script/script-editor/use-script-window-prefetch";
+import { ScriptDocument } from "@/components/script/script-editor/script-document";
+import { ScriptWindowRequests } from "@/components/script/script-editor/script-window-requests";
+import { DEFAULT_SCRIPT_CONFIG } from "@/lib/script/script-types";
 import type { Block } from "@/lib/script/script-types";
 
 const client = vi.hoisted(() => ({
@@ -16,14 +19,14 @@ vi.mock("@/lib/script/script-client", () => client);
 const blocks = Array.from({ length: 1_000 }, (_, index) => ({
   id: `b${index}`, type: "dialogue", content: "", characterIds: [],
 }) as unknown as Block);
-const blocksRef = { current: blocks };
+const script = new ScriptDocument({
+  versionId: "version-1", orderRevision: "rev-1", manifest: blocks.map(block => ({ ...block, lyric: false, sceneId: null, rehearsalMark: null })),
+  window: { start: 400, blocks: blocks.slice(400, 640), tags: [] },
+  characters: [], scenes: [], config: DEFAULT_SCRIPT_CONFIG, tagGroups: [], pageMap: {},
+});
 const rangeRef = { current: { start: 400, end: 640 } };
-const manifestRef = { current: new Set(blocks.map((block) => block.id)) };
-const loadedRef = { current: new Set(blocks.slice(400, 640).map((block) => block.id)) };
-const requestRef = { current: null as ScriptWindowRequest | null };
-const generationRef = { current: 0 };
-const revisionRef = { current: "rev-1" };
-const syncingRef = { current: false };
+const requests = new ScriptWindowRequests();
+const isSaving = () => false;
 const mergeWindow = vi.fn(() => true);
 const applyBootstrap = vi.fn();
 
@@ -35,15 +38,11 @@ function Probe({ viewport }: { viewport: { start: number; end: number } }) {
     versionId: "version-1",
     syncWaitingForNetwork: false,
     initialWindowSize: 240,
-    blocksRef,
+    script,
+    isSaving,
     viewportRange: viewport,
     windowRangeRef: rangeRef,
-    manifestBlockIdsRef: manifestRef,
-    loadedBlockIdsRef: loadedRef,
-    requestRef,
-    requestGenerationRef: generationRef,
-    orderRevisionRef: revisionRef,
-    isSyncingRef: syncingRef,
+    requests,
     mergeWindow,
     applyBootstrap,
   });
@@ -58,8 +57,7 @@ beforeEach(() => {
   client.fetchScriptWindowBootstrap.mockReset();
   mergeWindow.mockClear();
   applyBootstrap.mockClear();
-  requestRef.current = null;
-  generationRef.current = 0;
+  requests.cancel();
   rangeRef.current = { start: 400, end: 640 };
   vi.stubGlobal("requestIdleCallback", (callback: IdleRequestCallback) => { callback({ didTimeout: false, timeRemaining: () => 10 }); return 1; });
   vi.stubGlobal("cancelIdleCallback", vi.fn());
@@ -91,8 +89,7 @@ describe("剧本空闲补窗 hook（#641）", () => {
   });
 
   it("前台请求占用请求槽时不并发发起预取，也不取消前台", async () => {
-    const foreground = new AbortController();
-    requestRef.current = { controller: foreground, priority: "foreground" };
+    const { controller: foreground } = requests.begin("foreground");
     act(() => root.render(<Probe viewport={{ start: 400, end: 640 }} />));
     await act(async () => { vi.advanceTimersByTime(2000); await Promise.resolve(); });
     expect(client.fetchScriptWindow).not.toHaveBeenCalled();

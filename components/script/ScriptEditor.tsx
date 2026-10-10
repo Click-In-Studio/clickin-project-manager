@@ -13,33 +13,33 @@ import PageSkeleton from "@/components/ui/PageSkeleton";
 import Kbd from "@/components/ui/Kbd";
 import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
 import { useScriptRecovery } from "./script-editor/use-script-recovery";
-import { buildScriptPatchBasis, ScriptPatchConflict } from "@/lib/script/script-patch-basis";
+
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
-import { createSaveDebounce } from "@/lib/editor/save-debounce";
+
 import type { TagGroup, BlockTagValue } from "@/lib/script/script-block-tag-db";
-import type { SceneDetail } from "@/lib/script/script-scene-character-db";
+
 import { formatDuration, parseDuration } from "@/lib/duration";
 import { getChapterDurationDisplay } from "@/lib/ops/scene-duration";
 import { isTextBlock, sameCharacters, shouldHideCharacterLabel, shouldShowCharacterGap, shouldShowSceneEndGap } from "@/lib/script/script-block-layout";
-import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, mergeServerBlocks, expandLegacyMarkersToBlocks, normalizeScriptBlockStream, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, insertScriptBlockAt, findTocSceneBlockIndex, findSceneMarkerBlockIndex, mergeDirtyRanges, markerChangeFromOperations, sameBlocks } from "@/lib/script/script-block-stream";
-import { sameDragTarget, resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
+import { uid, makeBlock, makeMarkerBlock, isBlockEmptyForDelete, isEmptyTextBlock, normalizeScriptMarkerInvariants, insertMarkerWithEmptyBlockIfNeeded, insertScriptBlockAt, findTocSceneBlockIndex, findSceneMarkerBlockIndex, markerChangeFromOperations } from "@/lib/script/script-block-stream";
+import { resolveDragTarget, getDragInsertIndex, type DragTarget } from "@/lib/script/script-drag-target";
 import { buildEmptyScriptCleanupRemovalPlan, isOnlyTextBlockInMarkerSegment, analyzeEmptyScriptCleanup, type EmptyScriptCleanupTarget } from "@/lib/script/script-empty-cleanup";
 import { publishScriptFocus } from "@/lib/script/script-focus";
-import { buildMarkerLabelIndex } from "@/lib/script/script-generated-labels";
+
 import { hasScriptInsertionGapBefore, sceneParentIdMap } from "@/lib/script/script-insertion-gaps";
 import { LARGE_SELECTION_BLOCK_THRESHOLD, largeSelectionOperationMessage, type LargeSelectionOperation, type PendingLargeSelectionConfirmation } from "@/lib/script/script-large-selection";
-import { buildMarkerContextById, isMarkerBlock, withLegacyOwnershipProjection } from "@/lib/script/script-marker-blocks";
-import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, markerCacheUpdateBlockIds, planMarkerDeletion, type BlockChange, type MarkerChange, type MarkerDeleteOperation } from "@/lib/script/script-marker-domain";
-import { updateMarkerOwnership, type MarkerOwnershipDirty, type MarkerOwnershipRange } from "@/lib/script/script-marker-ownership-cache";
+import { isMarkerBlock } from "@/lib/script/script-marker-blocks";
+import { convertMarker, executeMarkerDeletion, getMarkerChange, insertMarker, planMarkerDeletion, type BlockChange, type MarkerDeleteOperation } from "@/lib/script/script-marker-domain";
+
 import { mdToHtml } from "@/lib/script/script-md";
-import { diffState, type TagEntry } from "@/lib/script/script-ops";
-import { updateEstimatedPageMap, type EstimatedPageMapCache } from "@/lib/script/script-page";
-import { computeLyricFromTags, sceneDetailDeleteBlockedMessage, markerBlockDramaturgyDeleteBlockedKind, markerDetailFields, markerExpectedDuration, toSceneDetail, syncSceneDetailsWithScenes, sameSceneRows, type SceneMetaFields, type MarkerDetailDeleteBlockedKind, type NonEmptyDramaturgyMarker, type MarkerDetailField } from "@/lib/script/script-scene-details";
-import { addSelectionRange, replaceSelectionItem, replaceSelectionRange, toggleSelectionItem, type SelectionState } from "@/lib/script/script-selection";
-import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type Scene, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
-import { manifestEntryToSkeleton, type ScriptWindowBootstrap, type ScriptWindowResponse } from "@/lib/script/script-window-types";
+
+
+import { sceneDetailDeleteBlockedMessage, markerBlockDramaturgyDeleteBlockedKind, markerDetailFields, markerExpectedDuration, toSceneDetail, type SceneMetaFields, type MarkerDetailDeleteBlockedKind, type NonEmptyDramaturgyMarker, type MarkerDetailField } from "@/lib/script/script-scene-details";
+
+import { DEFAULT_SCRIPT_CONFIG, type Block, type BlockType, type Character, type ScriptState, type ScriptConfig } from "@/lib/script/script-types";
+import { type ScriptWindowBootstrap, type ScriptWindowResponse } from "@/lib/script/script-window-types";
 import BlockGap from "./script-editor/BlockGap";
 import CharacterPanel from "./script-editor/CharacterPanel";
 import CommentsPanel, { preloadCommentsPanel } from "./script-editor/CommentsPanelLazy";
@@ -80,15 +80,22 @@ import { useSceneDetailDialog } from "./script-editor/use-scene-detail-dialog";
 import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
 import { useDisplaySettings } from "./script-editor/use-display-settings";
 import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
-import { useScriptWindowPrefetch, type ScriptWindowRequest } from "./script-editor/use-script-window-prefetch";
+import { useScriptWindowPrefetch } from "./script-editor/use-script-window-prefetch";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { useStoredScriptPersonalMode, type ScriptPersonalMode } from "./script-editor/personal-mode";
 import { useScriptPersonalModeTransition } from "./script-editor/use-script-personal-mode-transition";
-import { flushLatestScriptState } from "./script-editor/flush-latest-script-state";
+
 import { insertLineBreakAtTextOffset, setCursorAtStart, setCursorAtEnd, setCursorAtTextOffset, getEditableElementForRange, isTextEditingTarget, isFormEditingTarget, getTextLength } from "./script-editor/dom-cursor";
 import { getScrollEl, getScrollMetrics, scrollContainerBy, scrollElementIntoView, estimateVirtualScrollAnchor, measureScriptTocNumberWidths, clearTimeoutMap, markProgrammaticScroll } from "./script-editor/dom-scroll";
 import { replaceInlineStageDelimiters, toggleInlineTag, wrapSelectionAsInlineStageCue } from "./script-editor/inline-stage";
 import { EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS, REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS, presenceColor } from "./script-editor/presence";
+import { ScriptWindowRequests } from "./script-editor/script-window-requests";
+import { useScriptDocument } from "./script-editor/use-script-document";
+import { useScriptSync } from "./script-editor/use-script-sync";
+import { useScriptSelection } from "./script-editor/use-script-selection";
+import { useScriptHistory } from "./script-editor/use-script-history";
+import { useScriptDrag } from "./script-editor/use-script-drag";
+import { useScriptNavigation } from "./script-editor/use-script-navigation";
 import { flushSync } from "react-dom";
 
 type PendingStageDelimiterChange = {
@@ -100,30 +107,6 @@ type PendingStageDelimiterChange = {
 
 // 自动同步（#520）：trailing 1.5s，但自第一次改动起最迟 5s 必落一笔——
 // 连续打字不再无界不落库（丢数据窗口 / 协作延迟 / presence 先于内容到达）。
-const SYNC_DEBOUNCE_MS = 1500;
-const SYNC_MAX_WAIT_MS = 5000;
-
-function bootstrapBlocks(bootstrap: ScriptWindowBootstrap | null | undefined): Block[] {
-  if (!bootstrap) return [makeBlock()];
-  const blocks = bootstrap.manifest.map(manifestEntryToSkeleton);
-  bootstrap.window.blocks.forEach((block, offset) => {
-    const index = bootstrap.window.start + offset;
-    if (index >= 0 && index < blocks.length) blocks[index] = block;
-  });
-  return blocks;
-}
-
-function tagsToMap(tags: readonly BlockTagValue[]): Map<string, BlockTagValue[]> {
-  const map = new Map<string, BlockTagValue[]>();
-  for (const tag of tags) {
-    const values = map.get(tag.blockId) ?? [];
-    values.push(tag);
-    map.set(tag.blockId, values);
-  }
-  return map;
-}
-
-// ─── ScriptEditor ─────────────────────────────────────────────────────────────
 
 export default function ScriptEditor({
   scriptId = "default",
@@ -169,7 +152,7 @@ export default function ScriptEditor({
   const [rehearsalMode, setRehearsalMode] = useState(initialDisplay.rehearsalMode);
   const [personalMode, setPersonalMode, personalModeReady] = useStoredScriptPersonalMode(effectiveScriptId);
   const [recoveryLocked, setRecoveryLocked] = useState(false);
-  const [syncConflict, setSyncConflict] = useState(false);
+
   const recoveryTriggerRef = useRef<() => void>(() => {});
   const isContentLocked = recoveryLocked || !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;
   const canEditTextLayout = baseCanEditTextLayout && !isContentLocked;
@@ -178,9 +161,18 @@ export default function ScriptEditor({
   const effectiveCanEditRehearsalMark = canEditRehearsalMark && !isContentLocked;
 
   const canEdit = canEditText || canEditMetadata || effectiveCanEditRehearsalMark;
-  const initialBlocksRef = useRef<Block[] | null>(null);
-  if (initialBlocksRef.current === null) initialBlocksRef.current = bootstrapBlocks(initialWindow);
-  const [characters, setCharacters] = useState<Character[]>(() => initialWindow?.characters ?? []);
+  const [windowRequests] = useState(() => new ScriptWindowRequests());
+  const { document: script, snapshot: scriptDocument } = useScriptDocument(initialWindow);
+  const { blocks, characters, scenes, sceneDetails, tagGroups, tags: blockTagMap, config: scriptConfig,
+    loadedIds: loadedBlockIds, ownedBlocks, markerContextById, legacyProjectedBlocks, rehearsalLabels, pageMap } = scriptDocument;
+  const { selection, snapshot: selectionState } = useScriptSelection(script);
+
+
+  const { navigation, explicitLoadTargetIndex } = useScriptNavigation(script);
+  const { drag, snapshot: dragView } = useScriptDrag();
+
+
+
   const remoteScriptSearch = useCallback((query: string, exact: boolean, signal: AbortSignal) => (
     activeVersionId
       ? searchScriptWindow(effectiveScriptId, activeVersionId, query, exact, signal)
@@ -192,25 +184,22 @@ export default function ScriptEditor({
     toggleCharacterFocus, clearCharacterFocus,
     confirmAggregateFocusPrompt, addAllAggregateFocusPrompt, cancelAggregateFocusPrompt, togglePendingAggregateFocus,
   } = useCharacterFocus({ effectiveScriptId, characters });
-  const [scenes, setScenes] = useState<Scene[]>(() => initialWindow?.scenes ?? []);
-  const [sceneDetails, setSceneDetails] = useState<SceneDetail[]>([]);
-  const [blocks, setBlocks] = useState<Block[]>(() => initialBlocksRef.current!);
-  const [loadedBlockIds, setLoadedBlockIds] = useState<Set<string>>(
-    () => new Set(initialWindow?.window.blocks.map((block) => block.id) ?? []),
-  );
-  const loadedBlockIdsRef = useRef(loadedBlockIds);
-  useLayoutEffect(() => { loadedBlockIdsRef.current = loadedBlockIds; }, [loadedBlockIds]);
-  const manifestBlockIdsRef = useRef(new Set(initialWindow?.manifest.map((entry) => entry.id) ?? []));
-  const orderRevisionRef = useRef(initialWindow?.orderRevision ?? "");
+
+
+
+
+
+
+
   const applyWindowBootstrapRef = useRef<(bootstrap: ScriptWindowBootstrap) => void>(() => {});
-  const [rehearsalLabels, setRehearsalLabels] = useState(() => buildMarkerLabelIndex(blocks));
+
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
-  const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
-  const [isScriptDragging, setIsScriptDragging] = useState(false);
+  const dragTarget = dragView.target;
+  const isScriptDragging = dragView.dragging;
   const [selectionChangeNotice, setSelectionChangeNotice] = useState("");
-  const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
+  const selectedBlockIds = selectionState.selectedIds;
   const {
     mobileBlockMenuBlockId, setMobileBlockMenuBlockId,
     mobileInsertMenuOpen, setMobileInsertMenuOpen,
@@ -243,10 +232,10 @@ export default function ScriptEditor({
     }
   }, [selectedBlockIds, focusedId, viewportBlockId]);
   useEffect(() => () => publishScriptFocus(null), []);
-  const selectionAnchorBlockIdRef = useRef<string | null>(null);
-  const selectionDetachedRef = useRef(false);
-  const markerEndedScopeIdsRef = useRef<Set<string>>(new Set());
-  const [invalidSelectionEndIds, setInvalidSelectionEndIds] = useState<Set<string>>(() => new Set());
+
+
+
+  const invalidSelectionEndIds = selectionState.invalidEndIds;
   const [shiftKeyDown, setShiftKeyDown] = useState(false);
   const [recentlyMovedBlockIds, setRecentlyMovedBlockIds] = useState<Set<string>>(() => new Set());
   const [tocHighlightedMarkerIds, setTocHighlightedMarkerIds] = useState<Set<string>>(() => new Set());
@@ -278,19 +267,16 @@ export default function ScriptEditor({
   const [charEditTokens, setCharEditTokens] = useState<Record<string, number>>({});
 
   // ── Block tags ───────────────────────────────────────────────────────────────
-  const [tagGroups, setTagGroups] = useState<TagGroup[]>(() => initialWindow?.tagGroups ?? []);
-  const [blockTagMap, setBlockTagMap] = useState<Map<string, BlockTagValue[]>>(
-    () => tagsToMap(initialWindow?.window.tags ?? []),
-  );
-  const blockTagMapRef = useRef<Map<string, BlockTagValue[]>>(new Map());
+
+
+
   const tagClipboardRef = useRef<BlockTagValue[] | null>(null);
 
   // ── Script config (page layout, stage delimiters) ─────────────────────────
-  const [scriptConfig, setScriptConfig] = useState<ScriptConfig>(() => initialWindow?.config ?? DEFAULT_SCRIPT_CONFIG);
-  const [serverPageMap, setServerPageMap] = useState<Record<string, number> | null>(() => initialWindow?.pageMap ?? null);
+
+
   const canAddRehearsalMark = effectiveCanEditRehearsalMark && scriptConfig.useRehearsalMarks;
-  const scriptConfigRef = useRef(scriptConfig);
-  useEffect(() => { scriptConfigRef.current = scriptConfig; }, [scriptConfig]);
+
   const [aboutOpen, setAboutOpen] = useState(false);
   const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
   const [pendingRehearsalMode, setPendingRehearsalMode] = useState<boolean | null>(null);
@@ -309,26 +295,17 @@ export default function ScriptEditor({
   // scene 字段权限的人白写一次再被 403。
   const saveScriptConfig = useCallback(async (patch: Partial<ScriptConfig>) => {
     if (!baseCanEditTextLayout || isContentLocked) return;
-    const previous = scriptConfigRef.current;
+    const previous = script.getSnapshot().config;
     const next = { ...previous, ...patch };
-    scriptConfigRef.current = next;
-    setScriptConfig(next);
+    script.editConfig(next);
     const ok = await putScriptConfig(effectiveScriptId, activeVersionId, next);
-    if (!ok && scriptConfigRef.current === next) {
-      scriptConfigRef.current = previous;
-      setScriptConfig(previous);
+    if (!ok && script.getSnapshot().config === next) {
+      script.editConfig(previous);
     }
-  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId, isContentLocked]);
+  }, [activeVersionId, baseCanEditTextLayout, effectiveScriptId, isContentLocked, script]);
 
   // 开场章 = 排在最前的 chapter_marker，是块序列的派生值（#636）：只更新本地 config，
   // 不 PUT 回服务端——服务端读时自己从块算，落库反而多一个会漂的写点。
-  const syncOpeningChapterMarkerId = useCallback((nextBlocks: Block[]) => {
-    const openingChapterMarkerId = nextBlocks.find((block) => block.type === "chapter_marker")?.id ?? null;
-    if (openingChapterMarkerId === scriptConfigRef.current.openingChapterMarkerId) return;
-    const next = { ...scriptConfigRef.current, openingChapterMarkerId };
-    scriptConfigRef.current = next;
-    setScriptConfig(next);
-  }, []);
 
   const requestStageDelimiterChange = useCallback((open: string, close: string) => {
     if (scriptConfig.stageDelimOpen === open && scriptConfig.stageDelimClose === close) {
@@ -339,39 +316,6 @@ export default function ScriptEditor({
     closeToolbarMenu();
   }, [closeToolbarMenu, scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose]);
 
-  // ── Page map (computed client-side, deterministic) ──────────────────────────
-  const ownershipDirtyRef = useRef<MarkerOwnershipDirty>("full");
-  const pageMapCacheRef = useRef<EstimatedPageMapCache | null>(null);
-  const pageMapDirtyRef = useRef<MarkerOwnershipDirty>("full");
-  const markPageMapDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
-    pageMapDirtyRef.current = mergeDirtyRanges(pageMapDirtyRef.current, dirty);
-  }, []);
-  const markOwnershipDirty = useCallback((dirty: Exclude<MarkerOwnershipDirty, null>) => {
-    ownershipDirtyRef.current = mergeDirtyRanges(ownershipDirtyRef.current, dirty);
-    markPageMapDirty(dirty);
-  }, [markPageMapDirty]);
-  const markBlockStructureDirty = useCallback((previous: Block[], next: Block[], movedBlockIds?: Iterable<string>) => {
-    const change = getMarkerChange(previous, next, movedBlockIds);
-    if (change.positions.length === 0) return;
-    if (change.markerStructureChanged) setRehearsalLabels(buildMarkerLabelIndex(next));
-    markPageMapDirty(change.positions.map((start) => ({ start, end: start + 1 })));
-    const nextIndexById = new Map(next.map((block, index) => [block.id, index]));
-    const ownershipRanges = markerCacheUpdateBlockIds(next, change).flatMap((id): MarkerOwnershipRange[] => {
-      const start = nextIndexById.get(id);
-      return start === undefined ? [] : [{ start, end: start + 1, throughNextMarker: false }];
-    });
-    if (ownershipRanges.length > 0) markOwnershipDirty(ownershipRanges);
-  }, [markOwnershipDirty, markPageMapDirty]);
-  const ownedBlocks = useMemo(() => {
-    const owned = updateMarkerOwnership(blocks, ownershipDirtyRef.current);
-    ownershipDirtyRef.current = null;
-    return owned;
-  }, [blocks]);
-  const markerContextById = useMemo(() => buildMarkerContextById(ownedBlocks), [ownedBlocks]);
-  const legacyProjectedBlocks = useMemo(
-    () => withLegacyOwnershipProjection(ownedBlocks, markerContextById),
-    [markerContextById, ownedBlocks],
-  );
   const openingChapterState = useMemo(() => {
     const openingChapterMarkerId = scriptConfig.openingChapterMarkerId;
     const markerIndex = openingChapterMarkerId
@@ -401,52 +345,20 @@ export default function ScriptEditor({
       : scenes.filter((scene) => scene.id !== openingChapterSceneId),
     [openingChapterSceneId, openingChapterVisible, scenes]
   );
-  const pageMap = useMemo(() => {
-    // 分窗模式下正文尚未全在客户端，不能拿空骨架重新估页；服务端 page_map 是统一口径。
-    if (serverPageMap) return serverPageMap;
-    const cache = updateEstimatedPageMap(
-      pageMapCacheRef.current,
-      ownedBlocks,
-      scriptConfig.pageLayout,
-      scriptConfig.textLayoutMode,
-      true,
-      pageMapDirtyRef.current,
-      // 模版必须传：服务端 page_map（saveEstimatedPageMaps/getEstimatedPageMap）
-      // 按主本模版几何算页，这里漏传就退回 legacy 模版——配了模版的演出会出现
-      // 屏上页码与 AI/搜索页码整页级分叉（52 vs 57 事故）
-      scriptConfig.templateId ?? null,
-    );
-    pageMapCacheRef.current = cache;
-    pageMapDirtyRef.current = null;
-    return cache.pageMap;
-  }, [ownedBlocks, scriptConfig.pageLayout, scriptConfig.textLayoutMode, scriptConfig.templateId, serverPageMap]);
+
   const reloadScriptState = useCallback(async () => {
     if (initialWindow && activeVersionId) {
-      const bootstrap = await fetchScriptWindowBootstrap(
-        effectiveScriptId,
-        activeVersionId,
-        windowRangeRef.current.start,
-        INITIAL_WINDOW_SIZE,
-      );
+      const bootstrap = await fetchScriptWindowBootstrap(effectiveScriptId, activeVersionId, windowRangeRef.current.start, INITIAL_WINDOW_SIZE);
       if (!bootstrap) throw new Error("Failed to reload script window");
       applyWindowBootstrapRef.current(bootstrap);
       return;
     }
-    const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
-    if (!serverState) throw new Error("Failed to reload script state");
-    const expandedBlocks = expandLegacyMarkersToBlocks(serverState.blocks, serverState.scenes);
-    const normalized = normalizeScriptMarkerInvariants(expandedBlocks, serverState.scenes, serverState.config ?? DEFAULT_SCRIPT_CONFIG);
-    markOwnershipDirty("full");
-    setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
-    setBlocks(normalized.blocks);
-    setCharacters(serverState.characters);
-    setScenes(normalized.scenes);
-    setScriptConfig(normalized.config);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-    syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
-  }, [activeVersionId, effectiveScriptId, initialWindow, markOwnershipDirty]);
+    const state = await fetchScriptState(effectiveScriptId, activeVersionId);
+    if (!state) throw new Error("Failed to reload script state");
+    script.replaceServer(state);
+  }, [activeVersionId, effectiveScriptId, initialWindow, script]);
   // AI 写剧本（scope "script" 的 mutation 信号）落库后整体重载——最粗但最稳的粒度：
-  // reloadScriptState 会重置 syncedStateRef，编辑器后续 diff 以新服务端状态为基准，
+  // reloadScriptState 会通过正文维护者重建基线，后续 diff 以新服务端状态为基准，
   // 不会把 AI 的改动当作"本地被删的内容"再冲掉。
   useAgentMutation({ scope: "script", productionId: productionId ?? undefined }, () => {
     void reloadScriptState().catch((err) => console.error("[script-editor] AI 写入后重载失败:", err));
@@ -472,27 +384,6 @@ export default function ScriptEditor({
     return map;
   }, [blocks]);
   const maxLineIndexText = String(Math.max(1, scriptLineNumberByBlockId.size));
-  const applyBlockStructureEdit = useCallback((previousBlocks: Block[], nextBlocks: Block[], change: MarkerChange | "full") => {
-    const normalized = normalizeScriptMarkerInvariants(
-      nextBlocks,
-      scenes,
-      scriptConfigRef.current,
-      change === "full" ? undefined : change,
-    );
-    if (change === "full") {
-      setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
-      markOwnershipDirty("full");
-    }
-    else markBlockStructureDirty(previousBlocks, normalized.blocks);
-    setBlocks(normalized.blocks);
-    if (!sameSceneRows(normalized.scenes, scenes)) {
-      setScenes(normalized.scenes);
-      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-    }
-    if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
-      syncOpeningChapterMarkerId(normalized.blocks);
-    }
-  }, [markBlockStructureDirty, markOwnershipDirty, scenes, syncOpeningChapterMarkerId]);
 
   const {
     display, setDisplay, toggleDisplay,
@@ -500,7 +391,7 @@ export default function ScriptEditor({
   } = useDisplaySettings({ maxLineIndexText, initialDisplay });
 
   const {
-    isReorderLocked, reorderNotice, isReorderLockedRef, reorderUnlockFrame, reorderNoticeTimer,
+    isReorderLocked, reorderNotice, isReorderLockedRef, stop: stopReorder,
     lockReorder, unlockReorder, unlockReorderAfterCommit, showReorderNotice,
   } = useReorderLock({ blocks });
 
@@ -522,14 +413,7 @@ export default function ScriptEditor({
       windowRangeFrameRef.current = null;
     }
     pendingWindowRangeRef.current = null;
-    if (reorderUnlockFrame.current !== null) {
-      cancelAnimationFrame(reorderUnlockFrame.current);
-      reorderUnlockFrame.current = null;
-    }
-    if (reorderNoticeTimer.current !== null) {
-      clearTimeout(reorderNoticeTimer.current);
-      reorderNoticeTimer.current = null;
-    }
+    stopReorder();
     if (selectionChangeNoticeTimer.current !== null) {
       clearTimeout(selectionChangeNoticeTimer.current);
       selectionChangeNoticeTimer.current = null;
@@ -557,22 +441,20 @@ export default function ScriptEditor({
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-    pendingNavigateRef.current = null;
-    postNavCorrectionRef.current = null;
-    pendingMoveCenterRef.current = null;
-  }, [reorderNoticeTimer, reorderUnlockFrame, presenceLayoutTimerRef, presenceTimerRef]);
+    navigation.stop();
+  }, [stopReorder, navigation, presenceLayoutTimerRef, presenceTimerRef]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const mobileBlockMenuCaretRef = useRef<{ blockId: string; textOffset: number | null } | null>(null);
   const pendingFocus = useRef<{ id: string; textOffset?: number; atEnd?: boolean } | null>(null);
   const pendingCharOpen = useRef<string | null>(null);
-  const draggingBlockId = useRef<string | null>(null);
-  const draggingBlockIds = useRef<string[]>([]);
-  const dragTargetRef = useRef<DragTarget | null>(null);
-  const dragInvalidReasonRef = useRef<string | null>(null);
-  const dropHandledRef = useRef(false);
+
+
+
+
+
   const windowRangeFrameRef = useRef<number | null>(null);
-  const pendingMoveCenterRef = useRef<string | null>(null);
+
   const selectionChangeNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedHighlightTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const tocMarkerGlowTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -582,76 +464,34 @@ export default function ScriptEditor({
   const { toolbarCompact, toolbarShort, presenceFolded, setToolbarElement, setToolbarMeasureTick, resetToolbarMeasurement } = useScriptToolbarFold({
     toolbarStage, navigatingAwayRef, toolbarOpenMenuRef, closeToolbarMenu, activeVersionId, isLockedMode: isContentLocked, canEditMetadata,
   });
-  const blocksRef = useRef(blocks);
-  const ownedBlocksRef = useRef(ownedBlocks);
-  const scenesRef = useRef(scenes);
-  const charactersRef = useRef(characters);
-  useEffect(() => { charactersRef.current = characters; }, [characters]);
-  const sceneIdSetRef = useRef<Set<string>>(new Set(scenes.map((scene) => scene.id)));
-  const blockIndexByIdRef = useRef<Map<string, number>>(new Map(blocks.map((block, index) => [block.id, index])));
-  const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = blocksRef.current.length) => (
+  const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = script.getSnapshot().blocks.length) => (
     clampWindowRangePure(range, blockCount)
-  ), []);
-  useLayoutEffect(() => {
-    blocksRef.current = blocks;
-    blockIndexByIdRef.current = new Map(blocks.map((block, index) => [block.id, index]));
-  }, [blocks]);
-  useLayoutEffect(() => { ownedBlocksRef.current = ownedBlocks; }, [ownedBlocks]);
-  useLayoutEffect(() => {
-    scenesRef.current = scenes;
-    sceneIdSetRef.current = new Set(scenes.map((scene) => scene.id));
-  }, [scenes]);
-  useEffect(() => { blockTagMapRef.current = blockTagMap; }, [blockTagMap]);
-  const markBlockPageMapDirty = useCallback((id: string) => {
-    const idx = blockIndexByIdRef.current.get(id);
-    if (idx !== undefined) markPageMapDirty({ start: idx, end: idx + 1 });
-  }, [markPageMapDirty]);
-  const markBlockIdsPageMapDirty = useCallback((ids: Set<string>) => {
-    markPageMapDirty(Array.from(ids, (id) => {
-      const index = blockIndexByIdRef.current.get(id);
-      return index === undefined ? null : { start: index, end: index + 1 };
-    }).filter((range): range is MarkerOwnershipRange => range !== null));
-  }, [markPageMapDirty]);
+  ), [script]);
   useEffect(() => () => {
-    windowRequestRef.current?.controller.abort();
-    if (reorderUnlockFrame.current !== null) cancelAnimationFrame(reorderUnlockFrame.current);
+    windowRequests.cancel();
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
     pendingWindowRangeRef.current = null;
     if (programmaticScrollFrameRef.current !== null) cancelAnimationFrame(programmaticScrollFrameRef.current);
-    if (reorderNoticeTimer.current !== null) clearTimeout(reorderNoticeTimer.current);
     if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
     clearTimeoutMap(movedHighlightTimersRef.current);
     clearTimeoutMap(tocMarkerGlowTimersRef.current);
-  }, [reorderNoticeTimer, reorderUnlockFrame]);
+  }, [stopReorder, windowRequests]);
 
   const blocksContainerRef = useRef<HTMLDivElement>(null);
-  const { dragCountBadgeRef, dragButtonDownSeenRef, dragButtonReleasedRef, clearDragCountBadge, updateDragCountBadge } = useDragCountBadge({ blocksContainerRef });
-  const setScriptDragging = useCallback((dragging: boolean) => {
-    setIsScriptDragging((current) => current === dragging ? current : dragging);
-  }, []);
+  const { dragCountBadgeRef, beginDragCountBadge, clearDragCountBadge, updateDragCountBadge } = useDragCountBadge({ blocksContainerRef });
 
   const resetScriptInteractions = useCallback(() => {
-    selectionAnchorBlockIdRef.current = null;
-    selectionDetachedRef.current = false;
-    markerEndedScopeIdsRef.current = new Set();
+    selection.clear();
+    drag.end();
     pendingFocus.current = null;
     pendingCharOpen.current = null;
-    draggingBlockId.current = null;
-    draggingBlockIds.current = [];
-    dragTargetRef.current = null;
-    dragInvalidReasonRef.current = null;
-    dropHandledRef.current = false;
-    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
-    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
     setDeleteConfirmationRequest(null);
     setMarkerDeleteConfirmBlockId(null);
     setDismissActionToken((token) => token + 1);
-    setDragTarget(null);
-    setIsScriptDragging(false);
     clearDragCountBadge();
     window.getSelection()?.removeAllRanges();
-  }, [clearDragCountBadge]);
+  }, [clearDragCountBadge, drag, selection]);
 
   const toggleRehearsalMode = useCallback(() => {
     setRehearsalModeSwitchError("");
@@ -702,33 +542,13 @@ export default function ScriptEditor({
     }, 1800);
   }, []);
 
-  const commitBlockSelection = useCallback((next: SelectionState) => {
-    markerEndedScopeIdsRef.current = next.markerEndIds;
-    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-    setSelectedBlockIds(next.selectedIds);
-    if (next.selectedIds.size === 0) {
-      selectionAnchorBlockIdRef.current = null;
-      selectionDetachedRef.current = false;
-    }
-  }, []);
-
-  const clearBlockSelection = useCallback(() => {
-    markerEndedScopeIdsRef.current = new Set();
-    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-    setSelectedBlockIds((current) => current.size === 0 ? current : new Set());
-    selectionAnchorBlockIdRef.current = null;
-    selectionDetachedRef.current = false;
-  }, []);
+  const clearBlockSelection = selection.clear;
 
   const canPerformSelectedBlockAction = useCallback((ids: string[]) => {
-    if (ids.length <= 1 || markerEndedScopeIdsRef.current.size === 0) {
-      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-      return true;
-    }
-    setInvalidSelectionEndIds(new Set(markerEndedScopeIdsRef.current));
-    showSelectionChangeNotice("每个选中范围的最后一行必须是剧本行。");
-    return false;
-  }, [showSelectionChangeNotice]);
+    const valid = selection.validate(ids);
+    if (!valid) showSelectionChangeNotice("每个选中范围的最后一行必须是剧本行。");
+    return valid;
+  }, [selection, showSelectionChangeNotice]);
 
   const requestLargeSelectionOperation = useCallback((
     operation: LargeSelectionOperation,
@@ -813,25 +633,17 @@ export default function ScriptEditor({
   useLayoutEffect(() => { windowRangeRef.current = windowRange; }, [windowRange]);
   const pendingWindowRangeRef = useRef<{ start: number; end: number } | null>(null);
   const [spacerH, setSpacerH] = useState({ top: 0, bot: 0 });
-  const pendingVirtualScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const pendingVirtualWindowRefreshRef = useRef(false);
-  const windowRequestRef = useRef<ScriptWindowRequest | null>(null);
-  const windowRequestGenerationRef = useRef(0);
+
+
   const [windowLoadSlow, setWindowLoadSlow] = useState(false);
   const [windowLoadFailed, setWindowLoadFailed] = useState(false);
   const [windowRetryToken, setWindowRetryToken] = useState(0);
-  const [explicitLoadTargetIndex, setExplicitLoadTargetIndex] = useState<number | null>(null);
-  const deferredWindowNavigateRef = useRef<
-    { id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | null
-  >(null);
+
+
   // Pending navigation: set before windowRange update, consumed by useLayoutEffect after DOM commit
-  const pendingNavigateRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
-  >(null);
+
   // After the initial estimated scroll, store the target for a precise correction after measurement
-  const postNavCorrectionRef = useRef<
-    { kind: 'block'; id: string; align: ScrollLogicalPosition; viewportTopRatio?: number } | { kind: 'scene'; id: string } | null
-  >(null);
+
   // Incremented by the measurement effect to trigger the correction layout effect
   const [correctionTick, setCorrectionTick] = useState(0);
 
@@ -879,9 +691,8 @@ export default function ScriptEditor({
   }, [isContentLocked, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
-    pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor();
-    pendingVirtualWindowRefreshRef.current = true;
-  }, [captureVirtualScrollAnchor]);
+    navigation.refreshAtAnchor(captureVirtualScrollAnchor());
+  }, [captureVirtualScrollAnchor, navigation]);
 
   const applyWindowRange = useCallback((next: { start: number; end: number }, sync = false, preserveAnchor = false, flushCommit = false) => {
     const targetRange = clampWindowRange(next);
@@ -892,8 +703,8 @@ export default function ScriptEditor({
       // 视口里一个已渲染块都没有（快速滚动冲进 spacer 空白区）时抓不到 DOM 锚，
       // 退回按估算累计表合成的锚——否则视口上方缓冲区的估算误差会整体位移（#508）。
       const container = blocksContainerRef.current;
-      pendingVirtualScrollAnchorRef.current = captureVirtualScrollAnchor()
-        ?? (container ? estimateVirtualScrollAnchor(container, blocksRef.current, cumulativeHRef.current) : null);
+      navigation.preserveAnchor(captureVirtualScrollAnchor()
+        ?? (container ? estimateVirtualScrollAnchor(container, script.getSnapshot().blocks, cumulativeHRef.current) : null));
     }
     pendingWindowRangeRef.current = targetRange;
     if (windowRangeFrameRef.current !== null) cancelAnimationFrame(windowRangeFrameRef.current);
@@ -922,26 +733,26 @@ export default function ScriptEditor({
       else commit();
     }
     else windowRangeFrameRef.current = requestAnimationFrame(commit);
-  }, [captureVirtualScrollAnchor, clampWindowRange]);
+  }, [captureVirtualScrollAnchor, clampWindowRange, navigation, script]);
 
   // Rebuild cumulative heights from cache
   const rebuildCumulative = useCallback(() => {
     cumulativeHRef.current = buildCumulativeHeights(
-      ownedBlocksRef.current,
+      script.getSnapshot().ownedBlocks,
       measuredHeightsRef.current,
       measuredHeightTotalRef.current,
-      openingChapterVisible ? null : scriptConfigRef.current.openingChapterMarkerId,
+      openingChapterVisible ? null : script.getSnapshot().config.openingChapterMarkerId,
       DEFAULT_BLOCK_H,
     );
-  }, [openingChapterVisible]);
+  }, [openingChapterVisible, script]);
   const syncSpacerHeights = useCallback((range: { start: number; end: number }, anchor: { id: string; top: number } | null = null) => {
-    const { top, bot } = spacerHeightsFor(cumulativeHRef.current, range, blocksRef.current.length, DEFAULT_BLOCK_H);
+    const { top, bot } = spacerHeightsFor(cumulativeHRef.current, range, script.getSnapshot().blocks.length, DEFAULT_BLOCK_H);
     if (topSpacerRef.current) topSpacerRef.current.style.height = `${top}px`;
     if (botSpacerRef.current) botSpacerRef.current.style.height = `${bot}px`;
     if (anchor) restoreVirtualScrollAnchor(anchor);
     const next = { top, bot };
     setSpacerH((prev) => prev.top === top && prev.bot === bot ? prev : next);
-  }, [restoreVirtualScrollAnchor]);
+  }, [restoreVirtualScrollAnchor, script]);
   useEffect(() => {
     rebuildCumulative();
     syncSpacerHeights(windowRangeRef.current);
@@ -955,12 +766,12 @@ export default function ScriptEditor({
   ), []);
 
   const resolveActiveSceneIdForBlockIndex = useCallback((index: number): string | null => (
-    resolveActiveSceneIdForBlockIndexPure(blocksRef.current, ownedBlocksRef.current, sceneIdSetRef.current, index, VSCROLL_BUFFER)
-  ), []);
+    resolveActiveSceneIdForBlockIndexPure(script.getSnapshot().blocks, script.getSnapshot().ownedBlocks, script.getSnapshot().sceneIdSet, index, VSCROLL_BUFFER)
+  ), [script]);
 
   const updateActiveSceneFromScroll = useCallback(() => {
     const container = blocksContainerRef.current;
-    const bl = blocksRef.current;
+    const bl = script.getSnapshot().blocks;
     if (!container || bl.length === 0) {
       if (activeSceneIdRef.current !== null) {
         activeSceneIdRef.current = null;
@@ -978,7 +789,7 @@ export default function ScriptEditor({
       const id = el.dataset.bwrap;
       if (!id) continue;
       const rect = el.getBoundingClientRect();
-      const blockIdx = blockIndexByIdRef.current.get(id) ?? -1;
+      const blockIdx = script.getSnapshot().blockIndexById.get(id) ?? -1;
       if (blockIdx < 0) continue;
 
       if (rect.bottom > anchorY) {
@@ -1009,13 +820,13 @@ export default function ScriptEditor({
       return true;
     }
     return false;
-  }, [blockAtOffset, resolveActiveSceneIdForBlockIndex]);
+  }, [blockAtOffset, resolveActiveSceneIdForBlockIndex, script]);
 
   const recomputeWindow = useCallback(() => {
     if (navigatingAwayRef.current) return false;
-    if (draggingBlockId.current || isReorderLockedRef.current) return false;
+    if (drag.read()?.ids[0] || isReorderLockedRef.current) return false;
     const container = blocksContainerRef.current;
-    const bl = blocksRef.current;
+    const bl = script.getSnapshot().blocks;
     if (!container || bl.length === 0) return false;
 
     const { viewTop, viewBottom, clientHeight } = getScrollMetrics();
@@ -1027,7 +838,7 @@ export default function ScriptEditor({
       const rect = el.getBoundingClientRect();
       if (rect.bottom < viewTop) continue;
       if (rect.top > viewBottom) break;
-      const idx = blockIndexByIdRef.current.get(id) ?? -1;
+      const idx = script.getSnapshot().blockIndexById.get(id) ?? -1;
       if (idx < 0) continue;
       if (firstVisibleIdx < 0) firstVisibleIdx = idx;
       lastVisibleIdx = idx;
@@ -1040,8 +851,8 @@ export default function ScriptEditor({
       lastVisibleIdx = blockAtOffset(viewEnd);
     }
 
-    const fi = focusedIdRef.current ? blockIndexByIdRef.current.get(focusedIdRef.current) ?? -1 : -1;
-    const pfi = pendingFocus.current ? blockIndexByIdRef.current.get(pendingFocus.current.id) ?? -1 : -1;
+    const fi = focusedIdRef.current ? script.getSnapshot().blockIndexById.get(focusedIdRef.current) ?? -1 : -1;
+    const pfi = pendingFocus.current ? script.getSnapshot().blockIndexById.get(pendingFocus.current.id) ?? -1 : -1;
     const next = nextWindowRange(windowRangeRef.current, firstVisibleIdx, lastVisibleIdx, bl.length, VSCROLL_BUFFER, [fi, pfi]);
     if (!next) {
       return updateActiveSceneFromScroll();
@@ -1049,7 +860,7 @@ export default function ScriptEditor({
 
     applyWindowRange(next, true, true, true);
     return updateActiveSceneFromScroll();
-  }, [applyWindowRange, blockAtOffset, updateActiveSceneFromScroll, isReorderLockedRef]);
+  }, [drag, isReorderLockedRef, script, applyWindowRange, updateActiveSceneFromScroll, blockAtOffset]);
 
   type LoadState = "loading" | "ready" | "not-found" | "error";
   const [loadState, setLoadState] = useState<LoadState>(initialWindow ? "ready" : "loading");
@@ -1089,7 +900,7 @@ export default function ScriptEditor({
         else break;
       }
       if (savedId) {
-        const idx = blockIndexByIdRef.current.get(savedId) ?? 0;
+        const idx = script.getSnapshot().blockIndexById.get(savedId) ?? 0;
         document.cookie = `script_pos_${productionId}=${encodeURIComponent(`${savedId}:${idx}`)}; path=/; max-age=31536000; SameSite=Lax`;
       }
     };
@@ -1103,10 +914,7 @@ export default function ScriptEditor({
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     const cancelPendingCorrectionForUserScroll = () => {
       if (suppressProgrammaticScrollRef.current) return;
-      postNavCorrectionRef.current = null;
-      pendingNavigateRef.current = null;
-      deferredWindowNavigateRef.current = null;
-      setExplicitLoadTargetIndex(null);
+      navigation.cancelJump();
       setScrollLocked(false);
     };
     const onScroll = () => {
@@ -1124,7 +932,7 @@ export default function ScriptEditor({
         if (shouldRecenterToc || activeSceneChanged) window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
       if (!scrollLockedRef.current) {
-        postNavCorrectionRef.current = null;
+        navigation.finishCorrection();
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => saveScrollPosRef.current(), 400);
       }
@@ -1145,14 +953,14 @@ export default function ScriptEditor({
       clearTimeout(scrollGestureTimer);
       clearTimeout(saveTimer);
     };
-  }, [recomputeWindow, updateActiveSceneFromScroll]);
+  }, [navigation, recomputeWindow, updateActiveSceneFromScroll]);
 
   useEffect(() => {
     updateActiveSceneFromScroll();
   }, [blocks.length, updateActiveSceneFromScroll]);
 
   useLayoutEffect(() => {
-    const bl = blocksRef.current;
+    const bl = script.getSnapshot().blocks;
     const current = windowRangeRef.current;
     const measured = measuredHeightsRef.current;
     if (measured.size > 0) {
@@ -1175,13 +983,13 @@ export default function ScriptEditor({
     let start = Math.min(current.start, Math.max(0, bl.length - 1));
     let end = Math.min(Math.max(current.end, start + 1), bl.length);
     const pendingFocusId = pendingFocus.current?.id ?? pendingCharOpen.current;
-    const pendingFocusIdx = pendingFocusId ? blockIndexByIdRef.current.get(pendingFocusId) ?? -1 : -1;
+    const pendingFocusIdx = pendingFocusId ? script.getSnapshot().blockIndexById.get(pendingFocusId) ?? -1 : -1;
     if (pendingFocusIdx >= 0) {
       start = Math.min(start, pendingFocusIdx);
       end = Math.max(end, pendingFocusIdx + 1);
     }
     applyWindowRange({ start, end }, true, true);
-  }, [blocks.length, applyWindowRange]);
+  }, [blocks.length, applyWindowRange, script]);
 
   const measureVirtualItemElements = useCallback((elements: Iterable<HTMLElement>) => {
     let changed = false;
@@ -1198,14 +1006,14 @@ export default function ScriptEditor({
     }
     if (changed) {
       rebuildCumulative();
-      const anchor = pendingMoveCenterRef.current === null ? captureVirtualScrollAnchor() : null;
+      const anchor = navigation.readCenter() === null ? captureVirtualScrollAnchor() : null;
       syncSpacerHeights(windowRangeRef.current, anchor);
       // If there's a pending navigation correction, trigger the layout effect that will re-scroll
-      if (postNavCorrectionRef.current) {
+      if (navigation.readCorrection()) {
         setCorrectionTick(t => t + 1);
       }
     }
-  }, [captureVirtualScrollAnchor, rebuildCumulative, syncSpacerHeights]);
+  }, [captureVirtualScrollAnchor, navigation, rebuildCumulative, syncSpacerHeights]);
 
   // Measure rendered block heights after each render pass
   useLayoutEffect(() => {
@@ -1217,17 +1025,16 @@ export default function ScriptEditor({
 
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
-    if (!pendingVirtualWindowRefreshRef.current) return;
-    pendingVirtualWindowRefreshRef.current = false;
+    if (!navigation.consumeRefresh()) return;
     rebuildCumulative();
-    const anchor = pendingVirtualScrollAnchorRef.current;
+    const anchor = navigation.readAnchor();
     if (anchor) {
-      const anchorIdx = blockIndexByIdRef.current.get(anchor.id) ?? -1;
+      const anchorIdx = script.getSnapshot().blockIndexById.get(anchor.id) ?? -1;
       const currentRange = windowRangeRef.current;
       if (anchorIdx >= 0 && (anchorIdx < currentRange.start || anchorIdx >= currentRange.end)) {
-        const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+        const windowSize = Math.min(INITIAL_WINDOW_SIZE, script.getSnapshot().blocks.length);
         let start = Math.max(0, anchorIdx - Math.floor(windowSize / 2));
-        const end = Math.min(blocksRef.current.length, start + windowSize);
+        const end = Math.min(script.getSnapshot().blocks.length, start + windowSize);
         start = Math.max(0, end - windowSize);
         applyWindowRange({ start, end }, true, false, true);
         return;
@@ -1237,10 +1044,10 @@ export default function ScriptEditor({
     if (container) {
       measureVirtualItemElements(container.querySelectorAll<HTMLElement>("[data-vitem]"));
     }
-    pendingVirtualScrollAnchorRef.current = null;
+    navigation.finishAnchor();
     syncSpacerHeights(windowRangeRef.current, anchor);
     updateActiveSceneFromScroll();
-  }, [blocks, applyWindowRange, measureVirtualItemElements, rebuildCumulative, syncSpacerHeights, updateActiveSceneFromScroll]);
+  }, [blocks, applyWindowRange, measureVirtualItemElements, rebuildCumulative, syncSpacerHeights, updateActiveSceneFromScroll, navigation, script]);
 
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
@@ -1272,17 +1079,15 @@ export default function ScriptEditor({
 
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
-    const centerTarget = pendingMoveCenterRef.current;
+    const centerTarget = navigation.readCenter();
     if (centerTarget === null) return;
-    pendingVirtualScrollAnchorRef.current = null;
-    postNavCorrectionRef.current = null;
     if (blocks.length === 0) {
-      pendingMoveCenterRef.current = null;
+      navigation.takeCenter();
       return;
     }
-    const currentTargetIndex = blockIndexByIdRef.current.get(centerTarget);
+    const currentTargetIndex = script.getSnapshot().blockIndexById.get(centerTarget);
     if (currentTargetIndex === undefined) {
-      pendingMoveCenterRef.current = null;
+      navigation.takeCenter();
       return;
     }
     const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocks.length);
@@ -1290,24 +1095,24 @@ export default function ScriptEditor({
     let start = Math.max(0, centerIdx - Math.floor(windowSize / 2));
     const end = Math.min(blocks.length, start + windowSize);
     start = Math.max(0, end - windowSize);
-    pendingMoveCenterRef.current = null;
+    navigation.takeCenter();
     const nextRange = { start, end };
     const currentRange = windowRangeRef.current;
     const rangeChanged = currentRange.start !== nextRange.start || currentRange.end !== nextRange.end;
-    pendingNavigateRef.current = { kind: "block", id: centerTarget, align: "center" };
+    navigation.jump({ kind: "block", id: centerTarget, align: "center" });
     applyWindowRange(nextRange, true, false, true);
     if (!rangeChanged) {
       const el = document.getElementById(`block-${centerTarget}`);
       const scrollEl = getBlockScrollElement(centerTarget);
       if (scrollEl || el) {
-        pendingNavigateRef.current = null;
+        navigation.completeJump(false);
         rebuildCumulative();
         syncSpacerHeights(windowRangeRef.current);
         markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
         (scrollEl ?? el)?.scrollIntoView({ behavior: "instant", block: "center" });
       }
     }
-  }, [blocks, applyWindowRange, getBlockScrollElement, rebuildCumulative, syncSpacerHeights]);
+  }, [blocks, applyWindowRange, getBlockScrollElement, rebuildCumulative, syncSpacerHeights, navigation, script]);
 
   // 窗口 commit 后：先把 spacer 对齐新窗口，再把 commit 前抓的锚点块拉回原位。
   // 顺序不能反——spacer 一变，锚点块就跟着位移；先恢复锚点再改 spacer 等于白恢复。
@@ -1317,19 +1122,19 @@ export default function ScriptEditor({
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
     syncSpacerHeights(windowRange);
-    const anchor = pendingVirtualScrollAnchorRef.current;
+    const anchor = navigation.readAnchor();
     if (!anchor) return;
-    pendingVirtualScrollAnchorRef.current = null;
+    navigation.finishAnchor();
     restoreVirtualScrollAnchor(anchor);
-  }, [windowRange, blocks.length, spacerH.top, spacerH.bot, syncSpacerHeights, restoreVirtualScrollAnchor]);
+  }, [windowRange, blocks.length, spacerH.top, spacerH.bot, syncSpacerHeights, restoreVirtualScrollAnchor, navigation]);
 
   // Precise correction pass: fires after newly-rendered blocks are measured (before next paint)
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
     if (correctionTick === 0) return;
-    const nav = postNavCorrectionRef.current;
+    const nav = navigation.readCorrection();
     if (!nav) return;
-    postNavCorrectionRef.current = null;
+    navigation.finishCorrection();
     const el = nav.kind === 'block'
       ? getBlockScrollElement(nav.id)
       : document.getElementById(`scene-block-${nav.id}`);
@@ -1345,20 +1150,20 @@ export default function ScriptEditor({
       window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
     });
   // windowRange is intentionally in deps — ensures this captures the post-recomputeWindow value;
-  // postNavCorrectionRef going null after the first correction prevents repeated firing.
+  // 定位维护者完成首次校正后清理校正意图，避免重复滚动。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [correctionTick, windowRange, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
 
   // After each window-changing render, execute any pending navigation (fires before paint)
   useLayoutEffect(() => {
     if (navigatingAwayRef.current) return;
-    const nav = pendingNavigateRef.current;
+    const nav = navigation.readPending();
     if (!nav) return;
     const el = nav.kind === 'block'
       ? getBlockScrollElement(nav.id)
       : document.getElementById(`scene-block-${nav.id}`);
     if (!el) return;
-    pendingNavigateRef.current = null;
+    navigation.completeJump(true);
 
     rebuildCumulative();
     syncSpacerHeights(windowRange);
@@ -1368,12 +1173,11 @@ export default function ScriptEditor({
 
     // Newly-rendered blocks haven't been measured yet so the cumulative heights are estimated.
     // Store the target so the measurement effect can trigger a precise correction pass.
-    postNavCorrectionRef.current = nav;
     requestAnimationFrame(() => {
       updateActiveSceneFromScroll();
       window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
     });
-  }, [windowRange, rebuildCumulative, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll]);
+  }, [windowRange, rebuildCumulative, getBlockScrollElement, syncSpacerHeights, updateActiveSceneFromScroll, navigation]);
 
   // Teleport to a block: load target window, then instant-jump in the layout effect.
   const scrollToBlockIdx = useCallback((
@@ -1381,25 +1185,24 @@ export default function ScriptEditor({
     align: ScrollLogicalPosition = 'center',
     viewportTopRatio?: number,
   ) => {
-    if (idx < 0 || idx >= blocksRef.current.length) return;
-    const block = blocksRef.current[idx];
-    const targetAreaReady = !initialWindow || blocksRef.current
-      .slice(idx, Math.min(blocksRef.current.length, idx + 20))
+    if (idx < 0 || idx >= script.getSnapshot().blocks.length) return;
+    const block = script.getSnapshot().blocks[idx];
+    const targetAreaReady = !initialWindow || script.getSnapshot().blocks
+      .slice(idx, Math.min(script.getSnapshot().blocks.length, idx + 20))
       .every((candidate) => (
         isMarkerBlock(candidate)
-        || !manifestBlockIdsRef.current.has(candidate.id)
-        || loadedBlockIdsRef.current.has(candidate.id)
+        || !script.getSnapshot().manifestIds.has(candidate.id)
+        || script.getSnapshot().loadedIds.has(candidate.id)
       ));
     if (!targetAreaReady) {
       // 显式跳转不先把用户扔进空白窗口：保留当前画面，目标段到齐后再一次定位。
-      deferredWindowNavigateRef.current = { id: block.id, align, viewportTopRatio };
-      setExplicitLoadTargetIndex(idx);
+      navigation.waitForBlock(block.id, idx, align, viewportTopRatio);
       return;
     }
-    pendingNavigateRef.current = { kind: 'block', id: block.id, align, viewportTopRatio };
-    const windowSize = Math.min(INITIAL_WINDOW_SIZE, blocksRef.current.length);
+    navigation.jump({ kind: 'block', id: block.id, align, viewportTopRatio });
+    const windowSize = Math.min(INITIAL_WINDOW_SIZE, script.getSnapshot().blocks.length);
     let start = Math.max(0, idx - Math.floor(windowSize / 2));
-    const end = Math.min(blocksRef.current.length, start + windowSize);
+    const end = Math.min(script.getSnapshot().blocks.length, start + windowSize);
     start = Math.max(0, end - windowSize);
     const nextRange = { start, end };
     const currentRange = windowRangeRef.current;
@@ -1408,7 +1211,7 @@ export default function ScriptEditor({
     if (!rangeChanged) {
       const el = getBlockScrollElement(block.id);
       if (!el) return;
-      pendingNavigateRef.current = null;
+      navigation.completeJump(false);
       markProgrammaticScroll(suppressProgrammaticScrollRef, programmaticScrollFrameRef);
       scrollElementIntoView(el, align, viewportTopRatio);
       requestAnimationFrame(() => {
@@ -1416,17 +1219,14 @@ export default function ScriptEditor({
         window.dispatchEvent(new Event(SCRIPT_TOC_CENTER_EVENT));
       });
     }
-  }, [applyWindowRange, getBlockScrollElement, initialWindow, updateActiveSceneFromScroll]);
+  }, [applyWindowRange, getBlockScrollElement, initialWindow, navigation, script, updateActiveSceneFromScroll]);
 
   useLayoutEffect(() => {
-    const deferred = deferredWindowNavigateRef.current;
-    if (!deferred || !loadedBlockIds.has(deferred.id)) return;
-    const index = blockIndexByIdRef.current.get(deferred.id);
-    if (index === undefined) return;
-    deferredWindowNavigateRef.current = null;
-    setExplicitLoadTargetIndex(null);
-    scrollToBlockIdx(index, deferred.align, deferred.viewportTopRatio);
-  }, [loadedBlockIds, scrollToBlockIdx]);
+    const deferred = navigation.takeLoadedTarget(loadedBlockIds);
+    if (!deferred) return;
+    const index = script.getSnapshot().blockIndexById.get(deferred.id);
+    if (index !== undefined) scrollToBlockIdx(index, deferred.align, deferred.viewportTopRatio);
+  }, [loadedBlockIds, navigation, script, scrollToBlockIdx]);
 
   const openMobileBlockMenu = useCallback((blockId: string, blockIndex: number, textOffset: number | null = null) => {
     setMobileBatchAction(null);
@@ -1437,13 +1237,13 @@ export default function ScriptEditor({
   }, [scrollToBlockIdx, setMobileBatchAction, setMobileBlockMenuBlockId, setMobileInsertMenuOpen]);
 
   const scrollToScene = useCallback((sceneId: string) => {
-    const markerIdx = findSceneMarkerBlockIndex(sceneId, blocksRef.current);
-    if (markerIdx >= 0) glowTocMarker(blocksRef.current[markerIdx].id);
+    const markerIdx = findSceneMarkerBlockIndex(sceneId, script.getSnapshot().blocks);
+    if (markerIdx >= 0) glowTocMarker(script.getSnapshot().blocks[markerIdx].id);
     activeSceneIdRef.current = sceneId;
     setActiveSceneId(sceneId);
     const idx = markerIdx >= 0
       ? markerIdx
-      : findTocSceneBlockIndex(sceneId, scenesRef.current, ownedBlocksRef.current);
+      : findTocSceneBlockIndex(sceneId, script.getSnapshot().scenes, script.getSnapshot().ownedBlocks);
     if (idx >= 0) {
       scrollToBlockIdx(idx, "start");
       return;
@@ -1456,7 +1256,7 @@ export default function ScriptEditor({
       return;
     }
     showReorderNotice("跳转失败：该章节或段落没有对应剧本块。");
-  }, [glowTocMarker, scrollToBlockIdx, showReorderNotice]);
+  }, [glowTocMarker, script, scrollToBlockIdx, showReorderNotice]);
   useEffect(() => { focusedIdRef.current = focusedId; }, [focusedId]);
 
   const readBlockInViewport = useCallback((blockId: string | null | undefined): boolean => {
@@ -1491,343 +1291,78 @@ export default function ScriptEditor({
 
   // ── Server sync ─────────────────────────────────────────────────────────────
 
-  const syncedStateRef = useRef<ScriptState | null>(initialWindow ? {
-    blocks: initialBlocksRef.current!,
-    characters: initialWindow.characters,
-    scenes: initialWindow.scenes,
-    config: initialWindow.config,
-  } : null);
-  // Mirrors the tag state that was last successfully pushed to the server.
-  // Used to diff tag changes and embed them in block ops.
-  const syncedBlockTagMapRef = useRef<Map<string, BlockTagValue[]>>(
-    tagsToMap(initialWindow?.window.tags ?? []),
-  );
-  // Tags registered by inheritTags() that must be included in the NEXT insert op
-  // for the corresponding blockId.  Written synchronously from the event handler;
-  // consumed by pushPatchRef when the insert op is found.
-  const pendingTagInsertsRef = useRef<Map<string, TagEntry[]>>(new Map());
-  const clientSeqRef = useRef(0);
-  const serverSeqRef = useRef(0);
-  const isSyncingRef = useRef(false);
-  const syncIdleWaitersRef = useRef<Array<() => void>>([]);
-  // 计时器到期时上一笔还在飞：记下来，飞完重排一轮（不能丢——停手前最后一段
-  // 输入若恰好撞锁，没有下一个击键就再也不落库）；已卸载则不再重排。
-  const deferredSyncRef = useRef(false);
-  const syncUnmountedRef = useRef(false);
-  const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [syncWaitingForNetwork, setSyncWaitingForNetwork] = useState(false);
-  const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
-
-  // Stable ref to the push function so the debounce closure never goes stale.
-  const pushPatchRef = useRef<(curr: ScriptState, recovering?: boolean) => Promise<boolean>>(async () => false);
-  const [syncDebounce] = useState(() => createSaveDebounce(() => {
-    const curr: ScriptState = {
-      config: scriptConfigRef.current,
-      blocks: normalizeScriptBlockStream(blocksRef.current),
-      characters: charactersRef.current,
-      scenes: scenesRef.current,
-    };
-    void pushPatchRef.current(curr);
-  }, { wait: SYNC_DEBOUNCE_MS, maxWait: SYNC_MAX_WAIT_MS }));
-
-  const applyWindowBootstrap = useCallback((bootstrap: ScriptWindowBootstrap) => {
-    const previous = blocksRef.current;
-    const previousBaseline = syncedStateRef.current;
-    const previousIndex = new Map(previous.map((block) => [block.id, block]));
-    const previousBaselineById = new Map((previousBaseline?.blocks ?? []).map((block) => [block.id, block]));
-    const nextBaseline = bootstrapBlocks(bootstrap);
-    const nextBlocks = [...nextBaseline];
-    const nextIndexById = new Map(nextBlocks.map((block, index) => [block.id, index]));
-    const nextLoaded = new Set(bootstrap.window.blocks.map((block) => block.id));
-
-    // 远端刷新不能盖掉本地尚未保存的块；其余旧窗口安静卸载，重新进入时按需再取。
-    for (const [id, localBlock] of previousIndex) {
-      const oldBaseline = previousBaselineById.get(id);
-      const nextIndex = nextIndexById.get(id);
-      if (nextIndex === undefined || !oldBaseline || sameBlocks([localBlock], [oldBaseline])) continue;
-      nextBlocks[nextIndex] = localBlock;
-      nextBaseline[nextIndex] = oldBaseline;
-      nextLoaded.add(id);
-    }
-
-    const currentTags = blockTagMapRef.current;
-    const previousSyncedTags = syncedBlockTagMapRef.current;
-    const serverTags = tagsToMap(bootstrap.window.tags);
-    const nextTags = new Map(serverTags);
-    const nextSyncedTags = new Map(serverTags);
-    for (const [id, localTags] of currentTags) {
-      const baselineTags = previousSyncedTags.get(id) ?? [];
-      if (JSON.stringify(localTags) !== JSON.stringify(baselineTags)) {
-        nextTags.set(id, localTags);
-        nextSyncedTags.set(id, baselineTags);
+  const { sync, snapshot: syncState } = useScriptSync(script, {
+    canWrite: () => canEdit,
+    ready: () => loadState === "ready",
+    send: async (batch) => {
+      windowRequests.cancelBackground();
+      const body = await patchScript(effectiveScriptId, activeVersionId, { ...batch.patch, basis: batch.basis });
+      if (!body) throw new Error("script patch failed");
+      return body.serverSeq;
+    },
+    afterSave: async (batch) => {
+      if (!initialWindow || !activeVersionId || sync.isSuspended()) return;
+      const generation = windowRequests.readGeneration();
+      if (batch.structureChanged) {
+        const bootstrap = await fetchScriptWindowBootstrap(effectiveScriptId, activeVersionId, windowRangeRef.current.start, INITIAL_WINDOW_SIZE);
+        if (bootstrap && !sync.isStopped() && !sync.isSuspended() && generation === windowRequests.readGeneration()) applyWindowBootstrap(bootstrap);
+      } else if (batch.patch.blockOps.length) {
+        const map = await fetchScriptPageMap(effectiveScriptId, activeVersionId);
+        if (map && !sync.isStopped() && !sync.isSuspended() && generation === windowRequests.readGeneration()) script.setPageMap(map);
       }
-    }
+    },
+    onConflict: () => recoveryTriggerRef.current(),
+  });
+  const syncWaitingForNetwork = syncState.waitingForNetwork;
+  const syncConflict = syncState.conflict;
 
+  const applyWindowBootstrap = useCallback((bootstrap: ScriptWindowBootstrap, replace = false) => {
     requestVirtualWindowRefresh();
-    orderRevisionRef.current = bootstrap.orderRevision;
-    manifestBlockIdsRef.current = new Set(bootstrap.manifest.map((entry) => entry.id));
-    loadedBlockIdsRef.current = nextLoaded;
-    blocksRef.current = nextBlocks;
-    blockIndexByIdRef.current = nextIndexById;
-    blockTagMapRef.current = nextTags;
-    syncedBlockTagMapRef.current = nextSyncedTags;
-    syncedStateRef.current = {
-      blocks: nextBaseline,
-      characters: bootstrap.characters,
-      scenes: bootstrap.scenes,
-      config: bootstrap.config,
-    };
-    setBlocks(nextBlocks);
-    setLoadedBlockIds(nextLoaded);
-    setBlockTagMap(nextTags);
-    setTagGroups(bootstrap.tagGroups);
-    setCharacters(bootstrap.characters);
-    setScenes(bootstrap.scenes);
-    setSceneDetails((current) => syncSceneDetailsWithScenes(current, bootstrap.scenes));
-    setScriptConfig(bootstrap.config);
-    setServerPageMap(bootstrap.pageMap);
-    setRehearsalLabels(buildMarkerLabelIndex(nextBlocks));
-    markOwnershipDirty("full");
-    const end = Math.min(nextBlocks.length, bootstrap.window.start + Math.max(1, bootstrap.window.blocks.length));
+    script.applyBootstrap(bootstrap, replace);
+    const count = script.getSnapshot().blocks.length;
+    const end = Math.min(count, bootstrap.window.start + Math.max(1, bootstrap.window.blocks.length));
     applyWindowRange({ start: bootstrap.window.start, end }, true, true, true);
-  }, [applyWindowRange, markOwnershipDirty, requestVirtualWindowRefresh]);
+  }, [applyWindowRange, script, requestVirtualWindowRefresh]);
   useLayoutEffect(() => { applyWindowBootstrapRef.current = applyWindowBootstrap; }, [applyWindowBootstrap]);
 
-  const discardPendingEditsRef = useRef(false);
   const recoveryNeedsReloadRef = useRef(false);
   const { status: recoveryStatus, suspendedRef: recoverySuspendedRef, suspend: suspendRecovery, recover: recoverScript } = useScriptRecovery({
     pause: () => {
       setRecoveryLocked(true);
-      syncDebounce.cancel();
-      deferredSyncRef.current = false;
-      if (syncRetryTimerRef.current !== null) {
-        clearTimeout(syncRetryTimerRef.current);
-        syncRetryTimerRef.current = null;
-      }
-      windowRequestRef.current?.controller.abort();
-      windowRequestRef.current = null;
-      windowRequestGenerationRef.current++;
-      if (streamDebounceTimerRef.current) {
-        clearTimeout(streamDebounceTimerRef.current);
-        streamDebounceTimerRef.current = null;
-      }
+      sync.pause();
+      windowRequests.cancel();
+
+      if (streamDebounceTimerRef.current) clearTimeout(streamDebounceTimerRef.current);
+      streamDebounceTimerRef.current = null;
     },
     reconcile: async () => {
-      if (isSyncingRef.current) {
-        await new Promise<void>(resolve => syncIdleWaitersRef.current.push(resolve));
-      }
-      if (syncUnmountedRef.current) return;
-      // 条件保存使用旧基线。若服务器已改变，整批拒绝，随后读线上最新快照。
-      if (!discardPendingEditsRef.current) {
-        const saved = await pushPatchRef.current({
-          config: scriptConfigRef.current,
-          blocks: normalizeScriptBlockStream(blocksRef.current),
-          characters: charactersRef.current,
-          scenes: scenesRef.current,
-        }, true);
-        if (!saved) throw new Error("剧本修改尚未同步");
-      }
-      if (syncUnmountedRef.current) return;
+      await sync.waitForIdle();
+      if (sync.isStopped()) return;
+      if (!sync.needsConflictReload() && !await sync.flush(true)) throw new Error("剧本修改尚未同步");
+      if (sync.isStopped()) return;
       recoveryNeedsReloadRef.current = false;
       if (initialWindow && activeVersionId) {
-        const bootstrap = await fetchScriptWindowBootstrap(
-          effectiveScriptId, activeVersionId, windowRangeRef.current.start, INITIAL_WINDOW_SIZE,
-        );
+        const bootstrap = await fetchScriptWindowBootstrap(effectiveScriptId, activeVersionId, windowRangeRef.current.start, INITIAL_WINDOW_SIZE);
         if (!bootstrap) throw new Error("剧本重连加载失败");
-        if (syncUnmountedRef.current) return;
-        syncedStateRef.current = null;
-        syncedBlockTagMapRef.current = new Map(blockTagMapRef.current);
-        applyWindowBootstrap(bootstrap);
-        charactersRef.current = bootstrap.characters;
-        scenesRef.current = bootstrap.scenes;
-        scriptConfigRef.current = bootstrap.config;
+        if (sync.isStopped()) return;
+        applyWindowBootstrap(bootstrap, true);
       } else {
         const state = await fetchScriptState(effectiveScriptId, activeVersionId);
         if (!state) throw new Error("剧本重连加载失败");
-        if (syncUnmountedRef.current) return;
-        syncedStateRef.current = state;
-        blocksRef.current = state.blocks;
-        charactersRef.current = state.characters;
-        scenesRef.current = state.scenes;
-        scriptConfigRef.current = state.config ?? DEFAULT_SCRIPT_CONFIG;
-        setBlocks(state.blocks);
-        setCharacters(state.characters);
-        setScenes(state.scenes);
-        setScriptConfig(scriptConfigRef.current);
+        if (sync.isStopped()) return;
+        script.replaceServer(state);
         requestVirtualWindowRefresh();
       }
-      pendingTagInsertsRef.current.clear();
-      pendingMovedBlockIdsRef.current.clear();
-      undoStack.current = [];
-      redoStack.current = [];
-      setCanUndo(false);
-      setCanRedo(false);
-      discardPendingEditsRef.current = false;
-      // 归零只重置通知基线，快照才是数据真相；读取期间收到通知则再读一轮。
-      serverSeqRef.current = 0;
+      history.reset();
+      sync.resetAfterRecovery();
       if (recoveryNeedsReloadRef.current) void recoverScript();
-      setSyncWaitingForNetwork(false);
     },
   });
   useLayoutEffect(() => {
     recoveryTriggerRef.current = () => { void recoverScript(); };
     setRecoveryLocked(recoveryStatus !== "ready");
-  }, [recoverScript, recoveryStatus]);
-
-  useEffect(() => {
-    pushPatchRef.current = async (curr: ScriptState, recovering = false) => {
-      if (recoverySuspendedRef.current && !recovering) return false;
-      if (!canEdit && !recovering) return true;
-      if (loadState !== "ready" || syncedStateRef.current === null) return false;
-      if (isSyncingRef.current) { deferredSyncRef.current = true; return false; }
-      // 正文预取永远给写入让路；可见缺块属于用户正在等待的前台请求，不在这里取消。
-      if (windowRequestRef.current?.priority === "background") {
-        windowRequestRef.current.controller.abort();
-        windowRequestRef.current = null;
-      }
-      isSyncingRef.current = true;
-      try {
-        const seq = ++clientSeqRef.current;
-        const patch = diffState(syncedStateRef.current, curr, seq);
-        const movedIdsForPatch = [...pendingMovedBlockIdsRef.current];
-        if (movedIdsForPatch.length > 0) {
-          const reorder = patch.blockOps.find((op) => op.op === "reorder");
-          if (reorder?.op === "reorder") reorder.movedIds = movedIdsForPatch;
-        }
-
-        // ── Step 1: pending tag inserts (from inheritTags) ───────────────────────
-        // These are written synchronously into pendingTagInsertsRef when a new block
-        // is created via Enter.  Consume them first so the insert op always carries
-        // the inherited tags, regardless of useEffect / blockTagMapRef timing.
-        if (pendingTagInsertsRef.current.size > 0) {
-          for (const [blockId, tags] of pendingTagInsertsRef.current) {
-            const insertOp = patch.blockOps.find(
-              o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId
-            );
-            if (insertOp) {
-              (insertOp as { tags?: TagEntry[] }).tags = tags;
-              pendingTagInsertsRef.current.delete(blockId); // consumed
-            }
-            // If no insert op yet (shouldn't happen), leave for the diff pass below.
-          }
-        }
-
-        // ── Step 2: tag diff — embed all other tag changes into block ops ─────────
-        // blockTagMapRef.current is kept in sync with blockTagMap state via useEffect.
-        const currTagMap = blockTagMapRef.current;
-        const syncedTagMap = syncedBlockTagMapRef.current;
-        const deletedBlockIds = new Set(
-          patch.blockOps.filter(o => o.op === 'delete').map(o => (o as { id: string }).id)
-        );
-
-        const changedTagBlockIds: string[] = [];
-        for (const [blockId, tags] of currTagMap) {
-          if (deletedBlockIds.has(blockId)) continue;
-          const syncedTags = syncedTagMap.get(blockId) ?? [];
-          if (JSON.stringify(tags) !== JSON.stringify(syncedTags)) changedTagBlockIds.push(blockId);
-        }
-        for (const blockId of syncedTagMap.keys()) {
-          if (!currTagMap.has(blockId) && !deletedBlockIds.has(blockId))
-            changedTagBlockIds.push(blockId);
-        }
-
-        if (changedTagBlockIds.length > 0) {
-          for (const blockId of changedTagBlockIds) {
-            const tags: TagEntry[] = (currTagMap.get(blockId) ?? []).map(t => ({
-              groupId: t.groupId, optionId: t.optionId, value: t.value,
-            }));
-            const insertOp = patch.blockOps.find(o => o.op === 'insert' && (o as { block: { id: string } }).block.id === blockId);
-            const updateOp = patch.blockOps.find(o => o.op === 'update' && (o as { block: { id: string } }).block.id === blockId);
-            if (insertOp && 'block' in insertOp) {
-              (insertOp as { tags?: TagEntry[] }).tags = tags; // may already be set by step 1
-            } else if (updateOp && 'block' in updateOp) {
-              (updateOp as { tags?: TagEntry[] }).tags = tags;
-            } else {
-              // Tag-only change: synthesise a minimal update op so tags reach the server.
-              const block = curr.blocks.find(b => b.id === blockId);
-              if (block) patch.blockOps.push({ op: 'update', block, tags });
-            }
-          }
-        }
-        // ── End tag handling ─────────────────────────────────────────────────────
-
-        if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) {
-          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
-          return true;
-        }
-        const basis = buildScriptPatchBasis(syncedStateRef.current, patch, syncedTagMap);
-        const body = await patchScript(effectiveScriptId, activeVersionId, { ...patch, basis });
-        if (!body) throw new Error("script patch failed");
-        if (body) {
-          if (syncRetryTimerRef.current !== null) {
-            clearTimeout(syncRetryTimerRef.current);
-            syncRetryTimerRef.current = null;
-          }
-          setSyncWaitingForNetwork(false);
-          serverSeqRef.current = body.serverSeq;
-          const baselineById = new Map((syncedStateRef.current?.blocks ?? []).map((block) => [block.id, block]));
-          const structureChanged = patch.blockOps.some((op) => {
-            if (op.op === "insert" || op.op === "delete" || op.op === "reorder") return true;
-            const previous = baselineById.get(op.block.id);
-            return !previous || previous.type !== op.block.type || isMarkerBlock(previous) || isMarkerBlock(op.block);
-          });
-          if (initialWindow && activeVersionId && structureChanged) {
-            const bootstrap = await fetchScriptWindowBootstrap(
-              effectiveScriptId,
-              activeVersionId,
-              windowRangeRef.current.start,
-              INITIAL_WINDOW_SIZE,
-            );
-            if (bootstrap) {
-              syncedStateRef.current = curr;
-              syncedBlockTagMapRef.current = new Map(currTagMap);
-              applyWindowBootstrap(bootstrap);
-            }
-            else {
-              syncedStateRef.current = curr;
-              syncedBlockTagMapRef.current = new Map(currTagMap);
-            }
-          } else {
-            syncedStateRef.current = curr;
-            // Advance the synced tag baseline so the next diff starts fresh.
-            syncedBlockTagMapRef.current = new Map(currTagMap);
-            if (initialWindow && activeVersionId && patch.blockOps.length > 0) {
-              void fetchScriptPageMap(effectiveScriptId, activeVersionId).then((nextPageMap) => {
-                if (nextPageMap) setServerPageMap(nextPageMap);
-              });
-            }
-          }
-          // Any pending inserts that were consumed above are already deleted;
-          // clear whatever might remain (orphaned entries for blocks that were
-          // deleted before the sync fired).
-          pendingTagInsertsRef.current.clear();
-          for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
-        }
-        return true;
-      } catch (error) {
-        if (error instanceof ScriptPatchConflict) {
-          setSyncConflict(true);
-          discardPendingEditsRef.current = true;
-          if (!recovering && !recoverySuspendedRef.current) queueMicrotask(() => recoveryTriggerRef.current());
-          return true;
-        }
-        // 弱网下保留本地内容并明确标记未同步；即使用户不再敲字也会自动重试。
-        setSyncWaitingForNetwork(true);
-        if (syncRetryTimerRef.current !== null) clearTimeout(syncRetryTimerRef.current);
-        syncRetryTimerRef.current = setTimeout(() => {
-          syncRetryTimerRef.current = null;
-          if (!syncUnmountedRef.current && !recoverySuspendedRef.current) syncDebounce.trigger();
-        }, 2000);
-        return false;
-      } finally {
-        isSyncingRef.current = false;
-        const waiters = syncIdleWaitersRef.current;
-        syncIdleWaitersRef.current = [];
-        for (const resolve of waiters) resolve();
-        if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current && !recoverySuspendedRef.current) syncDebounce.trigger(); }
-      }
-    };
-  }, [effectiveScriptId, activeVersionId, applyWindowBootstrap, canEdit, initialWindow, loadState, syncDebounce, recoverySuspendedRef]);
+    if (recoveryStatus === "ready") sync.resume();
+  }, [recoverScript, recoveryStatus, sync]);
 
   useEffect(() => {
     if (initialWindow && initialWindow.versionId === activeVersionId) {
@@ -1835,19 +1370,11 @@ export default function ScriptEditor({
     }
     setLoadState("loading");
     setLoadError("");
-    const placeholderBlock = makeBlock();
     measuredHeightsRef.current.clear();
     measuredHeightTotalRef.current = 0;
     cumulativeHRef.current = [0, DEFAULT_BLOCK_H];
-    markOwnershipDirty("full");
-    setRehearsalLabels(buildMarkerLabelIndex([placeholderBlock]));
-    setBlocks([placeholderBlock]);
+    script.beginLoading();
     applyWindowRange({ start: 0, end: 1 }, true);
-    setCharacters([]);
-    setScenes([]);
-    setSceneDetails([]);
-    syncedStateRef.current = null;
-    pendingMovedBlockIdsRef.current.clear();
 
     let cancelled = false;
     const load = async () => {
@@ -1871,31 +1398,13 @@ export default function ScriptEditor({
           ? (body as ProdResponse).state
           : (body as ScriptState);
 
-        if (state.blocks.length > 0) {
-          const expandedBlocks = expandLegacyMarkersToBlocks(state.blocks, state.scenes);
-          const normalized = normalizeScriptMarkerInvariants(expandedBlocks, state.scenes, { ...DEFAULT_SCRIPT_CONFIG, ...(state.config ?? {}) });
-          const initialWindowEnd = Math.min(INITIAL_WINDOW_SIZE, normalized.blocks.length);
-          measuredHeightsRef.current.clear();
-          measuredHeightTotalRef.current = 0;
-          cumulativeHRef.current = new Array(normalized.blocks.length + 1);
-          cumulativeHRef.current[0] = 0;
-          for (let i = 0; i < normalized.blocks.length; i++) {
-            cumulativeHRef.current[i + 1] = cumulativeHRef.current[i] + DEFAULT_BLOCK_H;
-          }
-          markOwnershipDirty("full");
-          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
-          blocksRef.current = normalized.blocks;
-          blockIndexByIdRef.current = new Map(normalized.blocks.map((block, index) => [block.id, index]));
-          applyWindowRange({ start: 0, end: initialWindowEnd }, true);
-          syncSpacerHeights({ start: 0, end: initialWindowEnd });
-          setBlocks(normalized.blocks);
-          setCharacters(state.characters);
-          setScenes(normalized.scenes);
-          setScriptConfig(normalized.config);
-          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-          syncedStateRef.current = { ...state, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
-        }
-        if (state.config && state.blocks.length === 0) setScriptConfig({ ...DEFAULT_SCRIPT_CONFIG, ...state.config });
+        script.replaceServer(state);
+        const count = script.getSnapshot().blocks.length;
+        measuredHeightsRef.current.clear();
+        measuredHeightTotalRef.current = 0;
+        cumulativeHRef.current = Array.from({ length: count + 1 }, (_, i) => i * DEFAULT_BLOCK_H);
+        applyWindowRange({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, count) }, true);
+        syncSpacerHeights({ start: 0, end: Math.min(INITIAL_WINDOW_SIZE, count) });
 
         // Capture version info from production route response
         if (isProdResponse) {
@@ -1912,15 +1421,7 @@ export default function ScriptEditor({
           // 标签留在屏上、同步基线也跟着错位。无论成败都整体覆盖。
           const tgData = tgRes.status === "fulfilled" ? tgRes.value : null;
           const btData = btRes.status === "fulfilled" ? btRes.value : null;
-          setTagGroups((tgData?.groups ?? []) as TagGroup[]);
-          const map = new Map<string, BlockTagValue[]>();
-          for (const tag of (btData?.tags ?? []) as BlockTagValue[]) {
-            if (!map.has(tag.blockId)) map.set(tag.blockId, []);
-            map.get(tag.blockId)!.push(tag);
-          }
-          setBlockTagMap(map);
-          // 同步基线与服务端对齐，首次加载不把已有标签再发一遍。
-          syncedBlockTagMapRef.current = new Map(map);
+          script.loadTags((tgData?.groups ?? []) as TagGroup[], (btData?.tags ?? []) as BlockTagValue[]);
         }
 
         setLoadState("ready");
@@ -1933,58 +1434,13 @@ export default function ScriptEditor({
     };
     void load();
     return () => { cancelled = true; };
-  }, [effectiveScriptId, productionId, activeVersionId, initialWindow, applyWindowRange, markOwnershipDirty, syncSpacerHeights]);
+  }, [effectiveScriptId, productionId, activeVersionId, initialWindow, applyWindowRange, syncSpacerHeights, script]);
 
   const mergeScriptWindow = useCallback((body: ScriptWindowResponse): boolean => {
-    const current = blocksRef.current;
-    const baseline = syncedStateRef.current;
-    if (!baseline) return false;
-    const nextBlocks = [...current];
-    const nextBaselineBlocks = [...baseline.blocks];
-    for (let offset = 0; offset < body.window.blocks.length; offset++) {
-      const index = body.window.start + offset;
-      const serverBlock = body.window.blocks[offset];
-      if (nextBlocks[index]?.id !== serverBlock.id || nextBaselineBlocks[index]?.id !== serverBlock.id) return false;
-      const locallyDirty = !sameBlocks([nextBlocks[index]], [nextBaselineBlocks[index]]);
-      if (!locallyDirty) {
-        nextBaselineBlocks[index] = serverBlock;
-        nextBlocks[index] = serverBlock;
-      }
-    }
-
-    const nextTagMap = new Map(blockTagMapRef.current);
-    const nextSyncedTagMap = new Map(syncedBlockTagMapRef.current);
-    const tagsFromServer = tagsToMap(body.window.tags);
-    for (const block of body.window.blocks) {
-      const localTags = nextTagMap.get(block.id) ?? [];
-      const baselineTags = nextSyncedTagMap.get(block.id) ?? [];
-      const serverTags = tagsFromServer.get(block.id) ?? [];
-      if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
-        if (serverTags.length > 0) nextTagMap.set(block.id, serverTags);
-        else nextTagMap.delete(block.id);
-      }
-      if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
-        if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
-        else nextSyncedTagMap.delete(block.id);
-      }
-    }
-
-    const currentRange = windowRangeRef.current;
-    if (body.window.start < currentRange.end && body.window.start + body.window.blocks.length > currentRange.start) {
-      requestVirtualWindowRefresh();
-    }
-    blocksRef.current = nextBlocks;
-    syncedStateRef.current = { ...baseline, blocks: nextBaselineBlocks };
-    blockTagMapRef.current = nextTagMap;
-    syncedBlockTagMapRef.current = nextSyncedTagMap;
-    const nextLoaded = new Set(loadedBlockIdsRef.current);
-    body.window.blocks.forEach((block) => nextLoaded.add(block.id));
-    loadedBlockIdsRef.current = nextLoaded;
-    setBlocks(nextBlocks);
-    setBlockTagMap(nextTagMap);
-    setLoadedBlockIds(nextLoaded);
-    return true;
-  }, [requestVirtualWindowRefresh]);
+    const range = windowRangeRef.current;
+    if (body.window.start < range.end && body.window.start + body.window.blocks.length > range.start) requestVirtualWindowRefresh();
+    return script.mergeWindow(body);
+  }, [script, requestVirtualWindowRefresh]);
 
   // 分窗正文：当前视口优先，前后各留一段缓冲。请求切换时取消旧网络工作；即使浏览器
   // 来不及真正取消，generation 也保证旧响应不能夺回视口或覆盖新结构。
@@ -1994,13 +1450,13 @@ export default function ScriptEditor({
       ? Math.max(0, windowRange.start - 80)
       : Math.max(0, explicitLoadTargetIndex - Math.floor(INITIAL_WINDOW_SIZE / 2));
     const desiredEnd = explicitLoadTargetIndex === null
-      ? Math.min(blocksRef.current.length, windowRange.end + 80)
-      : Math.min(blocksRef.current.length, desiredStart + INITIAL_WINDOW_SIZE);
+      ? Math.min(script.getSnapshot().blocks.length, windowRange.end + 80)
+      : Math.min(script.getSnapshot().blocks.length, desiredStart + INITIAL_WINDOW_SIZE);
     let missingIndex = -1;
     let visibleMissing = false;
     for (let index = desiredStart; index < desiredEnd; index++) {
-      const id = blocksRef.current[index]?.id;
-      if (!id || !manifestBlockIdsRef.current.has(id) || loadedBlockIdsRef.current.has(id) || isMarkerBlock(blocksRef.current[index])) continue;
+      const id = script.getSnapshot().blocks[index]?.id;
+      if (!id || !script.getSnapshot().manifestIds.has(id) || script.getSnapshot().loadedIds.has(id) || isMarkerBlock(script.getSnapshot().blocks[index])) continue;
       if (missingIndex < 0) missingIndex = index;
       if (explicitLoadTargetIndex !== null || (index >= windowRange.start && index < windowRange.end)) visibleMissing = true;
     }
@@ -2009,10 +1465,8 @@ export default function ScriptEditor({
       return;
     }
 
-    windowRequestRef.current?.controller.abort();
-    const controller = new AbortController();
-    windowRequestRef.current = { controller, priority: "foreground" };
-    const generation = ++windowRequestGenerationRef.current;
+    const request = windowRequests.begin("foreground");
+    const { controller, generation } = request;
     setWindowLoadSlow(false);
     setWindowLoadFailed(false);
     const requestStart = Math.max(0, missingIndex - 40);
@@ -2026,10 +1480,10 @@ export default function ScriptEditor({
       activeVersionId,
       requestStart,
       requestLimit,
-      orderRevisionRef.current,
+      script.getSnapshot().orderRevision,
       controller.signal,
     ).then(async ({ status, body }) => {
-      if (controller.signal.aborted || generation !== windowRequestGenerationRef.current) return;
+      if (controller.signal.aborted || generation !== windowRequests.readGeneration()) return;
       if (status === 409) {
         // 结构变更会让绝对索引失效，但弱网下整页刷新会把已有画面也清空；原地重取轻量骨架。
         const bootstrap = await fetchScriptWindowBootstrap(
@@ -2039,7 +1493,7 @@ export default function ScriptEditor({
           INITIAL_WINDOW_SIZE,
           controller.signal,
         );
-        if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
+        if (!controller.signal.aborted && generation === windowRequests.readGeneration() && bootstrap) {
           applyWindowBootstrapRef.current(bootstrap);
         } else if (!controller.signal.aborted && visibleMissing) {
           setWindowLoadFailed(true);
@@ -2050,7 +1504,7 @@ export default function ScriptEditor({
         if (visibleMissing) setWindowLoadFailed(true);
         return;
       }
-      if (body.orderRevision !== orderRevisionRef.current) return;
+      if (body.orderRevision !== script.getSnapshot().orderRevision) return;
 
       if (!mergeScriptWindow(body)) {
         const bootstrap = await fetchScriptWindowBootstrap(
@@ -2060,7 +1514,7 @@ export default function ScriptEditor({
           INITIAL_WINDOW_SIZE,
           controller.signal,
         );
-        if (!controller.signal.aborted && generation === windowRequestGenerationRef.current && bootstrap) {
+        if (!controller.signal.aborted && generation === windowRequests.readGeneration() && bootstrap) {
           applyWindowBootstrapRef.current(bootstrap);
         } else if (!controller.signal.aborted && visibleMissing) {
           setWindowLoadFailed(true);
@@ -2071,20 +1525,20 @@ export default function ScriptEditor({
       setWindowLoadFailed(false);
     }).catch((error: unknown) => {
       if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
-      if (generation === windowRequestGenerationRef.current && visibleMissing) {
+      if (generation === windowRequests.readGeneration() && visibleMissing) {
         setWindowLoadSlow(false);
         setWindowLoadFailed(true);
       }
     }).finally(() => {
       if (slowTimer !== null) window.clearTimeout(slowTimer);
-      if (windowRequestRef.current?.controller === controller) windowRequestRef.current = null;
+      windowRequests.finish(request);
     });
 
     return () => {
       controller.abort();
       if (slowTimer !== null) window.clearTimeout(slowTimer);
     };
-  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, mergeScriptWindow, windowRange, windowRetryToken, recoveryStatus, recoverySuspendedRef]);
+  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, mergeScriptWindow, windowRange, windowRetryToken, recoveryStatus, recoverySuspendedRef, script, windowRequests]);
 
   // 用户停留后从当前视窗向外补齐；与前台缺块共用请求槽，滚动、跳转和保存可随时插队。
   useScriptWindowPrefetch({
@@ -2093,15 +1547,11 @@ export default function ScriptEditor({
     versionId: activeVersionId,
     syncWaitingForNetwork,
     initialWindowSize: INITIAL_WINDOW_SIZE,
-    blocksRef,
+    script,
+    isSaving: sync.isSaving,
     viewportRange: windowRange,
     windowRangeRef,
-    manifestBlockIdsRef,
-    loadedBlockIdsRef,
-    requestRef: windowRequestRef,
-    requestGenerationRef: windowRequestGenerationRef,
-    orderRevisionRef,
-    isSyncingRef,
+    requests: windowRequests,
     mergeWindow: mergeScriptWindow,
     applyBootstrap: applyWindowBootstrap,
   });
@@ -2111,10 +1561,10 @@ export default function ScriptEditor({
     let cancelled = false;
     fetchSceneDetails(productionId, activeVersionId).then((data) => {
       if (cancelled || !data) return;
-      setSceneDetails(syncSceneDetailsWithScenes(data, scenesRef.current));
+      script.editSceneDetails(data);
     });
     return () => { cancelled = true; };
-  }, [productionId, activeVersionId, loadState]);
+  }, [productionId, activeVersionId, loadState, script]);
 
   // 评论面板 chunk 在首屏画完后空闲预热（#647）：拆包省下的是首屏字节，不该把
   // 这笔成本原样转嫁成每次点开评论的等待。Safari 到近版才有 requestIdleCallback，
@@ -2152,7 +1602,7 @@ export default function ScriptEditor({
     if (hash.startsWith("#block-")) {
       const [fragment, query] = hash.slice(1).split("?");
       const blockId = fragment.slice("block-".length);
-      const idx = blocksRef.current.findIndex(b => b.id === blockId);
+      const idx = script.getSnapshot().blocks.findIndex(b => b.id === blockId);
       if (idx >= 0) { scrollToBlockIdx(idx, "center"); setHighlightedBlockId(blockId); }
       if (new URLSearchParams(query).get("open_comment") === "true") {
         setActiveCommentBlockId(blockId);
@@ -2169,7 +1619,7 @@ export default function ScriptEditor({
         const colonAt = decoded.lastIndexOf(":");
         const blockId = colonAt > 0 ? decoded.slice(0, colonAt) : decoded;
         const savedIndex = colonAt > 0 ? parseInt(decoded.slice(colonAt + 1), 10) : NaN;
-        const bl = blocksRef.current;
+        const bl = script.getSnapshot().blocks;
         const idx = bl.findIndex(b => b.id === blockId);
         if (idx >= 0) {
           scrollToBlockIdx(idx, "start");
@@ -2179,7 +1629,7 @@ export default function ScriptEditor({
       }
     }
     return () => clearTimeout(unlockTimer);
-  }, [loadState, productionId, scrollToBlockIdx, setActiveCommentBlockId, setTagEditorOnTop]);
+  }, [loadState, productionId, script, scrollToBlockIdx, setActiveCommentBlockId, setTagEditorOnTop]);
 
   // ── Clear block highlight on scroll or click ─────────────────────────────────
   useEffect(() => {
@@ -2230,7 +1680,7 @@ export default function ScriptEditor({
         recoveryNeedsReloadRef.current = true;
         return;
       }
-      if (seq <= serverSeqRef.current) return;
+      if (seq <= sync.getServerSeq()) return;
 
       if (streamDebounceTimerRef.current) clearTimeout(streamDebounceTimerRef.current);
       streamDebounceTimerRef.current = setTimeout(async () => {
@@ -2238,8 +1688,8 @@ export default function ScriptEditor({
         // Re-check: the PATCH response for our own edit may have arrived during
         // the 300 ms window and already advanced serverSeqRef.  If so there is
         // nothing to fetch — the server state equals what we already synced.
-        if (seq <= serverSeqRef.current) return;
-        const generation = windowRequestGenerationRef.current;
+        if (seq <= sync.getServerSeq()) return;
+        const generation = windowRequests.readGeneration();
         try {
           if (initialWindow && activeVersionId) {
             const bootstrap = await fetchScriptWindowBootstrap(
@@ -2248,34 +1698,17 @@ export default function ScriptEditor({
               windowRangeRef.current.start,
               INITIAL_WINDOW_SIZE,
             );
-            if (!bootstrap || generation !== windowRequestGenerationRef.current || recoverySuspendedRef.current || seq <= serverSeqRef.current) return;
-            serverSeqRef.current = seq;
+            if (!bootstrap || generation !== windowRequests.readGeneration() || recoverySuspendedRef.current || seq <= sync.getServerSeq()) return;
+            sync.observeServerSeq(seq);
             applyWindowBootstrap(bootstrap);
             return;
           }
           const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
-          if (!serverState || generation !== windowRequestGenerationRef.current || recoverySuspendedRef.current) return;
+          if (!serverState || generation !== windowRequests.readGeneration() || recoverySuspendedRef.current) return;
 
-          const oldSynced = syncedStateRef.current;
-          serverSeqRef.current = seq;
-
-          const mergedBlocks = expandLegacyMarkersToBlocks(mergeServerBlocks(blocksRef.current, serverState.blocks, oldSynced), serverState.scenes);
-          const normalized = normalizeScriptMarkerInvariants(mergedBlocks, serverState.scenes, { ...scriptConfigRef.current, ...(serverState.config ?? {}) });
-          markOwnershipDirty("full");
-          setRehearsalLabels(buildMarkerLabelIndex(normalized.blocks));
+          sync.observeServerSeq(seq);
           requestVirtualWindowRefresh();
-          setBlocks(normalized.blocks);
-          setCharacters(serverState.characters);
-          setScenes(normalized.scenes);
-          setScriptConfig(normalized.config);
-          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-          const localById = new Map(blocksRef.current.map(block => [block.id, block]));
-          const oldById = new Map((oldSynced?.blocks ?? []).map(block => [block.id, block]));
-          syncedStateRef.current = { ...serverState, blocks: serverState.blocks.map(block => {
-            const old = oldById.get(block.id);
-            const local = localById.get(block.id);
-            return old && local && !sameBlocks([old], [local]) ? old : block;
-          }) };
+          script.mergeServer(serverState);
         } catch { /* ignore */ }
       }, 300);
     };
@@ -2302,7 +1735,7 @@ export default function ScriptEditor({
 
     const handleConfig = (cfg: ScriptConfig) => {
       if (recoverySuspendedRef.current) { recoveryNeedsReloadRef.current = true; return; }
-      setScriptConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
+      script.editConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
     };
 
     const openEventSource = (streamClientId: string, onEvent: (type: "seq" | "presence" | "config", data: unknown) => void) => {
@@ -2460,7 +1893,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap, recoverScript, suspendRecovery, recoverySuspendedRef, streamRetryToken]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap, recoverScript, suspendRecovery, recoverySuspendedRef, streamRetryToken, sync, windowRequests, script]);
 
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
@@ -2501,49 +1934,8 @@ export default function ScriptEditor({
     focusBlockContent(focusId);
   }, [focusBlockContent, glowChangedBlocks]);
 
-  // Debounced sync: SYNC_DEBOUNCE_MS after the last state change, at most
-  // SYNC_MAX_WAIT_MS after the first (#520). 每次改动只 trigger，不在 cleanup 里
-  // cancel——cancel 会把 maxWait 窗口起点一起清掉，等于回到纯 trailing。
-  useEffect(() => {
-    if (loadState !== "ready") return;
-    syncDebounce.trigger();
-  // blockTagMap included so tag-only changes (inherit, paste, manual edit)
-  // also trigger the debounced sync and embed tags in the block op.
-  }, [blocks, characters, scenes, blockTagMap, loadState, syncDebounce]);
-  useEffect(() => () => { syncUnmountedRef.current = true; syncDebounce.cancel(); }, [syncDebounce]);
-  useEffect(() => () => {
-    if (syncRetryTimerRef.current !== null) clearTimeout(syncRetryTimerRef.current);
-  }, []);
-
-  const flushPendingPatch = useCallback(async () => {
-    syncDebounce.cancel();
-    if (isSyncingRef.current) {
-      await new Promise<void>((resolve) => {
-        syncIdleWaitersRef.current.push(resolve);
-      });
-      // 等待期间上一笔可能把撞锁的那轮重排了；这里马上就推，不用再等
-      deferredSyncRef.current = false;
-      syncDebounce.cancel();
-    }
-    const readCurrent = (): ScriptState => ({
-      config: scriptConfigRef.current,
-      blocks: normalizeScriptBlockStream(blocksRef.current),
-      characters: charactersRef.current,
-      scenes: scenesRef.current,
-    });
-    return flushLatestScriptState(readCurrent, pushPatchRef.current, (latest) => {
-      const remaining = diffState(syncedStateRef.current, latest, 0);
-      const stateSynced = remaining.blockOps.length === 0 && remaining.charOps.length === 0 && remaining.sceneOps.length === 0;
-      const currentTags = [...blockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
-      const syncedTags = [...syncedBlockTagMapRef.current.entries()].sort(([a], [b]) => a.localeCompare(b));
-      return stateSynced &&
-        pendingTagInsertsRef.current.size === 0 &&
-        JSON.stringify(currentTags) === JSON.stringify(syncedTags);
-    });
-  }, [syncDebounce]);
-  useLayoutEffect(() => {
-    flushPendingPatchRef.current = flushPendingPatch;
-  }, [flushPendingPatch]);
+  const flushPendingPatch = sync.flush;
+  useLayoutEffect(() => { flushPendingPatchRef.current = flushPendingPatch; }, [flushPendingPatch]);
 
   const {
     error: modeSwitchError,
@@ -2565,22 +1957,13 @@ export default function ScriptEditor({
     closeMenu: closeToolbarMenu,
   });
 
-  const persistMarkerState = useCallback(async (next: ScriptState) => {
-    syncDebounce.cancel();
-    if (isSyncingRef.current) {
-      await new Promise<void>((resolve) => syncIdleWaitersRef.current.push(resolve));
-      deferredSyncRef.current = false;
-      syncDebounce.cancel();
-    }
-    await pushPatchRef.current(next);
-  }, [syncDebounce]);
+  const persistMarkerState = sync.flush;
 
-  const undoStack = useRef<Block[][]>([]);
-  const redoStack = useRef<Block[][]>([]);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
-  const isTypingSession = useRef(false);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const history = useScriptHistory(() => script.getSnapshot().blocks, (snapshot) => {
+    script.editBlockStructure(snapshot);
+    requestVirtualWindowRefresh();
+  });
+  const { canUndo, canRedo, record: saveSnapshot, startTyping: startTypingSession } = history;
 
   const registerRef = useCallback((id: string, el: HTMLDivElement | null) => {
     if (el) taRefs.current.set(id, el);
@@ -2605,7 +1988,7 @@ export default function ScriptEditor({
   }, []);
 
   const handleArrowUpFromTextarea = useCallback((id: string) => {
-    const cur = blocksRef.current;
+    const cur = script.getSnapshot().blocks;
     const block = cur.find((b) => b.id === id);
     if (block?.type === "stage") {
       const idx = cur.findIndex((b) => b.id === id);
@@ -2617,10 +2000,10 @@ export default function ScriptEditor({
     } else {
       openCharSelector(id);
     }
-  }, [openCharSelector]);
+  }, [openCharSelector, script]);
 
   const handleArrowDownFromTextarea = useCallback((id: string) => {
-    const cur = blocksRef.current;
+    const cur = script.getSnapshot().blocks;
     const idx = cur.findIndex((b) => b.id === id);
     if (idx < cur.length - 1) {
       const next = cur[idx + 1];
@@ -2631,27 +2014,20 @@ export default function ScriptEditor({
         openCharSelector(next.id);
       }
     }
-  }, [openCharSelector]);
+  }, [openCharSelector, script]);
 
   const handleArrowUpFromChar = useCallback((id: string) => {
-    const cur = blocksRef.current;
+    const cur = script.getSnapshot().blocks;
     const idx = cur.findIndex((b) => b.id === id);
     if (idx > 0) {
       const el = taRefs.current.get(cur[idx - 1].id);
       if (el) { el.focus(); setCursorAtEnd(el); }
     }
-  }, []);
+  }, [script]);
 
   const handleArrowDownFromChar = useCallback((id: string) => {
     const el = taRefs.current.get(id);
     if (el) { el.focus(); setCursorAtStart(el); }
-  }, []);
-
-  const saveSnapshot = useCallback(() => {
-    undoStack.current.push(blocksRef.current);
-    redoStack.current = [];
-    setCanUndo(true);
-    setCanRedo(false);
   }, []);
 
   const applyStageDelimiterChange = useCallback(async (updateExisting: boolean) => {
@@ -2661,7 +2037,7 @@ export default function ScriptEditor({
     const previousClose = scriptConfig.stageDelimClose;
     setPendingStageDelimiterChange(null);
     if (updateExisting) {
-      const nextBlocks = blocksRef.current.map((block) => {
+      const nextBlocks = script.getSnapshot().blocks.map((block) => {
         if (block.type === "stage") return block;
         const content = replaceInlineStageDelimiters(
           block.content,
@@ -2672,21 +2048,14 @@ export default function ScriptEditor({
         );
         return content === block.content ? block : { ...block, content };
       });
-      if (nextBlocks.some((block, index) => block !== blocksRef.current[index])) {
+      if (nextBlocks.some((block, index) => block !== script.getSnapshot().blocks[index])) {
         saveSnapshot();
-        markPageMapDirty("full");
-        setBlocks(nextBlocks);
+
+        script.editBlocks(nextBlocks);
       }
     }
     await saveScriptConfig({ stageDelimOpen: pending.open, stageDelimClose: pending.close });
-  }, [
-    markPageMapDirty,
-    pendingStageDelimiterChange,
-    saveScriptConfig,
-    saveSnapshot,
-    scriptConfig.stageDelimOpen,
-    scriptConfig.stageDelimClose,
-  ]);
+  }, [pendingStageDelimiterChange, scriptConfig.stageDelimOpen, scriptConfig.stageDelimClose, saveScriptConfig, script, saveSnapshot]);
 
   // Apply inline format (bold/underline) to the current window selection.
   // Called from toolbar buttons via onMouseDown+preventDefault, which keeps
@@ -2700,50 +2069,16 @@ export default function ScriptEditor({
     if (!editableEl) return;
     // End typing session so startTypingSession (called by updateBlock via input event)
     // saves a fresh pre-format snapshot rather than lumping with active typing.
-    isTypingSession.current = false;
+    history.endTyping();
     toggleInlineTag(range, tag);
     // Re-focus then fire input so ScriptBlock's handleInput → syncContent runs
     editableEl.focus();
     editableEl.dispatchEvent(new Event("input", { bubbles: true }));
-  }, [isContentLocked]);
+  }, [history, isContentLocked]);
 
-  const startTypingSession = useCallback(() => {
-    if (!isTypingSession.current) {
-      saveSnapshot();
-      isTypingSession.current = true;
-    }
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => {
-      isTypingSession.current = false;
-      typingTimer.current = null;
-    }, 800);
-  }, [saveSnapshot]);
+  const undo = useCallback(() => { if (!isContentLocked) history.undo(); }, [history, isContentLocked]);
 
-  const undo = useCallback(() => {
-    if (isContentLocked) return;
-    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
-    isTypingSession.current = false;
-    const snapshot = undoStack.current.pop();
-    if (!snapshot) return;
-    redoStack.current.push(blocksRef.current);
-    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
-    requestVirtualWindowRefresh();
-    setCanUndo(undoStack.current.length > 0);
-    setCanRedo(true);
-  }, [applyBlockStructureEdit, isContentLocked, requestVirtualWindowRefresh]);
-
-  const redo = useCallback(() => {
-    if (isContentLocked) return;
-    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
-    isTypingSession.current = false;
-    const snapshot = redoStack.current.pop();
-    if (!snapshot) return;
-    undoStack.current.push(blocksRef.current);
-    applyBlockStructureEdit(blocksRef.current, snapshot, "full");
-    requestVirtualWindowRefresh();
-    setCanUndo(true);
-    setCanRedo(redoStack.current.length > 0);
-  }, [applyBlockStructureEdit, isContentLocked, requestVirtualWindowRefresh]);
+  const redo = useCallback(() => { if (!isContentLocked) history.redo(); }, [history, isContentLocked]);
 
   // ── Tag handlers ─────────────────────────────────────────────────────────────
   // Tag mutations are no longer sent via a dedicated block-tags PATCH.
@@ -2752,76 +2087,19 @@ export default function ScriptEditor({
   // available for server-side / admin use but is not called from here.
 
   const handleTagChange = useCallback((blockId: string, groupId: string, optionId: string | null, value: number | null, del: boolean) => {
-    if (isContentLocked) return;
-    setBlockTagMap(prev => {
-      const map = new Map(prev);
-      const existing = map.get(blockId) ?? [];
-      if (del) {
-        map.set(blockId, existing.filter(t => t.groupId !== groupId));
-      } else {
-        map.set(blockId, [...existing.filter(t => t.groupId !== groupId), { blockId, groupId, optionId, value }]);
-      }
-      return map;
-    });
-    // Tag change is synced as part of the block op via the debounced PATCH —
-    // no separate block-tags PATCH needed.
-    // Auto-sync block.lyric when any group has a lyric split configured (OR logic)
-    const changedGroup = tagGroups.find(g => g.id === groupId);
-    if (changedGroup?.lyricSplitAfterOptionId) {
-      const splitOpt = changedGroup.options.find(o => o.id === changedGroup.lyricSplitAfterOptionId);
-      if (splitOpt) {
-        const groupIsLyric = !del && !!optionId &&
-          (changedGroup.options.find(o => o.id === optionId)?.sortOrder ?? Infinity) <= splitOpt.sortOrder;
-        const currentTags = blockTagMapRef.current.get(blockId) ?? [];
-        const otherGroupsLyric = tagGroups.some(g => {
-          if (g.id === groupId || !g.lyricSplitAfterOptionId) return false;
-          const sp = g.options.find(o => o.id === g.lyricSplitAfterOptionId);
-          if (!sp) return false;
-          const tag = currentTags.find(t => t.groupId === g.id);
-          return !!tag?.optionId &&
-            (g.options.find(o => o.id === tag.optionId)?.sortOrder ?? Infinity) <= sp.sortOrder;
-        });
-        const newLyric = groupIsLyric || otherGroupsLyric;
-        markBlockPageMapDirty(blockId);
-        setBlocks(bs => bs.map(b => b.id === blockId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
-      }
-    }
-  }, [blockTagMapRef, markBlockPageMapDirty, tagGroups, isContentLocked]);
+    if (!isContentLocked) script.editTag(blockId, groupId, optionId, value, del);
+  }, [script, isContentLocked]);
 
   const handleTagCopy = useCallback((blockId: string) => {
-    tagClipboardRef.current = blockTagMapRef.current.get(blockId) ?? [];
-  }, []);
+    tagClipboardRef.current = script.getSnapshot().tags.get(blockId) ?? [];
+  }, [script]);
 
   const handleTagPaste = useCallback((blockId: string) => {
-    if (isContentLocked) return;
-    const clipboard = tagClipboardRef.current;
-    if (!clipboard?.length) return;
-    const inherited = clipboard.map(t => ({ ...t, blockId }));
-    setBlockTagMap(prev => { const m = new Map(prev); m.set(blockId, inherited); return m; });
-    // Tag change is synced as part of the block op via the debounced PATCH.
-  }, [isContentLocked]);
+    const tags = tagClipboardRef.current;
+    if (!isContentLocked && tags?.length) script.pasteTags(blockId, tags);
+  }, [script, isContentLocked]);
 
-  const inheritTags = useCallback((fromId: string, toId: string) => {
-    // Use blockTagMap from the closure (latest committed state) rather than
-    // blockTagMapRef so we're never stale when Enter is pressed right after
-    // a tag change (useEffect syncing the ref fires asynchronously).
-    const sourceTags = blockTagMap.get(fromId) ?? [];
-    if (!sourceTags.length) return;
-    const inherited = sourceTags.map(t => ({ ...t, blockId: toId }));
-    setBlockTagMap(prev => { const m = new Map(prev); m.set(toId, inherited); return m; });
-    // Register the tags directly in a ref so pushPatchRef can embed them in the
-    // insert op synchronously, without any dependency on useEffect timing.
-    pendingTagInsertsRef.current.set(toId, inherited.map(t => ({
-      groupId: t.groupId, optionId: t.optionId, value: t.value,
-    })));
-    // Apply the lyric mapping rule immediately so the new block's display is correct.
-    const newLyric = computeLyricFromTags(inherited, tagGroups);
-    if (newLyric !== null) {
-      markBlockPageMapDirty(toId);
-      setBlocks(bs => bs.map(b => b.id === toId && b.lyric !== newLyric ? { ...b, lyric: newLyric } : b));
-    }
-    // Tags (and the corrected lyric) are synced atomically via the debounced block op PATCH.
-  }, [blockTagMap, markBlockPageMapDirty, tagGroups]);
+  const inheritTags = script.inheritTags;
 
   const {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery, searchExact, setSearchExact,
@@ -2854,7 +2132,7 @@ export default function ScriptEditor({
       // Tag clipboard: ⌘/Ctrl+Shift+C copies tags from focused block, ⌘/Ctrl+Shift+V pastes
       else if (e.key === "c" && e.shiftKey) {
         const id = focusedIdRef.current;
-        if (id) { e.preventDefault(); tagClipboardRef.current = blockTagMapRef.current.get(id) ?? []; }
+        if (id) { e.preventDefault(); tagClipboardRef.current = script.getSnapshot().tags.get(id) ?? []; }
       }
       else if (e.key === "v" && e.shiftKey) {
         const id = focusedIdRef.current;
@@ -2863,12 +2141,12 @@ export default function ScriptEditor({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [undo, redo, handleTagPaste, setSearchOpen]);
+  }, [undo, redo, handleTagPaste, setSearchOpen, script]);
 
   const toggleBlockType = useCallback((id: string) => {
     if (isContentLocked) return;
     saveSnapshot();
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const changes: BlockChange[] = [];
     const nextBlocks: Block[] = previousBlocks.map((b, position) => {
       if (b.id !== id) return b;
@@ -2878,15 +2156,15 @@ export default function ScriptEditor({
       });
       return next;
     });
-    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
+    script.editBlockStructure(nextBlocks, markerChangeFromOperations(changes));
     glowAndFocusBlocks([id]);
-  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script, glowAndFocusBlocks]);
 
   const toggleStageCueToFocused = useCallback(() => {
     const id = focusedIdRef.current;
     if (!id) return;
 
-    const block = blocksRef.current.find((b) => b.id === id);
+    const block = script.getSnapshot().blocks.find((b) => b.id === id);
     const sel = window.getSelection();
     const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
     const editableEl = range ? getEditableElementForRange(range) : null;
@@ -2898,31 +2176,31 @@ export default function ScriptEditor({
       editableEl &&
       editableEl === taRefs.current.get(id)
     ) {
-      wrapSelectionAsInlineStageCue(range, scriptConfigRef.current.stageDelimOpen, scriptConfigRef.current.stageDelimClose);
+      wrapSelectionAsInlineStageCue(range, script.getSnapshot().config.stageDelimOpen, script.getSnapshot().config.stageDelimClose);
       editableEl.focus();
       editableEl.dispatchEvent(new Event("input", { bubbles: true }));
       return;
     }
 
     toggleBlockType(id);
-  }, [toggleBlockType]);
+  }, [script, toggleBlockType]);
 
   const toggleBlockLyric = useCallback((id: string) => {
     if (isContentLocked) return;
     saveSnapshot();
-    markBlockPageMapDirty(id);
-    setBlocks((prev) => prev.map((b) =>
+
+    script.editBlocks((prev) => prev.map((b) =>
       b.id === id ? { ...b, lyric: !b.lyric } : b
     ));
     glowAndFocusBlocks([id]);
-  }, [glowAndFocusBlocks, markBlockPageMapDirty, saveSnapshot, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script, glowAndFocusBlocks]);
 
   const setBlocksType = useCallback((ids: string[], type: BlockType) => {
     if (isContentLocked) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const changes: BlockChange[] = [];
     const nextBlocks = previousBlocks.map((b, position) => {
       if (!targetIds.has(b.id)) return b;
@@ -2932,23 +2210,23 @@ export default function ScriptEditor({
       });
       return next;
     });
-    applyBlockStructureEdit(previousBlocks, nextBlocks, markerChangeFromOperations(changes));
+    script.editBlockStructure(nextBlocks, markerChangeFromOperations(changes));
     glowAndFocusBlocks(ids);
-  }, [applyBlockStructureEdit, glowAndFocusBlocks, saveSnapshot, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script, glowAndFocusBlocks]);
 
   const setBlocksLyric = useCallback((ids: string[], lyric: boolean) => {
     if (isContentLocked) return;
     const targetIds = new Set(ids);
     if (targetIds.size === 0) return;
     saveSnapshot();
-    markBlockIdsPageMapDirty(targetIds);
-    setBlocks((prev) => prev.map((b) =>
+
+    script.editBlocks((prev) => prev.map((b) =>
       targetIds.has(b.id) && b.type !== "stage"
         ? { ...b, lyric }
         : b
     ));
     glowAndFocusBlocks(ids);
-  }, [glowAndFocusBlocks, markBlockIdsPageMapDirty, saveSnapshot, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script, glowAndFocusBlocks]);
 
   // Apply pending focus on every render until resolved
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2978,15 +2256,15 @@ export default function ScriptEditor({
     (id: string, changes: Partial<Block>) => {
       if (isContentLocked) return;
       startTypingSession();
-      markBlockPageMapDirty(id);
-      setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
+
+      script.editBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...changes } : b)));
     },
-    [markBlockPageMapDirty, startTypingSession, isContentLocked]
+    [isContentLocked, startTypingSession, script]
   );
 
   const findChapterIdForBlock = useCallback((blockId: string): string | null => {
-    const currentBlocks = ownedBlocksRef.current;
-    const currentScenes = scenesRef.current;
+    const currentBlocks = script.getSnapshot().ownedBlocks;
+    const currentScenes = script.getSnapshot().scenes;
     const sceneMap = new Map(currentScenes.map((scene) => [scene.id, scene]));
     const idx = currentBlocks.findIndex((block) => block.id === blockId);
     if (idx !== -1) {
@@ -2999,35 +2277,32 @@ export default function ScriptEditor({
       }
     }
     return currentScenes.find((scene) => scene.parentId === null)?.id ?? null;
-  }, []);
+  }, [script]);
 
   const addChapterBeforeBlock = useCallback((blockId: string) => {
     if (isContentLocked || !canEditMetadata) return;
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const next = insertMarker({
       blocks: previousBlocks,
-      scenes: scenesRef.current,
-      characters: charactersRef.current,
-      config: scriptConfigRef.current,
+      scenes: script.getSnapshot().scenes,
+      characters: script.getSnapshot().characters,
+      config: script.getSnapshot().config,
     }, { kind: "chapter", name: "", beforeBlockId: blockId }, uid);
     saveSnapshot();
-    markBlockStructureDirty(previousBlocks, next.blocks);
-    setBlocks(next.blocks);
-    setScenes(next.scenes);
-    setScriptConfig(next.config);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
-    void persistMarkerState(next);
-  }, [canEditMetadata, isContentLocked, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+    script.editStructure(next);
+    void persistMarkerState();
+  }, [canEditMetadata, isContentLocked, persistMarkerState, saveSnapshot, script]);
 
   const addSceneBeforeBlock = useCallback((blockId: string) => {
     if (isContentLocked || !canEditMetadata) return;
     const chapterId = findChapterIdForBlock(blockId);
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const next = insertMarker({
       blocks: previousBlocks,
-      scenes: scenesRef.current,
-      characters: charactersRef.current,
-      config: scriptConfigRef.current,
+      scenes: script.getSnapshot().scenes,
+      characters: script.getSnapshot().characters,
+      config: script.getSnapshot().config,
     }, {
       kind: chapterId ? "scene" : "chapter",
       name: "",
@@ -3035,71 +2310,61 @@ export default function ScriptEditor({
       beforeBlockId: blockId,
     }, uid);
     saveSnapshot();
-    markBlockStructureDirty(previousBlocks, next.blocks);
-    setBlocks(next.blocks);
-    setScenes(next.scenes);
-    setScriptConfig(next.config);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
-    void persistMarkerState(next);
-  }, [canEditMetadata, findChapterIdForBlock, isContentLocked, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+    script.editStructure(next);
+    void persistMarkerState();
+  }, [canEditMetadata, findChapterIdForBlock, isContentLocked, persistMarkerState, saveSnapshot, script]);
 
   const addRehearsalBeforeBlock = useCallback((blockId: string) => {
-    if (isContentLocked || !effectiveCanEditRehearsalMark || !scriptConfigRef.current.useRehearsalMarks) return;
+    if (isContentLocked || !effectiveCanEditRehearsalMark || !script.getSnapshot().config.useRehearsalMarks) return;
     const marker = makeMarkerBlock("rehearsal_marker");
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const index = previousBlocks.findIndex((block) => block.id === blockId);
     const insertIndex = index === -1 ? previousBlocks.length : index;
     const nextBlocks = insertMarkerWithEmptyBlockIfNeeded(
       previousBlocks,
       marker,
       insertIndex,
-      scriptConfigRef.current.openingChapterMarkerId,
+      script.getSnapshot().config.openingChapterMarkerId,
     );
     saveSnapshot();
-    markBlockStructureDirty(previousBlocks, nextBlocks);
-    setBlocks(nextBlocks);
-  }, [effectiveCanEditRehearsalMark, isContentLocked, markBlockStructureDirty, saveSnapshot]);
+
+    script.editBlocks(nextBlocks);
+  }, [effectiveCanEditRehearsalMark, isContentLocked, saveSnapshot, script]);
 
   const convertMarkerBlockType = useCallback((blockId: string, nextType: Extract<BlockType, "chapter_marker" | "scene_marker">) => {
     if (isContentLocked || !canEditMetadata) return;
-    const currentIdx = blockIndexByIdRef.current.get(blockId);
+    const currentIdx = script.getSnapshot().blockIndexById.get(blockId);
     if (currentIdx === undefined) return;
-    const currentBlock = blocksRef.current[currentIdx];
+    const currentBlock = script.getSnapshot().blocks[currentIdx];
     if (!currentBlock) return;
     if (!isMarkerBlock(currentBlock)) return;
     if (currentBlock.type === nextType) return;
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const next = convertMarker({
       blocks: previousBlocks,
-      scenes: scenesRef.current,
+      scenes: script.getSnapshot().scenes,
       characters,
-      config: scriptConfigRef.current,
+      config: script.getSnapshot().config,
     }, blockId, nextType === "chapter_marker" ? "chapter" : "scene", uid);
 
     saveSnapshot();
-    markBlockStructureDirty(previousBlocks, next.blocks);
-    setBlocks(next.blocks);
-    setScenes(next.scenes);
-    setScriptConfig(next.config);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
-    void persistMarkerState(next);
-    selectionAnchorBlockIdRef.current = blockId;
-    selectionDetachedRef.current = false;
-    markerEndedScopeIdsRef.current = new Set([blockId]);
-    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-    setSelectedBlockIds(new Set([blockId]));
-  }, [canEditMetadata, characters, isContentLocked, markBlockStructureDirty, persistMarkerState, saveSnapshot]);
+
+    script.editStructure(next);
+    void persistMarkerState();
+    selection.selectOne(blockId);
+  }, [canEditMetadata, characters, isContentLocked, persistMarkerState, saveSnapshot, script, selection]);
 
   const splitBlock = useCallback((id: string, before: string, after: string) => {
     if (isContentLocked) return;
     saveSnapshot();
-    // Pre-generate the new block ID **outside** the setBlocks updater so the ID
+    // Pre-generate the new block ID **outside** the script.editBlocks updater so the ID
     // is stable across React Strict Mode's double-invocation of the updater.
     // If makeBlock() were called inside the updater, each invocation would
     // produce a different uid(), causing nextId (from the 2nd call) to diverge
     // from the block actually committed to state (from the 1st call).
     const nextBlockId = uid();
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const currentIdx = previousBlocks.findIndex((block) => block.id === id);
     if (currentIdx !== -1) {
       const cur = previousBlocks[currentIdx];
@@ -3115,8 +2380,8 @@ export default function ScriptEditor({
       updated[currentIdx] = { ...cur, content: before };
       updated.splice(currentIdx + 1, 0, next);
       pendingFocus.current = { id: next.id, textOffset: 0 };
-      markOwnershipDirty({ start: currentIdx, end: currentIdx + 1, throughNextMarker: false });
-      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+
+      script.editBlockStructure(updated, markerChangeFromOperations([{
         kind: "insert",
         position: currentIdx + 1,
         blockId: next.id,
@@ -3125,18 +2390,18 @@ export default function ScriptEditor({
       }]));
     }
     inheritTags(id, nextBlockId);
-  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, inheritTags, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script, inheritTags]);
 
   const mergeBlock = useCallback((id: string) => {
     if (isContentLocked) return;
     saveSnapshot();
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const currentIdx = previousBlocks.findIndex((block) => block.id === id);
     if (currentIdx === 0) {
       // Delete empty first block if there are more blocks after it
       if (previousBlocks.length > 1 && !previousBlocks[0].content.trim()) {
         pendingFocus.current = { id: previousBlocks[1].id, atEnd: false };
-        applyBlockStructureEdit(previousBlocks, previousBlocks.slice(1), markerChangeFromOperations([{
+        script.editBlockStructure(previousBlocks.slice(1), markerChangeFromOperations([{
           kind: "delete",
           position: 0,
           blockId: previousBlocks[0].id,
@@ -3162,8 +2427,8 @@ export default function ScriptEditor({
         id: p.id,
         textOffset: p.content && c.content ? pLen + 1 : pLen,
       };
-      markOwnershipDirty({ start: currentIdx - 1, end: currentIdx, throughNextMarker: false });
-      applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+
+      script.editBlockStructure(updated, markerChangeFromOperations([{
         kind: "delete",
         position: Math.min(currentIdx, updated.length),
         blockId: c.id,
@@ -3171,11 +2436,11 @@ export default function ScriptEditor({
         afterType: null,
       }]));
     }
-  }, [applyBlockStructureEdit, markOwnershipDirty, saveSnapshot, isContentLocked]);
+  }, [isContentLocked, saveSnapshot, script]);
 
   const nonEmptyDramaturgyMarkersForBlockIds = useCallback((ids: Iterable<string>): NonEmptyDramaturgyMarker[] => {
-    const currentBlocks = blocksRef.current;
-    const currentIndexById = blockIndexByIdRef.current;
+    const currentBlocks = script.getSnapshot().blocks;
+    const currentIndexById = script.getSnapshot().blockIndexById;
     const markers: NonEmptyDramaturgyMarker[] = [];
     for (const id of ids) {
       const index = currentIndexById.get(id);
@@ -3186,7 +2451,7 @@ export default function ScriptEditor({
       if (kind) markers.push({ id, kind });
     }
     return markers;
-  }, [sceneDetailById]);
+  }, [sceneDetailById, script]);
 
   const deleteBlocks = useCallback((ids: string[], options?: { forceDeleteNonEmptyMarkerDetails?: boolean }) => {
     if (isContentLocked) return;
@@ -3205,7 +2470,7 @@ export default function ScriptEditor({
     }
     saveSnapshot();
     const emptyBlockId2 = uid(); // pre-generated for the case where all blocks are deleted
-    const currentBlocks = blocksRef.current;
+    const currentBlocks = script.getSnapshot().blocks;
     const firstDeletedIdx = currentBlocks.findIndex((block) => deleteIds.has(block.id));
     if (firstDeletedIdx === -1) return;
     const remaining = currentBlocks.filter((block) => !deleteIds.has(block.id));
@@ -3232,33 +2497,16 @@ export default function ScriptEditor({
     });
     const normalized = normalizeScriptMarkerInvariants(
       editedBlocks,
-      scenesRef.current,
-      scriptConfigRef.current,
+      script.getSnapshot().scenes,
+      script.getSnapshot().config,
       markerChangeFromOperations(changes),
     );
     const focusIdx = Math.min(firstDeletedIdx, editedBlocks.length - 1);
     pendingFocus.current = { id: editedBlocks[focusIdx].id, atEnd: false };
-    markBlockStructureDirty(currentBlocks, normalized.blocks);
-    setBlocks(normalized.blocks);
-    if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
-      setScenes(normalized.scenes);
-      setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-    }
-    if (normalized.config.openingChapterMarkerId !== scriptConfigRef.current.openingChapterMarkerId) {
-      syncOpeningChapterMarkerId(normalized.blocks);
-    }
-    setSelectedBlockIds((current) => {
-      const next = new Set(current);
-      for (const id of deleteIds) next.delete(id);
-      return next;
-    });
-    markerEndedScopeIdsRef.current = new Set();
-    selectionDetachedRef.current = false;
-    setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-    if (selectionAnchorBlockIdRef.current && deleteIds.has(selectionAnchorBlockIdRef.current)) {
-      selectionAnchorBlockIdRef.current = null;
-    }
-  }, [markBlockStructureDirty, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, syncOpeningChapterMarkerId, isContentLocked]);
+
+    script.editStructure({ ...script.read(), ...normalized });
+    selection.remove(deleteIds);
+  }, [isContentLocked, nonEmptyDramaturgyMarkersForBlockIds, saveSnapshot, script, selection]);
 
   const emptyScriptCleanupDescendantKeys = useMemo(() => {
     const childKeysByParent = new Map<string, string[]>();
@@ -3310,10 +2558,10 @@ export default function ScriptEditor({
   const requestEmptyScriptCleanup = useCallback(() => {
     if (isContentLocked || !canEditText) return;
     const cleanupAnalysis = analyzeEmptyScriptCleanup(
-      blocksRef.current,
-      scenesRef.current,
+      script.getSnapshot().blocks,
+      script.getSnapshot().scenes,
       sceneDetailById,
-      scriptConfigRef.current.openingChapterMarkerId
+      script.getSnapshot().config.openingChapterMarkerId
     );
     if (!cleanupAnalysis.hasEmptyTextBlock && cleanupAnalysis.targets.length === 0) {
       showReorderNotice("没有可清除的空白内容。");
@@ -3322,11 +2570,11 @@ export default function ScriptEditor({
     }
     setEmptyScriptCleanupDialog(cleanupAnalysis.targets);
     closeToolbarMenu();
-  }, [canEditText, closeToolbarMenu, isContentLocked, sceneDetailById, setEmptyScriptCleanupDialog, showReorderNotice]);
+  }, [canEditText, closeToolbarMenu, isContentLocked, sceneDetailById, script, setEmptyScriptCleanupDialog, showReorderNotice]);
 
   const applyEmptyScriptCleanup = useCallback((selectedTargetKeys: Set<string>) => {
     if (isContentLocked || !canEditText) return;
-    const currentBlocks = blocksRef.current;
+    const currentBlocks = script.getSnapshot().blocks;
     const emptyTextBlockIds = currentBlocks
       .filter(isEmptyTextBlock)
       .map((block) => block.id);
@@ -3359,7 +2607,7 @@ export default function ScriptEditor({
     );
 
     const remainingBlocks = currentBlocks.filter((block) => !deleteBlockIds.has(block.id));
-    const remainingScenes = scenesRef.current.filter((scene) => !selectedSceneIds.has(scene.id));
+    const remainingScenes = script.getSnapshot().scenes.filter((scene) => !selectedSceneIds.has(scene.id));
     const editedBlocks = remainingBlocks.length > 0 ? remainingBlocks : [makeBlock()];
     let retainedBefore = 0;
     const changes: BlockChange[] = [];
@@ -3384,49 +2632,41 @@ export default function ScriptEditor({
     const normalized = normalizeScriptMarkerInvariants(
       editedBlocks,
       remainingScenes,
-      scriptConfigRef.current,
+      script.getSnapshot().config,
       markerChangeFromOperations(changes),
     );
 
     saveSnapshot();
-    markBlockStructureDirty(currentBlocks, normalized.blocks);
+
     resetScriptInteractions();
     setEmptyScriptCleanupDialog(null);
-    setBlocks(normalized.blocks);
-    setScenes(normalized.scenes);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(
-      prev.filter((scene) => !selectedSceneIds.has(scene.id)),
-      normalized.scenes
-    ));
+    script.editStructure({ ...script.read(), ...normalized });
     showReorderNotice("已清除选中空白内容。");
-  }, [canEditText, deleteBlocks, isContentLocked, markBlockStructureDirty, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, setEmptyScriptCleanupDialog, showReorderNotice]);
+  }, [canEditText, deleteBlocks, isContentLocked, pendingEmptyScriptCleanup, resetScriptInteractions, saveSnapshot, script, setEmptyScriptCleanupDialog, showReorderNotice]);
 
   const applyMarkerDeleteOperation = useCallback((operation: MarkerDeleteOperation) => {
-    const previousBlocks = blocksRef.current;
+    const previousBlocks = script.getSnapshot().blocks;
     const next = executeMarkerDeletion({
       blocks: previousBlocks,
-      scenes: scenesRef.current,
-      characters: charactersRef.current,
-      config: scriptConfigRef.current,
+      scenes: script.getSnapshot().scenes,
+      characters: script.getSnapshot().characters,
+      config: script.getSnapshot().config,
     }, operation, uid);
     saveSnapshot();
-    markBlockStructureDirty(previousBlocks, next.blocks);
+
     resetScriptInteractions();
-    setBlocks(next.blocks);
-    setScenes(next.scenes);
-    setScriptConfig(next.config);
-    setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, next.scenes));
+    script.editStructure(next);
     setMarkerDeleteDialog(null);
-    void persistMarkerState(next);
-  }, [markBlockStructureDirty, persistMarkerState, resetScriptInteractions, saveSnapshot]);
+    void persistMarkerState();
+  }, [persistMarkerState, resetScriptInteractions, saveSnapshot, script]);
 
   const deleteMarker = useCallback((markerBlockId: string) => {
     if (isContentLocked) return;
     const plan = planMarkerDeletion({
-      blocks: blocksRef.current,
-      scenes: scenesRef.current,
-      characters: charactersRef.current,
-      config: scriptConfigRef.current,
+      blocks: script.getSnapshot().blocks,
+      scenes: script.getSnapshot().scenes,
+      characters: script.getSnapshot().characters,
+      config: script.getSnapshot().config,
     }, markerBlockId, sceneDetails);
     if (plan.status === "blocked" || plan.status === "choice") {
       setMarkerDeleteDialog({ plan, source: "local" });
@@ -3437,20 +2677,20 @@ export default function ScriptEditor({
       return;
     }
     applyMarkerDeleteOperation(plan.operation);
-  }, [applyMarkerDeleteOperation, canEditText, isContentLocked, sceneDetails]);
+  }, [applyMarkerDeleteOperation, canEditText, isContentLocked, sceneDetails, script]);
 
   const blockIdsRequireNonEmptySceneConfirm = useCallback((ids: string[]) => ids.some((id) => {
-    const index = blockIndexByIdRef.current.get(id);
+    const index = script.getSnapshot().blockIndexById.get(id);
     if (index === undefined) return false;
     const block = blocks[index];
-    return !!block && isBlockEmptyForDelete(block) && isOnlyTextBlockInMarkerSegment(ownedBlocks, index, scriptConfigRef.current.openingChapterMarkerId);
-  }), [blocks, ownedBlocks]);
+    return !!block && isBlockEmptyForDelete(block) && isOnlyTextBlockInMarkerSegment(ownedBlocks, index, script.getSnapshot().config.openingChapterMarkerId);
+  }), [blocks, ownedBlocks, script]);
 
   const blockIdsAreEmptyForDelete = useCallback((ids: string[]) => ids.every((id) => {
-    const index = blockIndexByIdRef.current.get(id);
+    const index = script.getSnapshot().blockIndexById.get(id);
     const block = index === undefined ? undefined : blocks[index];
     return block ? isBlockEmptyForDelete(block) : false;
-  }), [blocks]);
+  }), [blocks, script]);
 
   const selectedBlockIdsArray = useMemo(() => Array.from(selectedBlockIds), [selectedBlockIds]);
   const selectedBlocksRequireNonEmptySceneConfirm = useMemo(
@@ -3469,7 +2709,7 @@ export default function ScriptEditor({
     if (!canPerformSelectedBlockAction(selectedIds)) return true;
     const selectedBlocks = selectedIds
       .map((id) => {
-        const index = blockIndexByIdRef.current.get(id);
+        const index = script.getSnapshot().blockIndexById.get(id);
         return index === undefined ? null : blocks[index] ?? null;
       })
       .filter((block): block is Block => block !== null);
@@ -3488,7 +2728,7 @@ export default function ScriptEditor({
     }));
     setDeleteConfirmingBlockIds(new Set(selectedIds));
     return true;
-  }, [blocks, canPerformSelectedBlockAction, deleteBlocks, requestLargeSelectionOperation, selectedBlockIds, selectedBlockIdsArray, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, windowRange.end, windowRange.start, isContentLocked]);
+  }, [isContentLocked, selectedBlockIdsArray, canPerformSelectedBlockAction, selectedBlocksAreEmptyForDelete, selectedBlocksRequireNonEmptySceneConfirm, blocks, windowRange.start, windowRange.end, script, requestLargeSelectionOperation, deleteBlocks, selectedBlockIds]);
 
   const requestMarkerDelete = useCallback((id: string) => {
     if (isContentLocked) return false;
@@ -3498,10 +2738,10 @@ export default function ScriptEditor({
     }
     if (ids.length === 1) {
       const plan = planMarkerDeletion({
-        blocks: blocksRef.current,
-        scenes: scenesRef.current,
-        characters: charactersRef.current,
-        config: scriptConfigRef.current,
+        blocks: script.getSnapshot().blocks,
+        scenes: script.getSnapshot().scenes,
+        characters: script.getSnapshot().characters,
+        config: script.getSnapshot().config,
       }, id, sceneDetails);
       setDeleteConfirmingBlockIds(new Set(plan.status === "blocked" ? [id] : plan.previewBlockIds));
       return true;
@@ -3509,11 +2749,11 @@ export default function ScriptEditor({
     if (!canPerformSelectedBlockAction(ids)) return false;
     setDeleteConfirmingBlockIds(new Set(ids));
     return true;
-  }, [canPerformSelectedBlockAction, clearBlockSelection, isContentLocked, sceneDetails, selectedBlockIds, selectedBlockIdsArray]);
+  }, [canPerformSelectedBlockAction, clearBlockSelection, isContentLocked, sceneDetails, script, selectedBlockIds, selectedBlockIdsArray]);
 
   const requestMobileDelete = useCallback((id: string) => {
-    const index = blockIndexByIdRef.current.get(id);
-    const block = index === undefined ? null : blocksRef.current[index] ?? null;
+    const index = script.getSnapshot().blockIndexById.get(id);
+    const block = index === undefined ? null : script.getSnapshot().blocks[index] ?? null;
     if (!block) return;
 
     if (isMarkerBlock(block)) {
@@ -3549,16 +2789,7 @@ export default function ScriptEditor({
           : "确认删除此行？",
       blocked,
     });
-  }, [
-    blockIdsAreEmptyForDelete,
-    blockIdsRequireNonEmptySceneConfirm,
-    canPerformSelectedBlockAction,
-    deleteBlocks,
-    requestLargeSelectionOperation,
-    requestMarkerDelete,
-    selectedBlockIds,
-    selectedBlockIdsArray,
-  ]);
+  }, [blockIdsAreEmptyForDelete, blockIdsRequireNonEmptySceneConfirm, canPerformSelectedBlockAction, deleteBlocks, requestLargeSelectionOperation, requestMarkerDelete, script, selectedBlockIds, selectedBlockIdsArray]);
 
   const dismissBlockConfirmations = useCallback(() => {
     setDeleteConfirmingBlockIds((current) => current.size === 0 ? current : new Set());
@@ -3569,7 +2800,7 @@ export default function ScriptEditor({
   useEffect(() => {
     const hasDeleteConfirmationOpen = deleteConfirmingBlockIds.size > 0 || markerDeleteConfirmBlockId !== null;
     const handler = (e: PointerEvent) => {
-      if (draggingBlockId.current || isReorderLockedRef.current) return;
+      if (drag.read()?.ids[0] || isReorderLockedRef.current) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (mobileBlockMenuBlockId !== null && !target.closest("[data-script-selection-action='true']")) return;
@@ -3596,7 +2827,7 @@ export default function ScriptEditor({
     };
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
-  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size, isReorderLockedRef]);
+  }, [clearBlockSelection, deleteConfirmingBlockIds.size, dismissBlockConfirmations, markerDeleteConfirmBlockId, mobileBlockMenuBlockId, selectedBlockIds.size, isReorderLockedRef, drag]);
 
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -3615,7 +2846,7 @@ export default function ScriptEditor({
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Shift") setShiftKeyDown(true);
       if (e.key === "Shift" || e.key === "Control" || e.key === "Meta") {
-        selectionDetachedRef.current = true;
+        selection.detach();
       }
     };
     const handleKeyUp = (e: globalThis.KeyboardEvent) => {
@@ -3627,7 +2858,7 @@ export default function ScriptEditor({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [selection]);
 
   const moveDraggedBlocks = useCallback((fromIds: string[], target: DragTarget): boolean => {
     if (isContentLocked) return false;
@@ -3636,7 +2867,7 @@ export default function ScriptEditor({
       showReorderNotice("移动失败：未找到被拖拽内容。");
       return false;
     }
-    const prev = blocksRef.current;
+    const prev = script.getSnapshot().blocks;
     const resolvedTarget = resolveDragTarget(target, prev, windowRangeRef.current);
     if (!resolvedTarget) {
       showReorderNotice("移动失败：目标位置已失效，请重新拖拽。");
@@ -3667,8 +2898,8 @@ export default function ScriptEditor({
     }
     const normalized = normalizeScriptMarkerInvariants(
       next,
-      scenesRef.current,
-      scriptConfigRef.current,
+      script.getSnapshot().scenes,
+      script.getSnapshot().config,
       getMarkerChange(prev, next, movingIds),
     );
     const normalizedNext = normalized.blocks;
@@ -3676,28 +2907,16 @@ export default function ScriptEditor({
     const movingHasMarker = moving.some(isMarkerBlock);
     const firstMovedOwnerMarkerId = normalizedNext[movedStartIndex].ownerMarkerId ?? null;
     const movedTextOwnershipChanged = !movingHasMarker && moving.some((block, offset) => {
-      const beforeIdx = blockIndexByIdRef.current.get(block.id);
-      const before = beforeIdx === undefined ? null : ownedBlocksRef.current[beforeIdx];
+      const beforeIdx = script.getSnapshot().blockIndexById.get(block.id);
+      const before = beforeIdx === undefined ? null : script.getSnapshot().ownedBlocks[beforeIdx];
       return (before?.ownerMarkerId ?? null) !== (normalizedNext[movedStartIndex + offset]?.ownerMarkerId ?? null);
     });
 
     requestLargeSelectionOperation("move", moving.length, () => {
       saveSnapshot();
-      for (const id of movingIds) pendingMovedBlockIdsRef.current.add(id);
-      markBlockStructureDirty(prev, normalizedNext, movingIds);
-      pendingVirtualScrollAnchorRef.current = null;
-      pendingNavigateRef.current = null;
-      postNavCorrectionRef.current = null;
+      navigation.centerAfterMove(moving[0].id);
       requestVirtualWindowRefresh();
-      pendingMoveCenterRef.current = moving[0].id;
-      if (movingHasMarker) {
-        if (!sameSceneRows(normalized.scenes, scenesRef.current)) {
-          setScenes(normalized.scenes);
-          setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-        }
-        syncOpeningChapterMarkerId(normalizedNext);
-      }
-      setBlocks(normalizedNext);
+      script.editStructure({ ...script.read(), ...normalized }, movingIds);
       const movedBlockIds: string[] = [];
       const movedRehearsalMarkerIds: string[] = [];
       const movedNonRehearsalIds: string[] = [];
@@ -3708,15 +2927,7 @@ export default function ScriptEditor({
       }
       glowChangedBlocks(movedNonRehearsalIds);
       movedRehearsalMarkerIds.forEach(glowTocMarker);
-      const movedEndBlockId = movedBlockIds[movedBlockIds.length - 1];
-      const movedEndBlock = normalizedNext.find((block) => block.id === movedEndBlockId);
-      selectionAnchorBlockIdRef.current = moving[0]?.id ?? null;
-      selectionDetachedRef.current = false;
-      markerEndedScopeIdsRef.current = movedEndBlock && isMarkerBlock(movedEndBlock)
-        ? new Set([movedEndBlock.id])
-        : new Set();
-      setInvalidSelectionEndIds((current) => current.size === 0 ? current : new Set());
-      setSelectedBlockIds(new Set(movedBlockIds));
+      selection.selectMoved(movedBlockIds);
       if (movingHasMarker) {
         showSelectionChangeNotice("章节标记/段落标记/排练记号已更新。");
       } else if (movedTextOwnershipChanged) {
@@ -3735,12 +2946,12 @@ export default function ScriptEditor({
       unlockReorderAfterCommit();
     }, unlockReorder);
     return true;
-  }, [glowChangedBlocks, glowTocMarker, markBlockStructureDirty, markerContextById, rehearsalLabels.rehearsalLabelByMarkerId, requestLargeSelectionOperation, requestVirtualWindowRefresh, saveSnapshot, sceneById, showReorderNotice, showSelectionChangeNotice, syncOpeningChapterMarkerId, unlockReorder, unlockReorderAfterCommit, isContentLocked]);
+  }, [isContentLocked, script, requestLargeSelectionOperation, unlockReorder, showReorderNotice, saveSnapshot, navigation, requestVirtualWindowRefresh, glowChangedBlocks, glowTocMarker, selection, unlockReorderAfterCommit, showSelectionChangeNotice, markerContextById, sceneById, rehearsalLabels.rehearsalLabelByMarkerId]);
 
   const isNoopDragTarget = useCallback((fromIds: string[], target: DragTarget): boolean => {
     const movingIds = new Set(fromIds);
     if (movingIds.size === 0) return true;
-    const currentBlocks = blocksRef.current;
+    const currentBlocks = script.getSnapshot().blocks;
     const resolvedTarget = resolveDragTarget(target, currentBlocks, windowRangeRef.current);
     if (!resolvedTarget) return true;
     const rawInsertIdx = getDragInsertIndex(resolvedTarget, currentBlocks);
@@ -3753,7 +2964,7 @@ export default function ScriptEditor({
     const next = [...remaining];
     next.splice(insertIdx, 0, ...currentBlocks.filter((b) => movingIds.has(b.id)));
     return next.every((b, i) => b.id === currentBlocks[i]?.id);
-  }, []);
+  }, [script]);
 
   const getDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
     const container = blocksContainerRef.current;
@@ -3766,9 +2977,9 @@ export default function ScriptEditor({
     if (clientY < firstRect.top) return { kind: "edge", edge: "top" };
     if (clientY > lastRect.bottom) return { kind: "edge", edge: "bottom" };
 
-    const currentBlocks = blocksRef.current;
+    const currentBlocks = script.getSnapshot().blocks;
     let insertIdx = currentBlocks.length;
-    const blockIndexById = blockIndexByIdRef.current;
+    const blockIndexById = script.getSnapshot().blockIndexById;
     for (const row of rows) {
       const id = row.dataset.bwrap;
       if (!id) continue;
@@ -3786,71 +2997,101 @@ export default function ScriptEditor({
     const target = insertIdx >= currentBlocks.length
       ? { kind: "block" as const, id: currentBlocks[currentBlocks.length - 1].id, position: "after" as const }
       : { kind: "block" as const, id: currentBlocks[insertIdx].id, position: "before" as const };
-    if (isNoopDragTarget(draggingBlockIds.current, target)) {
-      dragInvalidReasonRef.current = "移动未执行：目标位置与当前位置相同。";
+    if (isNoopDragTarget((drag.read()?.ids ?? []), target)) {
+      drag.reject("移动未执行：目标位置与当前位置相同。");
       return null;
     }
-    dragInvalidReasonRef.current = null;
+    drag.reject(null);
     return target;
-  }, [isNoopDragTarget]);
+  }, [drag, isNoopDragTarget, script]);
 
   const updateDragTargetFromClientY = useCallback((clientY: number): DragTarget | null => {
     const nextTarget = getDragTargetFromClientY(clientY);
-    dragTargetRef.current = nextTarget;
-    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
+    drag.setTarget(nextTarget);
     return nextTarget;
-  }, [getDragTargetFromClientY]);
+  }, [drag, getDragTargetFromClientY]);
 
   const setEdgeDragTarget = useCallback((edge: "top" | "bottom") => {
-    const nextTarget: DragTarget = { kind: "edge", edge };
-    dragTargetRef.current = nextTarget;
-    setDragTarget((current) => (sameDragTarget(current, nextTarget) ? current : nextTarget));
-    dragInvalidReasonRef.current = null;
-  }, []);
-
-  const clearDragTarget = useCallback(() => {
-    dragTargetRef.current = null;
-    setDragTarget(null);
-  }, []);
+    drag.setTarget({ kind: "edge", edge });
+    drag.reject(null);
+  }, [drag]);
 
   const handleEdgeSpacerDragOver = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
     if (isContentLocked) return;
     if (isReorderLockedRef.current) return;
-    if (!draggingBlockId.current) return;
+    if (!drag.read()?.ids[0]) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setEdgeDragTarget(edge);
-  }, [setEdgeDragTarget, isContentLocked, isReorderLockedRef]);
+  }, [isContentLocked, isReorderLockedRef, drag, setEdgeDragTarget]);
 
-  const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
-    if (isContentLocked) return;
-    if (isReorderLockedRef.current) return;
-    if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
+  const beginBlockDrag = useCallback((e: DragEvent<HTMLElement>, id: string, marker: boolean) => {
+    if (isReorderLockedRef.current) { e.preventDefault(); return; }
+    const selected = selection.getSnapshot().selectedIds;
+    const isSelection = selected.has(id);
+    const ids = isSelection ? [...selected] : [id];
+    if (isSelection && !canPerformSelectedBlockAction(ids)) { e.preventDefault(); return; }
+    dismissBlockConfirmations();
+    if (!isSelection && selected.size) selection.clear();
+    clearEditorFocusForDrag();
+    pendingFocus.current = null;
+    drag.begin(ids);
+    beginDragCountBadge(e.clientX, e.clientY, ids.length);
+    if (marker && !isSelection) selection.selectOne(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", ids.join(","));
+  }, [isReorderLockedRef, selection, canPerformSelectedBlockAction, dismissBlockConfirmations, clearEditorFocusForDrag, drag, beginDragCountBadge]);
+
+  const handleScriptDragOver = useCallback((e: DragEvent<HTMLElement>) => {
+    const session = drag.read();
+    if (isReorderLockedRef.current || !session) return;
+    if (session.ids.length > 1) updateDragCountBadge(e.clientX, e.clientY, session.ids.length, e.buttons);
+    if (!updateDragTargetFromClientY(e.clientY)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, [drag, isReorderLockedRef, updateDragCountBadge, updateDragTargetFromClientY]);
+
+  const handleScriptDrop = useCallback((e: DragEvent<HTMLElement>, edgeTarget?: DragTarget) => {
+    const session = drag.read();
+    if (isReorderLockedRef.current || !session) return;
     e.preventDefault();
     e.stopPropagation();
     lockReorder();
-    dropHandledRef.current = true;
-    const draggedIds = draggingBlockIds.current.length
-      ? draggingBlockIds.current
-      : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
-    const target: DragTarget = { kind: "edge", edge };
-    draggingBlockId.current = null;
-    draggingBlockIds.current = [];
-    clearDragTarget();
+    const target = edgeTarget ?? updateDragTargetFromClientY(e.clientY) ?? drag.read()?.target;
+    const reason = drag.read()?.invalidReason;
+    drag.end();
     clearDragCountBadge();
-    setScriptDragging(false);
-    dragInvalidReasonRef.current = null;
-    const moved = moveDraggedBlocks(draggedIds, target);
-    if (!moved) unlockReorder();
-  }, [clearDragCountBadge, clearDragTarget, lockReorder, moveDraggedBlocks, setScriptDragging, unlockReorder, isContentLocked, isReorderLockedRef]);
+    dismissBlockConfirmations();
+    if (!target) {
+      showReorderNotice(reason ?? "移动失败：未释放到有效位置。");
+      unlockReorder();
+    } else if (!moveDraggedBlocks(session.ids, target)) unlockReorder();
+  }, [drag, isReorderLockedRef, lockReorder, updateDragTargetFromClientY, clearDragCountBadge, dismissBlockConfirmations, showReorderNotice, unlockReorder, moveDraggedBlocks]);
+
+  const endBlockDrag = useCallback(() => {
+    const session = drag.end();
+    if (session && session.ids.length) {
+      if (session.target) {
+        lockReorder();
+        if (!moveDraggedBlocks(session.ids, session.target)) unlockReorder();
+      } else showReorderNotice(session.invalidReason ?? "移动失败：未释放到有效位置。");
+    }
+    clearDragCountBadge();
+    dismissBlockConfirmations();
+  }, [drag, lockReorder, moveDraggedBlocks, unlockReorder, showReorderNotice, clearDragCountBadge, dismissBlockConfirmations]);
+
+  const handleEdgeSpacerDrop = useCallback((e: DragEvent<HTMLDivElement>, edge: "top" | "bottom") => {
+    if (isContentLocked || isReorderLockedRef.current || !drag.read()) return;
+    handleScriptDrop(e, { kind: "edge", edge });
+  }, [drag, isContentLocked, isReorderLockedRef, handleScriptDrop]);
 
   const insertBlockAt = useCallback((index: number) => {
     if (!canEditText) return;
     saveSnapshot();
     // Pre-generate the new block ID outside the updater (Strict Mode double-invocation fix).
     const newBlockId = uid();
-    // refId must also be determined outside the updater; read it from blocksRef.
-    const previousBlocks = blocksRef.current;
+    // 插入位置从正文维护者读取，避免依赖渲染快照。
+    const previousBlocks = script.getSnapshot().blocks;
     const newBlock: Block = {
       ...makeBlock(),
       id: newBlockId,  // use the pre-generated stable ID
@@ -3859,7 +3100,7 @@ export default function ScriptEditor({
     };
     const { blocks: updated, insertIndex, refId } = insertScriptBlockAt(previousBlocks, index, newBlock);
     pendingCharOpen.current = newBlock.id;
-    applyBlockStructureEdit(previousBlocks, updated, markerChangeFromOperations([{
+    script.editBlockStructure(updated, markerChangeFromOperations([{
       kind: "insert",
       position: insertIndex,
       blockId: newBlock.id,
@@ -3867,28 +3108,19 @@ export default function ScriptEditor({
       afterType: newBlock.type,
     }]));
     if (refId) inheritTags(refId, newBlockId);
-  }, [applyBlockStructureEdit, canEditText, saveSnapshot, inheritTags]);
+  }, [canEditText, saveSnapshot, script, inheritTags]);
 
   const addChar = (name: string) => {
     if (isContentLocked) return;
-    setCharacters((prev) => [...prev, { id: uid(), name, isAggregate: false }]);
+    script.editCharacters((prev) => [...prev, { id: uid(), name, isAggregate: false }]);
   };
 
   const removeChar = (charId: string) => {
-    if (isContentLocked) return;
-    setCharacters((prev) => prev.filter((c) => c.id !== charId));
-    markPageMapDirty("full");
-    setBlocks((prev) =>
-      prev.map((b) => {
-        const restAnnotations = { ...b.characterAnnotations };
-        delete restAnnotations[charId];
-        return { ...b, characterIds: b.characterIds.filter((id) => id !== charId), characterAnnotations: restAnnotations };
-      })
-    );
+    if (!isContentLocked) script.removeCharacter(charId);
   };
 
   const renameChar = (charId: string, name: string) =>
-    !isContentLocked && setCharacters((prev) =>
+    !isContentLocked && script.editCharacters((prev) =>
       prev.map((c) => (c.id === charId ? { ...c, name } : c))
     );
 
@@ -3971,7 +3203,7 @@ export default function ScriptEditor({
     if (!productionId || !canEditMetadata) return;
     const ok = await patchSceneMetadata(productionId, id, activeVersionId ? { ...fields, versionId: activeVersionId } : fields);
     if (!ok) throw new Error("Failed to update scene metadata");
-    setSceneDetails((prev) => prev.map((scene) => (scene.id === id ? { ...scene, ...fields } : scene)));
+    script.patchSceneDetails(id, fields);
   };
 
   const commentPanelNavigationTargets = useMemo(
@@ -3997,14 +3229,9 @@ export default function ScriptEditor({
 
     openBlockSidePanel(kind, nextBlockId);
 
-    const blockIndex = blocksRef.current.findIndex(block => block.id === nextBlockId);
+    const blockIndex = script.getSnapshot().blocks.findIndex(block => block.id === nextBlockId);
     if (blockIndex >= 0) scrollToBlockIdx(blockIndex, "center");
-  }, [
-    assetPanelNavigationTargets,
-    commentPanelNavigationTargets,
-    openBlockSidePanel,
-    scrollToBlockIdx,
-  ]);
+  }, [assetPanelNavigationTargets, commentPanelNavigationTargets, openBlockSidePanel, script, scrollToBlockIdx]);
 
   // 与路由骨架（app/production/[id]/loading.tsx）同一个组件：RSC 换页与首窗到齐之间
   // 画面不变，不再「灰条列表 → 居中小字」闪两下（#652）。
@@ -4142,14 +3369,14 @@ export default function ScriptEditor({
   };
   const sceneIdForBlockId = (blockId: string | null | undefined): string | null => {
     if (!blockId) return null;
-    const cachedIndex = blockIndexByIdRef.current.get(blockId) ?? -1;
+    const cachedIndex = script.getSnapshot().blockIndexById.get(blockId) ?? -1;
     const blockIndex = blocks[cachedIndex]?.id === blockId
       ? cachedIndex
       : blocks.findIndex((block) => block.id === blockId);
     return blockIndex >= 0 ? sceneIdForBlockAtIndex(blocks[blockIndex], blockIndex) : null;
   };
   const markerDeleteConfirmBlockIndex = markerDeleteConfirmBlockId
-    ? blockIndexByIdRef.current.get(markerDeleteConfirmBlockId)
+    ? script.getSnapshot().blockIndexById.get(markerDeleteConfirmBlockId)
     : undefined;
   const markerDeleteConfirmBlock = markerDeleteConfirmBlockIndex === undefined
     ? null
@@ -4952,7 +4179,7 @@ export default function ScriptEditor({
       {syncConflict && recoveryStatus === "ready" && (
         <div role="status" className="fixed right-4 top-16 z-30 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1 text-xs text-amber-800 shadow-sm">
           剧本已被他人修改，部分本地修改未上传，已加载最新内容
-          <button className="ml-2 underline" onClick={() => setSyncConflict(false)}>知道了</button>
+          <button className="ml-2 underline" onClick={() => sync.dismissConflict()}>知道了</button>
         </div>
       )}
       {syncWaitingForNetwork && recoveryStatus === "ready" && !syncConflict && (
@@ -5114,42 +4341,8 @@ export default function ScriptEditor({
           <TableOfContents scenes={tocScenes} blocks={legacyProjectedBlocks} onScrollToScene={scrollToScene} />
           <div
             ref={blocksContainerRef}
-            onDragOver={(e) => {
-              if (isReorderLockedRef.current) return;
-              if (!draggingBlockId.current) return;
-              if (draggingBlockIds.current.length > 1) {
-                updateDragCountBadge(e.clientX, e.clientY, draggingBlockIds.current.length, e.buttons);
-              }
-              const nextTarget = updateDragTargetFromClientY(e.clientY);
-              if (!nextTarget) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(e) => {
-              if (isReorderLockedRef.current) return;
-              if (!draggingBlockId.current && draggingBlockIds.current.length === 0) return;
-              e.preventDefault();
-              lockReorder();
-              dropHandledRef.current = true;
-              const draggedIds = draggingBlockIds.current.length
-                ? draggingBlockIds.current
-                : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
-              const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current;
-              draggingBlockId.current = null;
-              draggingBlockIds.current = [];
-              clearDragTarget();
-              clearDragCountBadge();
-              setScriptDragging(false);
-              if (!target) {
-                showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
-                dragInvalidReasonRef.current = null;
-                unlockReorder();
-                return;
-              }
-              dragInvalidReasonRef.current = null;
-              const moved = moveDraggedBlocks(draggedIds, target);
-              if (!moved) unlockReorder();
-            }}
+            onDragOver={handleScriptDragOver}
+            onDrop={handleScriptDrop}
           >
           {(() => {
             const hasFocusedCharacters = focusedCharacterIds.size > 0;
@@ -5188,7 +4381,7 @@ export default function ScriptEditor({
               />,
               ...blocks.slice(safeWindowStart, safeWindowEnd).flatMap((block, wIdx) => {
             const bIdx = safeWindowStart + wIdx;
-            if (!isMarkerBlock(block) && manifestBlockIdsRef.current.has(block.id) && !loadedBlockIds.has(block.id)) {
+            if (!isMarkerBlock(block) && script.getSnapshot().manifestIds.has(block.id) && !loadedBlockIds.has(block.id)) {
               return [
                 <div
                   key={block.id}
@@ -5262,133 +4455,13 @@ export default function ScriptEditor({
                       openMobileBlockMenu(block.id, bIdx);
                     }}
                     onSelect={(e) => {
-                      if (isReorderLockedRef.current) return;
-                      const isAdditiveSelection = e.ctrlKey || e.metaKey;
-                      if (e.shiftKey && selectedBlockIds.size > 0) {
-                        clearBlockSelection();
-                        return;
-                      }
-                      if (isAdditiveSelection) {
-                        selectionDetachedRef.current = true;
-                        const next = toggleSelectionItem(blocks, {
-                          selectedIds: selectedBlockIds,
-                          markerEndIds: markerEndedScopeIdsRef.current,
-                        }, bIdx, isMarkerBlock);
-                        selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
-                          ? block.id
-                          : next.selectedIds.values().next().value ?? null;
-                        commitBlockSelection(next);
-                        return;
-                      }
-                      if (selectedBlockIds.has(block.id)) {
-                        const next = toggleSelectionItem(blocks, {
-                          selectedIds: selectedBlockIds,
-                          markerEndIds: markerEndedScopeIdsRef.current,
-                        }, bIdx, isMarkerBlock);
-                        selectionAnchorBlockIdRef.current = next.selectedIds.values().next().value ?? null;
-                        commitBlockSelection(next);
-                        return;
-                      }
-                      selectionAnchorBlockIdRef.current = block.id;
-                      if (selectionDetachedRef.current) {
-                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
-                        return;
-                      }
-                      commitBlockSelection(toggleSelectionItem(blocks, {
-                        selectedIds: selectedBlockIds,
-                        markerEndIds: markerEndedScopeIdsRef.current,
-                      }, bIdx, isMarkerBlock));
-                      selectionDetachedRef.current = true;
+                      if (!isReorderLockedRef.current) selection.clickMarker(block.id, { shiftKey: e.shiftKey, additive: e.ctrlKey || e.metaKey });
                     }}
                     onSceneNameChange={updateScene}
-                    onDragStart={(e) => {
-                      if (isReorderLockedRef.current) {
-                        e.preventDefault();
-                        return;
-                      }
-                      const isDraggingSelection = selectedBlockIds.has(block.id);
-                      const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
-                      if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
-                        e.preventDefault();
-                        return;
-                      }
-                      dismissBlockConfirmations();
-                      if (!isDraggingSelection && selectedBlockIds.size > 0) {
-                        clearBlockSelection();
-                      }
-                      clearEditorFocusForDrag();
-                      setScriptDragging(true);
-                      dragButtonDownSeenRef.current = false;
-                      dragButtonReleasedRef.current = false;
-                      updateDragCountBadge(e.clientX, e.clientY, ids.length);
-                      draggingBlockId.current = block.id;
-                      draggingBlockIds.current = ids;
-                      dropHandledRef.current = false;
-                      pendingFocus.current = null;
-                      clearDragTarget();
-                      dragInvalidReasonRef.current = null;
-                      if (!isDraggingSelection) {
-                        selectionAnchorBlockIdRef.current = block.id;
-                        commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
-                      }
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", ids.join(","));
-                    }}
-                    onDragEnd={() => {
-                      const draggedIds = draggingBlockIds.current;
-                      const target = dragTargetRef.current;
-                      if (!dropHandledRef.current && draggedIds.length > 0) {
-                        if (target) {
-                          lockReorder();
-                          const moved = moveDraggedBlocks(draggedIds, target);
-                          if (!moved) unlockReorder();
-                        } else {
-                          showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
-                        }
-                      }
-                      dropHandledRef.current = false;
-                      draggingBlockId.current = null;
-                      draggingBlockIds.current = [];
-                      clearDragTarget();
-                      dragInvalidReasonRef.current = null;
-                      clearDragCountBadge();
-                      setScriptDragging(false);
-                      dismissBlockConfirmations();
-                    }}
-                    onDragOver={(e) => {
-                      if (isReorderLockedRef.current) return;
-                      if (!draggingBlockId.current) return;
-                      const nextTarget = updateDragTargetFromClientY(e.clientY);
-                      if (!nextTarget) return;
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(e) => {
-                      if (isReorderLockedRef.current) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      lockReorder();
-                      dropHandledRef.current = true;
-                      const draggedIds = draggingBlockIds.current.length
-                        ? draggingBlockIds.current
-                        : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
-                      const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
-                      draggingBlockId.current = null;
-                      draggingBlockIds.current = [];
-                      clearDragTarget();
-                      clearDragCountBadge();
-                      setScriptDragging(false);
-                      dismissBlockConfirmations();
-                      if (!target) {
-                        showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
-                        dragInvalidReasonRef.current = null;
-                        unlockReorder();
-                        return;
-                      }
-                      dragInvalidReasonRef.current = null;
-                      const moved = moveDraggedBlocks(draggedIds, target);
-                      if (!moved) unlockReorder();
-                    }}
+                    onDragStart={(e) => beginBlockDrag(e, block.id, true)}
+                    onDragEnd={endBlockDrag}
+                    onDragOver={handleScriptDragOver}
+                    onDrop={handleScriptDrop}
                     lineIndexWidth={markerLineIndexWidthStyle}
                     reserveRehearsalGap={rehearsalMode}
                   />
@@ -5576,52 +4649,9 @@ export default function ScriptEditor({
                   onToggleSelected={(e) => {
                     if (isReorderLockedRef.current) return;
                     focusBlockContent(block.id);
-                    const isAdditiveSelection = e.ctrlKey || e.metaKey || (
-                      window.matchMedia("(max-width: 639px)").matches && selectedBlockIds.size > 0
-                    );
-                    if (e.shiftKey) {
-                      const anchorId = selectionAnchorBlockIdRef.current;
-                      const anchorIdx = anchorId ? blockIndexByIdRef.current.get(anchorId) ?? -1 : -1;
-                      const start = anchorIdx === -1 ? bIdx : Math.min(anchorIdx, bIdx);
-                      const end = anchorIdx === -1 ? bIdx : Math.max(anchorIdx, bIdx);
-                      if (anchorIdx === -1) selectionAnchorBlockIdRef.current = block.id;
-                      selectionDetachedRef.current = true;
-                      if (isAdditiveSelection) {
-                        commitBlockSelection(addSelectionRange(blocks, {
-                          selectedIds: selectedBlockIds,
-                          markerEndIds: markerEndedScopeIdsRef.current,
-                        }, start, end, isMarkerBlock));
-                      } else {
-                        commitBlockSelection(replaceSelectionRange(blocks, start, end, isMarkerBlock));
-                      }
-                      return;
-                    }
-                    if (isAdditiveSelection) {
-                      selectionDetachedRef.current = true;
-                      const next = toggleSelectionItem(blocks, {
-                        selectedIds: selectedBlockIds,
-                        markerEndIds: markerEndedScopeIdsRef.current,
-                      }, bIdx, isMarkerBlock);
-                      selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
-                        ? block.id
-                        : next.selectedIds.values().next().value ?? null;
-                      commitBlockSelection(next);
-                      return;
-                    }
-                    if (!selectedBlockIds.has(block.id) && selectionDetachedRef.current) {
-                      selectionAnchorBlockIdRef.current = block.id;
-                      commitBlockSelection(replaceSelectionItem(blocks, bIdx, isMarkerBlock));
-                      selectionDetachedRef.current = false;
-                      return;
-                    }
-                    const next = toggleSelectionItem(blocks, {
-                      selectedIds: selectedBlockIds,
-                      markerEndIds: markerEndedScopeIdsRef.current,
-                    }, bIdx, isMarkerBlock);
-                    selectionAnchorBlockIdRef.current = next.selectedIds.has(block.id)
-                      ? block.id
-                      : next.selectedIds.values().next().value ?? null;
-                    commitBlockSelection(next);
+                    selection.clickText(block.id, { shiftKey: e.shiftKey, additive: e.ctrlKey || e.metaKey || (
+                      window.matchMedia("(max-width: 639px)").matches && selection.getSnapshot().selectedIds.size > 0
+                    ) });
                   }}
                   onDeleteConfirmationChange={(active) => {
                     setDeleteConfirmingBlockIds((current) => {
@@ -5629,90 +4659,10 @@ export default function ScriptEditor({
                       return current.size === 0 ? current : new Set();
                     });
                   }}
-                  onDragStartBlock={(e) => {
-                    if (isReorderLockedRef.current) {
-                      e.preventDefault();
-                      return;
-                    }
-                    const isDraggingSelection = selectedBlockIds.has(block.id);
-                    const ids = isDraggingSelection ? Array.from(selectedBlockIds) : [block.id];
-                    if (isDraggingSelection && !canPerformSelectedBlockAction(ids)) {
-                      e.preventDefault();
-                      return;
-                    }
-                    dismissBlockConfirmations();
-                    if (!isDraggingSelection && selectedBlockIds.size > 0) {
-                      clearBlockSelection();
-                    }
-                    clearEditorFocusForDrag();
-                    setScriptDragging(true);
-                    dragButtonDownSeenRef.current = false;
-                    dragButtonReleasedRef.current = false;
-                    updateDragCountBadge(e.clientX, e.clientY, ids.length);
-                    draggingBlockId.current = block.id;
-                    draggingBlockIds.current = ids;
-                    dropHandledRef.current = false;
-                    pendingFocus.current = null;
-                    clearDragTarget();
-                    dragInvalidReasonRef.current = null;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", ids.join(","));
-                  }}
-                  onDragEndBlock={() => {
-                    const draggedIds = draggingBlockIds.current;
-                    const target = dragTargetRef.current;
-                    if (!dropHandledRef.current && draggedIds.length > 0) {
-                      if (target) {
-                        lockReorder();
-                        const moved = moveDraggedBlocks(draggedIds, target);
-                        if (!moved) unlockReorder();
-                      } else {
-                        showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
-                      }
-                    }
-                    dropHandledRef.current = false;
-                    draggingBlockId.current = null;
-                    draggingBlockIds.current = [];
-                    clearDragTarget();
-                    dragInvalidReasonRef.current = null;
-                    clearDragCountBadge();
-                    setScriptDragging(false);
-                    dismissBlockConfirmations();
-                  }}
-                  onDragOverBlock={(e) => {
-                    if (isReorderLockedRef.current) return;
-                    if (!draggingBlockId.current) return;
-                    const nextTarget = updateDragTargetFromClientY(e.clientY);
-                    if (!nextTarget) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                  }}
-                  onDropBlock={(e) => {
-                    if (isReorderLockedRef.current) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    lockReorder();
-                    dropHandledRef.current = true;
-                    const draggedIds = draggingBlockIds.current.length
-                      ? draggingBlockIds.current
-                      : e.dataTransfer.getData("text/plain").split(",").filter(Boolean);
-                    const target = updateDragTargetFromClientY(e.clientY) ?? dragTargetRef.current ?? dragTarget;
-                    draggingBlockId.current = null;
-                    draggingBlockIds.current = [];
-                    clearDragTarget();
-                    clearDragCountBadge();
-                    setScriptDragging(false);
-                    dismissBlockConfirmations();
-                    if (!target) {
-                      showReorderNotice(dragInvalidReasonRef.current ?? "移动失败：未释放到有效位置。");
-                      dragInvalidReasonRef.current = null;
-                      unlockReorder();
-                      return;
-                    }
-                    dragInvalidReasonRef.current = null;
-                    const moved = moveDraggedBlocks(draggedIds, target);
-                    if (!moved) unlockReorder();
-                  }}
+                  onDragStartBlock={(e) => beginBlockDrag(e, block.id, false)}
+                  onDragEndBlock={endBlockDrag}
+                  onDragOverBlock={handleScriptDragOver}
+                  onDropBlock={handleScriptDrop}
                   isMarkStart={isMarkStart}
                   commentCount={blockComments.length}
                   blockComments={blockComments}
@@ -5819,7 +4769,7 @@ export default function ScriptEditor({
               productionId={productionId}
               initialGroups={tagGroups}
               canEdit={canEditMetadata}
-              onGroupsChange={setTagGroups}
+              onGroupsChange={script.editTagGroups}
             />
           </div>
         </div>
@@ -6007,7 +4957,7 @@ export default function ScriptEditor({
       {pendingNonEmptyMarkerSelectionDeleteIds && (() => {
         const blockedMarkers = nonEmptyDramaturgyMarkersForBlockIds(pendingNonEmptyMarkerSelectionDeleteIds)
           .map((marker) => {
-            const index = blockIndexByIdRef.current.get(marker.id);
+            const index = script.getSnapshot().blockIndexById.get(marker.id);
             const block = index === undefined ? null : blocks[index] ?? null;
             if (!block) return null;
             const detail = block.sceneId ? sceneDetailById.get(block.sceneId) ?? null : null;
@@ -6022,7 +4972,7 @@ export default function ScriptEditor({
           })
           .filter((item): item is { id: string; captionNumber: string; captionName: string; captionDuration: string; details: MarkerDetailField[] } => item !== null);
         const scriptBlockDeleteIds = pendingNonEmptyMarkerSelectionDeleteIds.filter((id) => {
-          const index = blockIndexByIdRef.current.get(id);
+          const index = script.getSnapshot().blockIndexById.get(id);
           const block = index === undefined ? undefined : blocks[index];
           return !!block && (block.type === "rehearsal_marker" || !isMarkerBlock(block));
         });

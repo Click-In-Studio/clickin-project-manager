@@ -77,5 +77,11 @@ export function useDragCountBadge({ blocksContainerRef }: { blocksContainerRef: 
     badge.hidden = false;
   }, [clearDragCountBadge, blocksContainerRef]);
 
-  return { dragCountBadgeRef, dragButtonDownSeenRef, dragButtonReleasedRef, clearDragCountBadge, updateDragCountBadge };
+  const beginDragCountBadge = useCallback((clientX: number, clientY: number, count: number) => {
+    dragButtonDownSeenRef.current = false;
+    dragButtonReleasedRef.current = false;
+    updateDragCountBadge(clientX, clientY, count);
+  }, [updateDragCountBadge]);
+
+  return { dragCountBadgeRef, beginDragCountBadge, clearDragCountBadge, updateDragCountBadge };
 }

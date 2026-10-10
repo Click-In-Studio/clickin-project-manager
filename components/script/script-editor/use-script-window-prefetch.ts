@@ -3,16 +3,12 @@
 import { useEffect } from "react";
 import { fetchScriptWindow, fetchScriptWindowBootstrap } from "@/lib/script/script-client";
 import { isMarkerBlock } from "@/lib/script/script-marker-blocks";
-import type { Block } from "@/lib/script/script-types";
+import type { ScriptWindowRequests } from "./script-window-requests";
+import type { ScriptDocument } from "./script-document";
 import { nextIdlePrefetchRange, type ScriptWindowRange } from "@/lib/script/script-window-prefetch";
 import type { ScriptWindowBootstrap, ScriptWindowResponse } from "@/lib/script/script-window-types";
 
 type MutableRef<T> = { current: T };
-
-export type ScriptWindowRequest = {
-  controller: AbortController;
-  priority: "foreground" | "background";
-};
 
 export function useScriptWindowPrefetch({
   enabled,
@@ -20,15 +16,11 @@ export function useScriptWindowPrefetch({
   versionId,
   syncWaitingForNetwork,
   initialWindowSize,
-  blocksRef,
+  script,
+  isSaving,
   viewportRange,
   windowRangeRef,
-  manifestBlockIdsRef,
-  loadedBlockIdsRef,
-  requestRef,
-  requestGenerationRef,
-  orderRevisionRef,
-  isSyncingRef,
+  requests,
   mergeWindow,
   applyBootstrap,
 }: {
@@ -37,15 +29,11 @@ export function useScriptWindowPrefetch({
   versionId: string | null;
   syncWaitingForNetwork: boolean;
   initialWindowSize: number;
-  blocksRef: MutableRef<Block[]>;
+  script: ScriptDocument;
+  isSaving: () => boolean;
   viewportRange: ScriptWindowRange;
   windowRangeRef: MutableRef<ScriptWindowRange>;
-  manifestBlockIdsRef: MutableRef<Set<string>>;
-  loadedBlockIdsRef: MutableRef<Set<string>>;
-  requestRef: MutableRef<ScriptWindowRequest | null>;
-  requestGenerationRef: MutableRef<number>;
-  orderRevisionRef: MutableRef<string>;
-  isSyncingRef: MutableRef<boolean>;
+  requests: ScriptWindowRequests;
   mergeWindow: (body: ScriptWindowResponse) => boolean;
   applyBootstrap: (bootstrap: ScriptWindowBootstrap) => void;
 }) {
@@ -75,40 +63,39 @@ export function useScriptWindowPrefetch({
     };
     const loadNext = async () => {
       if (cancelled) return;
-      if (document.visibilityState === "hidden" || isSyncingRef.current || requestRef.current) {
+      if (document.visibilityState === "hidden" || isSaving() || requests.isBusy()) {
         schedule(document.visibilityState === "hidden" ? 5000 : 500);
         return;
       }
-      const target = nextIdlePrefetchRange(blocksRef.current.length, windowRangeRef.current, (index) => {
-        const block = blocksRef.current[index];
-        return Boolean(block && manifestBlockIdsRef.current.has(block.id)
-          && !loadedBlockIdsRef.current.has(block.id) && !isMarkerBlock(block));
+      const target = nextIdlePrefetchRange(script.getSnapshot().blocks.length, windowRangeRef.current, (index) => {
+        const block = script.getSnapshot().blocks[index];
+        return Boolean(block && script.getSnapshot().manifestIds.has(block.id)
+          && !script.getSnapshot().loadedIds.has(block.id) && !isMarkerBlock(block));
       });
       if (!target) return;
 
-      const controller = new AbortController();
-      requestRef.current = { controller, priority: "background" };
-      const generation = ++requestGenerationRef.current;
+      const request = requests.begin("background");
+      const { controller } = request;
       let retryDelay = 1000;
       try {
         const { status, body } = await fetchScriptWindow(
-          scriptId, versionId, target.start, target.limit, orderRevisionRef.current, controller.signal,
+          scriptId, versionId, target.start, target.limit, script.getSnapshot().orderRevision, controller.signal,
         );
-        if (cancelled || controller.signal.aborted || generation !== requestGenerationRef.current) return;
+        if (cancelled || controller.signal.aborted || !requests.isCurrent(request)) return;
         if (!body) retryDelay = status === 409 ? 1000 : 10_000;
-        if (status === 409 || !body || body.orderRevision !== orderRevisionRef.current || !mergeWindow(body)) {
+        if (status === 409 || !body || body.orderRevision !== script.getSnapshot().orderRevision || !mergeWindow(body)) {
           if (status !== 409 && !body) return;
           const bootstrap = await fetchScriptWindowBootstrap(
             scriptId, versionId, windowRangeRef.current.start, initialWindowSize, controller.signal,
           );
-          if (!cancelled && !controller.signal.aborted && generation === requestGenerationRef.current && bootstrap) {
+          if (!cancelled && !controller.signal.aborted && requests.isCurrent(request) && bootstrap) {
             applyBootstrap(bootstrap);
           }
         }
       } catch (error: unknown) {
         if (!(controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError"))) retryDelay = 10_000;
       } finally {
-        if (requestRef.current?.controller === controller) requestRef.current = null;
+        requests.finish(request);
         if (!cancelled) schedule(retryDelay);
       }
     };
@@ -117,11 +104,8 @@ export function useScriptWindowPrefetch({
     return () => {
       cancelled = true;
       clearSchedule();
-      if (requestRef.current?.priority === "background") {
-        requestRef.current.controller.abort();
-        requestRef.current = null;
-      }
+      requests.cancelBackground();
     };
-  }, [applyBootstrap, blocksRef, enabled, initialWindowSize, isSyncingRef, loadedBlockIdsRef, manifestBlockIdsRef, mergeWindow,
-    orderRevisionRef, requestGenerationRef, requestRef, scriptId, syncWaitingForNetwork, versionId, viewportRange, windowRangeRef]);
+  }, [applyBootstrap, script, enabled, initialWindowSize, isSaving, mergeWindow,
+    requests, scriptId, syncWaitingForNetwork, versionId, viewportRange, windowRangeRef]);
 }
