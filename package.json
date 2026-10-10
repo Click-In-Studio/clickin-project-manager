@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed:local-demo": "tsx scripts/seed-local-demo.ts",
+    "seed:local-demo": "esbuild scripts/seed-local-demo.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/seed-local-demo.mjs --log-level=warning && node node_modules/.cache/seed-local-demo.mjs",
     "db": "tsx scripts/db.ts",
     "db:fingerprint": "tsx scripts/db-fingerprint.ts",
     "db:check": "tsx scripts/db-check.ts",

@@ -1,17 +1,16 @@
 /**
- * Rebuild the local demo production for the currently signed-in developer.
+ * 为当前登录的开发者重建本地演示项目。
  *
- * Run from the repository root:
- *   npx tsx scripts/seed-local-demo.ts
+ * 在仓库根目录运行（ESM bundle 支持仅提供 import 入口的依赖）：
+ *   npm run seed:local-demo
  *
- * The script only replaces the fixed `demo-misty-harbor` production. It leaves
- * accounts and any non-demo projects untouched.
+ * 脚本只重建固定的 demo-misty-harbor 项目，保留账号和其他项目。
  */
 import path from "node:path";
 import dotenv from "dotenv";
 import { getPool } from "../lib/pg";
 import { createAnnouncement, updateAnnouncement } from "@/lib/notify/announcement-db";
-import { createProduction } from "@/lib/production/production-db";
+import { createProduction, listMyProductionsWithRoles, placeProductionForUser } from "@/lib/production/production-db";
 import {
   createEventCallTime,
   createEventReport,
@@ -70,7 +69,7 @@ async function main() {
   await createProduction(PRODUCTION_ID, "《雾港来信》音乐剧", user.id, "musical", "音乐剧");
   await pool.query(
     `UPDATE production
-     SET description = $2, language = 'zh-CN', sort_order = -100,
+     SET description = $2, language = 'zh-CN',
          script_config = script_config || $3::jsonb
      WHERE id = $1`,
     [
@@ -79,6 +78,12 @@ async function main() {
       JSON.stringify({ stageDelimOpen: "（", stageDelimClose: "）", pageLayout: "a4", textLayoutMode: "center" }),
     ],
   );
+  // 项目顺序属于个人偏好，只将演示项目置于当前开发者的活跃项目之前。
+  const firstProduction = (await listMyProductionsWithRoles(user.id, false, []))
+    .find(production => production.id !== PRODUCTION_ID && production.archivedAt === null);
+  if (firstProduction) {
+    await placeProductionForUser(user.id, PRODUCTION_ID, { anchorId: firstProduction.id, side: "before" });
+  }
   // 部门与角色不写名字。这个脚本每次跑都是先 DELETE 再 createProduction 重建
   // demo-misty-harbor，部门树和角色名单就是上一行 applyProductionTemplate 刚灌进去的
   // 那批——不存在「剧组改过名」的中间状态，按项目自己的定序取用即可。硬写模版当前的
