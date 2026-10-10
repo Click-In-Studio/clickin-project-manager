@@ -7,15 +7,15 @@
 // 判别依据：production id 是后台 uid() 生成的短字母数字串（无连字符，
 // ≤32 位），不可能与 36 位带连字符的 UUID 混淆；末段恒为会话 UUID。
 
+export const SESSION_NAMESPACE = "clickin:chat:";
+
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const SESSION_KEY_RE = new RegExp(
-  `clickin:chat:(${UUID}):(?:([a-z0-9]{1,32}):)?(${UUID})(?::|$)`,
+  `${SESSION_NAMESPACE}(${UUID}):(?:([a-z0-9]{1,32}):)?(${UUID})(?::|$)`,
   "i",
 );
 
 export const PRODUCTION_ID_RE = /^[a-z0-9]{1,32}$/i;
-
-const SESSION_NAMESPACE = "clickin:chat:";
 
 /** 所有权判定：sessionKey 是否属于该用户（网关时代的 agent:<id>: 回显前缀仍容忍）。 */
 export function sessionKeyOwnedBy(sessionKey: string, userId: string): boolean {

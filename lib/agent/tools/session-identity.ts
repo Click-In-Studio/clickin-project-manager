@@ -1,7 +1,5 @@
 import crypto from "node:crypto";
-import { PRODUCTION_ID_RE } from "./session-identity-parse";
-
-const SESSION_NAMESPACE = "clickin:chat:";
+import { PRODUCTION_ID_RE, SESSION_NAMESPACE } from "./session-identity-parse";
 
 /** 个人会话：clickin:chat:<userId>:<uuid>
  *  production 会话：clickin:chat:<userId>:<productionId>:<uuid>
