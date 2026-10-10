@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { listApprovalCenterItems } from "@/lib/approval/approval-center-db";
-import type { ApprovalCenterListParams } from "@/lib/approval/approval-center-types";
+import type { ApprovalCenterListParams, ApprovalCenterPage } from "@/lib/approval/approval-center-types";
 import { GET as approvalCenterHandler } from "@/app/api/production/[id]/approval-items/route";
 import { getPool } from "@/lib/pg";
 import { approveExpense } from "@/lib/ops/finance-db";
@@ -320,6 +320,62 @@ describe("审批中心读模型", () => {
     await expect(listApprovalCenterItems(viewerId, prodB, options({
       view: "submitted", sort: "newest", cursor: first.nextCursor!,
     }))).rejects.toThrow("cursor 与 sort 不匹配");
+  });
+});
+
+describe("审批中心超过 100 条的接口分页", () => {
+  it("混合业务、同提交时间、两种排序与筛选组合下跨页无重复或遗漏", async () => {
+    const { prodId } = await makeProduction(viewerId);
+    const expected: { id: string; source: string; sourceId: string; createdAt: string }[] = [];
+    try {
+      for (let i = 0; i < 51; i += 1) {
+        const createdAt = new Date(Date.UTC(2026, 8, 1 + Math.floor(i / 3))).toISOString();
+        const accessId = await insertApproval({
+          productionId: prodId, subjectId: viewerId, type: "resource_access",
+          status: "rejected", createdAt, note: "分页验收",
+        });
+        const expenseId = await insertExpense({
+          productionId: prodId, submittedBy: viewerId, title: "分页验收",
+          status: "rejected", createdAt,
+        });
+        expected.push(
+          { id: `approval_request:${accessId}`, source: "approval_request", sourceId: accessId, createdAt },
+          { id: `expense:${expenseId}`, source: "expense", sourceId: expenseId, createdAt },
+        );
+      }
+      for (const sort of ["oldest", "newest"] as const) {
+        const params = new URLSearchParams({
+          view: "submitted", sort, limit: "100", status: "rejected", q: "分页验收",
+          from: "2026-09-01T00:00:00.000Z", to: "2026-10-01T00:00:00.000Z",
+          type: "resource_access,expense",
+        });
+        const readPage = async () => {
+          const req = new NextRequest(`http://localhost/api/production/${prodId}/approval-items?${params}`);
+          req.cookies.set(SESSION_COOKIE, createSession({ userId: viewerId, name: "查看者", avatarUrl: null, isAdmin: false }));
+          const response = await approvalCenterHandler(req, { params: Promise.resolve({ id: prodId }) });
+          expect(response.status).toBe(200);
+          return response.json() as Promise<ApprovalCenterPage>;
+        };
+        const first = await readPage();
+        expect(first.items).toHaveLength(100);
+        expect(first.nextCursor).toBeTruthy();
+        expect(first.viewCounts.submitted).toBe(102);
+        params.set("cursor", first.nextCursor!);
+        const second = await readPage();
+        expect(second.items).toHaveLength(2);
+        expect(second.nextCursor).toBeNull();
+        expect(second.viewCounts.submitted).toBe(102);
+        const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+        const ordered = [...expected].sort((a, b) =>
+          compare(a.createdAt, b.createdAt) * (sort === "oldest" ? 1 : -1)
+          || compare(a.source, b.source) || compare(a.sourceId, b.sourceId));
+        const actual = [...first.items, ...second.items].map(item => item.id);
+        expect(actual).toEqual(ordered.map(item => item.id));
+        expect(new Set(actual).size).toBe(102);
+      }
+    } finally {
+      await cleanupProduction(prodId).catch(() => {});
+    }
   });
 });
 
