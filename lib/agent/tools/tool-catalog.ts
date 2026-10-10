@@ -183,6 +183,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     triggers: ["删角色", "删掉这个角色", "删除人物"], en: "delete characters",
     examples: ["把这个角色删掉", "删除多余的人物"] },
   // ── 剧本正文族（读面 P1）：页码粗着陆 + 相对窗口微调是刻意的组合拳
+  // #461 的局部读取优化不改变召回范围：搜索给命中摘要，读工具给指定范围正文。
   { name: "production.script_read_section", family: "production.script", scope: "production", oneliner: "整段读取一场/一章的剧本正文（含台词块 id）",
     triggers: ["读剧本", "剧本内容", "这一场的台词", "整场台词", "剧本正文", "台词内容", "看剧本", "读一场"], en: "read script section blocks dialogue lines",
     examples: ["把第二场的剧本读出来", "看看这一场都有什么台词", "读一下第一幕开头那场的正文"] },

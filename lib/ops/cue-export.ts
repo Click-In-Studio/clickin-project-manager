@@ -1,7 +1,14 @@
-import type { Block, Character } from "../script/script-types";
+import type { Block } from "../script/script-types";
 import type { Cue } from "./cue-types";
 
 export type TextSegment = { text: string; underline?: boolean };
+
+export type CuePositionContext = {
+  blockMap: ReadonlyMap<string, Block>;
+  charMap: ReadonlyMap<string, string>;
+  blockIndexMap: ReadonlyMap<string, number>;
+  nextBlockIdById: ReadonlyMap<string, string>;
+};
 
 const CTX = 15;
 
@@ -33,7 +40,7 @@ function selectedText(content: string, start: number, end: number): string {
   return clean.length > 20 ? clean.slice(0, 20) + "…" : clean;
 }
 
-function charPrefix(block: Block, charMap: Map<string, string>): string {
+function charPrefix(block: Block, charMap: ReadonlyMap<string, string>): string {
   if (block.type === "stage") return "";
   const first = block.characterIds[0];
   return first ? (charMap.get(first) ?? "") + "：" : "";
@@ -54,19 +61,17 @@ function seg(text: string, underline?: boolean): TextSegment {
  */
 export function formatCuePosition(
   cue: Cue,
-  blocks: Block[],
-  characters: Character[],
+  context: CuePositionContext,
 ): TextSegment[] {
-  const charMap = new Map(characters.map((c) => [c.id, c.name]));
-  const blockMap = new Map(blocks.map((b) => [b.id, b]));
+  const { charMap, blockMap, nextBlockIdById } = context;
 
   const { start, end } = cue;
 
   // ── Gap ──────────────────────────────────────────────────────────────────────
   if (start.kind === "gap") {
-    const idx = blocks.findIndex((b) => b.id === start.afterBlockId);
-    const before = idx >= 0 ? blocks[idx] : null;
-    const after = idx >= 0 && idx + 1 < blocks.length ? blocks[idx + 1] : null;
+    const before = start.afterBlockId !== null ? blockMap.get(start.afterBlockId) : null;
+    const nextId = start.afterBlockId !== null ? nextBlockIdById.get(start.afterBlockId) : undefined;
+    const after = nextId ? blockMap.get(nextId) : null;
     const parts: TextSegment[] = [];
     if (before) parts.push(seg(charPrefix(before, charMap) + truncBefore(before.content, before.content.length)));
     parts.push(seg(" ↓ "));
@@ -119,8 +124,8 @@ export function formatCuePosition(
     }
   } else {
     // end is gap — use the block that follows the gap
-    const idx = blocks.findIndex((b) => b.id === end.afterBlockId);
-    const after = idx >= 0 && idx + 1 < blocks.length ? blocks[idx + 1] : null;
+    const nextId = end.afterBlockId !== null ? nextBlockIdById.get(end.afterBlockId) : undefined;
+    const after = nextId ? blockMap.get(nextId) : null;
     if (after) {
       endPrefix = charPrefix(after, charMap);
       endAfter = truncAfter(after.content, 0);

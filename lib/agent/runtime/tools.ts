@@ -540,7 +540,8 @@ export const DEFS: ToolDefinition[] = [
 
   // ── production.script_* 读面（剧本正文，lib/agent/tools/script-tools.ts）─────────
   // 正文以「剧本方言」文本形态输出（[b:<id>] 行头携带块 id，lib/script/script-dialect.ts）；
-  // 页码是估算值——定位组合拳是「页码粗着陆 + 相对窗口微调」。写面（P2）另批上线。
+  // 页码是估算值——定位组合拳是「页码粗着陆 + 相对窗口微调」。
+  // #461：四个正文读工具共用局部读口；参数、权限门与方言输出契约保持不变。
   {
     mcpName: "production.script_dialect_ref",
     description: "获取剧本正文方言的完整说明：[b:]/[new]/[m:] 头标、[台]/[白]/[歌]/[显名]/[提示] 标记、续行与转义规则（EN: script dialect syntax reference）。需要理解或改写剧本正文而语境中没有方言说明时，先调用本工具。",

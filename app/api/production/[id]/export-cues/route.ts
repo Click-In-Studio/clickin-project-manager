@@ -3,19 +3,18 @@ import { getSession } from "@/lib/account/session";
 import { TOKEN_COOKIE } from "@/lib/platform/feishu/feishu-auth";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { listCues } from "@/lib/ops/cue-db";
-import { loadProduction } from "@/lib/script/script-state-db";
+import { loadCueExportContext } from "@/lib/ops/cue-export-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { canAccessNode } from "@/lib/perm/grant-template";
 import { resolveWikiToSheet, getFirstSheetId, writeSheetData, type CellValue } from "@/lib/platform/feishu/feishu-sheet";
 import { formatCuePosition } from "@/lib/ops/cue-export";
 import type { CueAnchor } from "@/lib/ops/cue-types";
-import { textBlocksWithMarkerOwnership } from "@/lib/script/script-marker-blocks";
 
 function sseFrame(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`;
 }
 
-function anchorSortKey(anchor: CueAnchor, blockIndexMap: Map<string, number>): number {
+function anchorSortKey(anchor: CueAnchor, blockIndexMap: ReadonlyMap<string, number>): number {
   if (anchor.kind === "gap") {
     const i = anchor.afterBlockId !== null ? (blockIndexMap.get(anchor.afterBlockId) ?? -1) : -1;
     return (i + 1) * 1_000_000;
@@ -68,16 +67,11 @@ export async function POST(
         push("log", "正在加载剧本数据…");
         const versionId = await getActiveVersionId(productionId);
         if (!versionId) { push("error", "制作无可用版本"); controller.close(); return; }
-        const prod = await loadProduction(productionId, versionId);
-        if (!prod) { push("error", "制作不存在"); controller.close(); return; }
-        const blocks = textBlocksWithMarkerOwnership(prod.state.blocks);
-        const { characters } = prod.state;
-
         push("log", `正在加载 ${cueListIds.length} 个 Cue 表…`);
         const allCues = (await Promise.all(cueListIds.map((id) => listCues(id)))).flat();
         push("log", `已加载 ${allCues.length} 个 Cue`);
-
-        const blockIndexMap = new Map(blocks.map((b, i) => [b.id, i]));
+        const context = await loadCueExportContext(versionId, allCues);
+        const { blockIndexMap } = context;
         const sorted = [...allCues].sort(
           (a, b) =>
             anchorSortKey(a.start, blockIndexMap) - anchorSortKey(b.start, blockIndexMap),
@@ -98,7 +92,7 @@ export async function POST(
             cue.number,
             cue.name,
             cue.content,
-            formatCuePosition(cue, blocks, characters),
+            formatCuePosition(cue, context),
           ]);
         }
 

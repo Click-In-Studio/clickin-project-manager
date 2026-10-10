@@ -50,6 +50,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-character_propose_create": "提议新建角色",
   "production-character_propose_update": "提议修改角色",
   "production-character_propose_delete": "提议删除角色",
+  // #461：正文读工具改为局部读取，四个操作标签仍与注册表、召回目录逐项对应。
   "production-script_read_section": "阅读剧本段落",
   "production-script_read_window": "查看剧本上下文",
   "production-script_search": "搜索剧本台词",
