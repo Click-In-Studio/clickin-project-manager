@@ -708,6 +708,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 ```bash
 npm test                             # 跑全部测试（vitest run，约 5 分钟）
 npm test -- tests/perm               # 只跑一个直接受影响域
+npm test -- --project ui             # 无需数据库的组件、headless 编辑器和 SSR 测试
 npm test -- --reporter=verbose       # 显示每条测试名称
 TEST_SEED=1234567890 npm test        # 用固定 seed 复现 CI 失败
 ```
@@ -868,6 +869,22 @@ const res = await listCueListsHandler(req(`/api/production/${prodId}/cuelists`, 
 - 工厂会补齐线上并不存在的前提行，「缺行」分支永远测不到。凡是读路径 JOIN 了「后加的可选配置表」，专门写一条显式 DELETE 掉那行的用例，并先连生产库数一下 `count(*) FILTER (WHERE x.id IS NULL)`（#263：`escalateExpiredApprovals` INNER JOIN 后加的表，线上 8 个演出全缺行，超时升级从未生效过）。可选配置缺行的语义应是「按列默认值」（LEFT JOIN + COALESCE），不是功能静默失效。
 - 修复点在管线上游时，先找出下游还有哪几层会掩盖它（JS 侧 `dedup()` 替 SQL 兜住了 `DISTINCT ON`），把规模推到那些层兜不住的地方。反证要红得恰好是目标那条，全红多半是反证本身写坏了。
 - 反证「撤掉门/字段看测试变红」时：**先 commit 再反证**，改完 `git checkout -- <file>` 还原。不要用 `git stash`（改动已 commit 时 stash 不创建条目、紧接着的 pop 会弹出别人的旧 stash 污染工作区）；对未提交的改动 `git checkout --` 是整文件抹除。
+
+### 11.7 组件、编辑器与 SSR 测试（#129）
+
+组件行为测试按域放 `tests/<域>/*.test.tsx`，需要 DOM 的文件首行写 `// @vitest-environment jsdom`。headless tiptap 测试可继续用 `.test.ts` 加同一声明；纯服务端渲染、静态契约与 Playwright 测试保持 node 环境，不按 `.tsx` 扩展名强制 jsdom。
+
+渲染沿用 `react-dom/client` 的 `createRoot` + React `act`，事件用元素方法或原生 `dispatchEvent`，不引入 testing-library / msw。fetch 用 `vi.stubGlobal`，`next/navigation` 用 `vi.mock`。断言实际行为：prop 更新后的显示、回调参数、请求目标、保存与重载的结果。测试后在 `act` 内卸载 root、移除容器，恢复本文件安装的 globals / mocks；替身只覆盖本次不验证的边界。
+
+Vitest 配置只有 `vitest.config.ts` 一份。`npm test` 跑所有测试；`npm test -- --project ui` 只跑 `.test.tsx`、声明 jsdom 的 `.test.ts` 与 `*-ssr.test.ts`，不初始化数据库，但仍执行共享 setup。其余测试属于 `db` 项目，由它执行 DB / migration 生命周期。需要真数据库的组件集成测试放 `.test.ts` 且不声明 jsdom，不能混进无需 DB 的项目。新增 / 修改文件仍可在命令末尾指定路径。
+
+共享 setup 会把 React 的缺失 / 重复 key、受控与非受控输入切换、渲染期间更新另一组件的错误警告升级为失败。警告先收集，测试收尾时裁决，避免在 `console.error` 里抛错后被 React 捕获而假绿；普通业务失败日志不在这条护栏内。不要通过屏蔽 console 绕过护栏；专门验证护栏的反例使用独立子运行器，让真实 React 发出警告并检查非零退出。
+
+jsdom 的边界：
+
+- 没有真实布局，不能证明定位、裁切、滚动或拖拽落点；真实几何与交互用 Playwright / 人工验证，Safari 特有行为用实际内核验证。
+- Next App Router 的 document 监听器拓扑与 `createRoot(container)` 不同，`stopPropagation` 在 jsdom 成功不代表线上成立（§13.3）。
+- jsdom 提供了 `window`，不能证明 SSR 安全。`*-ssr.test.ts` 保持 node 环境，先确认没有 `window`，用 `renderToString` / `renderToStaticMarkup` 覆盖实际渲染分支；已有登录页回归是范例，不为所有页面制造通用 props 或批量快照。
 
 ---
 

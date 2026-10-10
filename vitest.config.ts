@@ -1,5 +1,13 @@
 import { defineConfig, configDefaults } from "vitest/config";
 import path from "path";
+import { readdirSync, readFileSync } from "node:fs";
+
+// 组件、headless 编辑器与 SSR 测试无需数据库；环境仍由各文件声明。
+const componentTestFiles = readdirSync("tests", { recursive: true })
+  .filter((file): file is string => typeof file === "string" && /\.test\.tsx?$/.test(file))
+  .map(file => `tests/${file}`)
+  .filter(file => file.endsWith(".test.tsx") || file.endsWith("-ssr.test.ts")
+    || /^\/\/ @vitest-environment jsdom/m.test(readFileSync(file, "utf8")));
 
 export default defineConfig({
   resolve: {
@@ -20,8 +28,18 @@ export default defineConfig({
     // .sql 文件一条 query** 打进去的，生产的 15s 阈值是按单条业务语句定的，不适用。
     // 不设 0——超时闸在测试里也该是活的（单条测试另有 testTimeout 兜底）。
     env: { PG_STATEMENT_TIMEOUT_MS: "60000" },
-    globalSetup: "./tests/_support/global-setup.ts",
     setupFiles: ["./tests/_support/setup.ts"],
+    projects: [
+      { extends: true, test: { name: "ui", include: componentTestFiles } },
+      {
+        extends: true,
+        test: {
+          name: "db",
+          exclude: [...configDefaults.exclude, ".next/**", ...componentTestFiles],
+          globalSetup: "./tests/_support/global-setup.ts",
+        },
+      },
+    ],
     // All test files share one DB — parallel execution causes cross-file membership pollution
     fileParallelism: false,
   },

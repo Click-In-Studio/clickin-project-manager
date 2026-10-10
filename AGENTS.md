@@ -76,6 +76,9 @@
 - 新 API route 必须有 401 / 非成员 403 / 只持单枚键 403 用例；不靠 `isAdmin: true` 过门。
 - 模块级单例 / 注册表 / provider 注入必须另立静态断言盯注册点（单测自注册会 mock 掉接线）。
 - 护栏用例必须验证它会红：可选表 JOIN 专测「缺行」分支；反证先 commit 再改、`git checkout --` 还原，不用 `git stash`。
+- 组件行为测试按域放 `tests/<域>/*.test.tsx`；需要 DOM 的首行声明 `// @vitest-environment jsdom`。沿用 `createRoot` + `act`、原生 DOM 事件，不引 testing-library / msw；fetch 用 `vi.stubGlobal`、导航用 `vi.mock`，测试后卸载 root 并恢复 globals / mocks（§11.7）。
+- 测试统一走 `npm test`；无需 DB 的组件、jsdom 编辑器与 `*-ssr.test.ts` 可用 `npm test -- --project ui`，不因扩展名强制 jsdom。React key / 受控切换 / 渲染期更新警告会使 jsdom 测试失败；预期业务错误不屏蔽这条护栏。
+- jsdom 不证明真实布局、拖拽落点、Safari 或 Next 的 document 事件传播；这些走浏览器 / 人工。SSR 安全在 node 环境测，确认没有 `window`，覆盖实际渲染分支。
 - 源码不落字面 `\x00`；`git diff --stat` 见文本文件 `Bin` 立即排查。
 
 ## 7. UI（§13.4）
