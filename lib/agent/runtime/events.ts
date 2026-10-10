@@ -118,7 +118,7 @@ type Listener = (seq: number) => void;
 
 /**
  * 进程级 LISTEN 单例：一条专用连接，按 sessionId 分发通知。
- * 连接断开时自动重连；订阅者若错过通知也不会丢事件——消费侧按 seq 游标取行，
+ * 连接断开后由新订阅重新建连；订阅者若错过通知也不会丢事件——消费侧按 seq 游标取行，
  * 通知只是"该去取了"的提示。
  */
 class EventListener {
@@ -190,4 +190,9 @@ const g = global as typeof globalThis & { __agentEventListener?: EventListener }
 export function subscribeSessionEvents(sessionId: string, fn: Listener): Promise<() => void> {
   if (!g.__agentEventListener) g.__agentEventListener = new EventListener(getPool());
   return g.__agentEventListener.subscribe(sessionId, fn);
+}
+
+/** 决议按卡片寻址，共享 LISTEN 连接，但不接收正文与子任务进度通知。 */
+export function subscribeDecisionEvents(kind: "approval" | "question", id: string, fn: () => void): Promise<() => void> {
+  return subscribeSessionEvents(`${kind}:${id}`, fn);
 }

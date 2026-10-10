@@ -7,6 +7,7 @@ import type { NextRequest } from "next/server";
 import { SessionBusyError } from "./service";
 import { startRun } from "./client";
 import { readEventsSince, subscribeSessionEvents } from "./events";
+import { EVENT_FALLBACK_MS, EventWakeup } from "./event-wakeup";
 import { pageKeyForLabel } from "@/lib/agent/agent-page-context";
 import { getPool } from "@/lib/pg";
 import type { ApprovalInfo, StreamLine } from "@/lib/agent/chat/stream-reducer";
@@ -50,53 +51,51 @@ export function createRunnerStreamResponse(
 ): Response {
   const encoder = new TextEncoder();
   let closed = false;
-  let unsubscribe: (() => void) | null = null;
+  let cleanup = () => {};
 
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: unknown) => {
+      const wakeup = new EventWakeup(req.signal);
+      const sentApprovals = new Set<string>();
+      let unsubscribe: (() => void) | undefined;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      const send = (obj: StreamLine | { type: "session"; key: string; runId: string }) => {
         if (closed) return;
+        // attach 补发的待答卡可能也落在订阅后补读的事件中，只展示一次。
+        if (obj.type === "approval" && obj.approval) {
+          if (sentApprovals.has(obj.approval.id)) return;
+          sentApprovals.add(obj.approval.id);
+        }
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       };
-      const finish = (obj?: unknown) => {
+      cleanup = () => {
+        unsubscribe?.();
+        clearInterval(heartbeat);
+        wakeup.close();
+        req.signal.removeEventListener("abort", onClientGone);
+      };
+      const finish = (obj?: StreamLine) => {
         if (closed) return;
         if (obj) send(obj);
         closed = true;
-        unsubscribe?.();
+        cleanup();
         controller.close();
       };
-      const onClientGone = () => {
-        closed = true;
-        unsubscribe?.();
-      };
-      req.signal.addEventListener("abort", onClientGone);
-      if (req.signal.aborted) onClientGone();
+      const onClientGone = () => finish();
+      req.signal.addEventListener("abort", onClientGone, { once: true });
 
       try {
+        if (req.signal.aborted || closed) {
+          finish();
+          return;
+        }
         send({ type: "ping" });
-        // 游标：发消息时从当前末尾起（本轮事件全部可见）；attach 同样从末尾起
+        // 心跳独立于读库与兜底节拍，通知频繁时也不会延后。
+        heartbeat = setInterval(() => send({ type: "ping" }), 15_000);
+        // 保留 attach 只看当前末尾之后事件的语义；订阅完成后立即补读这个间隙。
         let cursor = await maxSeq(sessionKey);
-        let terminal = false;
-        let draining = Promise.resolve();
-        const pump = () => {
-          draining = draining.then(async () => {
-            if (closed || terminal) return;
-            const rows = await readEventsSince(sessionKey, cursor);
-            for (const row of rows) {
-              cursor = row.seq;
-              const line = row.line;
-              if (line.type === "final" || line.type === "aborted" || line.type === "error") {
-                terminal = true;
-                finish(line);
-                return;
-              }
-              send(line);
-            }
-          }).catch((err) => {
-            console.error("[agent-runtime] stream pump error:", err);
-          });
-        };
-        unsubscribe = await subscribeSessionEvents(sessionKey, () => pump());
+        unsubscribe = await subscribeSessionEvents(sessionKey, wakeup.wake);
+        if (closed) return;
 
         if (options.startRun) {
           const started = await options.startRun();
@@ -105,31 +104,40 @@ export function createRunnerStreamResponse(
           const state = await currentRunStatus(sessionKey);
           if (state === "compacting") send({ type: "compacting", active: true });
           if (state === null) {
-            terminal = true;
             finish({ type: "final", text: "", fallback: true });
             return;
           }
           for (const line of await pendingApprovalLines(sessionKey)) send(line);
         }
 
-        // 心跳 + 轮询兜底（NOTIFY 丢失/连接抖动时游标照样推进）
-        let lastPing = Date.now();
-        while (!closed && !terminal) {
-          await new Promise((r) => setTimeout(r, 1000));
-          pump();
-          if (Date.now() - lastPing >= 15_000) {
-            lastPing = Date.now();
-            send({ type: "ping" });
+        // 单循环串行读库；读库期间的通知只记一次待补读，不追加查询任务。
+        while (!closed) {
+          const rows = await readEventsSince(sessionKey, cursor);
+          for (const row of rows) {
+            if (closed) break;
+            cursor = row.seq;
+            const line = row.line;
+            if (line.type === "final" || line.type === "aborted" || line.type === "error") {
+              finish(line);
+              return;
+            }
+            send(line);
           }
+          if (!closed) await wakeup.wait(EVENT_FALLBACK_MS);
         }
-        await draining;
       } catch (err) {
         if (err instanceof SessionBusyError) {
           finish({ type: "error", error: err.message });
           return;
         }
         finish({ type: "error", error: err instanceof Error ? err.message : "Agent run failed" });
+      } finally {
+        cleanup();
       }
+    },
+    cancel() {
+      closed = true;
+      cleanup();
     },
   });
 
