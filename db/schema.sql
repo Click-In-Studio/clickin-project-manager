@@ -776,13 +776,29 @@ CREATE TABLE IF NOT EXISTS wiki (
   mentions      JSONB       NOT NULL DEFAULT '[]',
   created_by    UUID        NULL REFERENCES app_user(id),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT wiki_id_production_uniq UNIQUE (id, production_id)
 );
 
 CREATE INDEX IF NOT EXISTS wiki_production_idx ON wiki (production_id);
 CREATE INDEX IF NOT EXISTS wiki_mentions_idx   ON wiki USING GIN (mentions);
 CREATE INDEX IF NOT EXISTS wiki_title_trgm_idx ON wiki USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS wiki_body_trgm_idx  ON wiki USING GIN (body gin_trgm_ops);
+
+-- 当前账号的最近访问；只保存文档与时间，不保存设备或阅读位置。
+CREATE TABLE IF NOT EXISTS wiki_recent_visit (
+  id             TEXT PRIMARY KEY,
+  user_id        UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  production_id  TEXT NOT NULL,
+  wiki_id        UUID NOT NULL,
+  last_viewed_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (user_id, production_id, wiki_id),
+  FOREIGN KEY (wiki_id, production_id)
+    REFERENCES wiki(id, production_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS wiki_recent_visit_order_idx
+  ON wiki_recent_visit (user_id, production_id, last_viewed_at DESC, wiki_id DESC);
+CREATE INDEX IF NOT EXISTS wiki_recent_visit_wiki_idx ON wiki_recent_visit (wiki_id, production_id);
 
 -- 软链接（原 wiki_alias，#358）已随 node 树统一（#420）合入 node 表的
 -- kind='link' 节点；#358 的全部不变量（叶子性、无权限列的物理保证、本地可枚举

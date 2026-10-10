@@ -108,19 +108,23 @@ export async function canViewWiki(
 
 /**
  * 列表过滤：返回该用户可见的 wiki id 集合（或 wildcard=true 表示全可见）。
- * 与 canViewWiki 同语义的集合式实现，供文档树列表/目录/搜索使用。
+ * 与 canViewWiki 同语义的集合式实现；个人历史传候选集，避免枚举整个项目。
  */
 export async function listVisibleWikiIds(
   actor: GrantActor,
   productionId: string,
+  candidateIds?: string[],
 ): Promise<{ wildcard: boolean; ids: Set<string> }> {
+  if (candidateIds?.length === 0) return { wildcard: false, ids: new Set() };
   if (actor.isAdmin || actor.isOwner) return { wildcard: true, ids: new Set() };
   const pool = getPool();
   const ids = new Set<string>();
 
   const granted = await listGrantedResourceIds(actor.userId, productionId, "wiki", "*", "view");
   if (granted.wildcard) return { wildcard: true, ids: new Set() };
-  for (const id of granted.ids) ids.add(id);
+  for (const id of granted.ids) {
+    if (!candidateIds || candidateIds.includes(id)) ids.add(id);
+  }
 
   // 与 canViewWiki 同源：is_public 这条让渡受 policy.wiki_public_enabled 管。
   // 单实例判定与列表判定**必须同读**——分叉即「列表看得见、点进去 403」（批D 教训）。
@@ -129,13 +133,13 @@ export async function listVisibleWikiIds(
   const structural = await pool.query<{ id: string }>(
     `SELECT w.id::text AS id FROM wiki w
      LEFT JOIN node n ON n.wiki_id = w.id
-     WHERE w.production_id = $1 AND (
+     WHERE w.production_id = $1 AND ($4::uuid[] IS NULL OR w.id = ANY($4::uuid[])) AND (
        ($3 AND n.is_public)
        OR EXISTS (SELECT 1 FROM node_dept_share ns
                   JOIN production_dept_member pdm ON pdm.dept_id = ns.dept_id
                   WHERE ns.node_id = n.id AND pdm.user_id = $2::uuid AND pdm.production_id = $1)
      )`,
-    [productionId, actor.userId, wikiPublicOn],
+    [productionId, actor.userId, wikiPublicOn, candidateIds ?? null],
   );
   for (const r of structural.rows) ids.add(r.id);
 
@@ -164,23 +168,31 @@ export async function listVisibleWikiIds(
        WHERE pe.production_id = $1
      )
      SELECT DISTINCT e.wiki_id::text AS id FROM edges e
-     WHERE (e.published_at IS NOT NULL AND $2)
+     WHERE ($10::uuid[] IS NULL OR e.wiki_id = ANY($10::uuid[])) AND (
+          (e.published_at IS NOT NULL AND $2)
         OR ($3 OR e.report_id = ANY($4::text[]))
         OR ($5 OR e.report_id = ANY($6::text[]))
         OR ($7 OR e.event_id = ANY($8::text[]))
         OR EXISTS (SELECT 1 FROM event_participant ep
                    WHERE ep.event_id = e.event_id AND ep.user_id = $9::uuid
-                     AND ep.department_id IS NOT NULL)`,
+                     AND ep.department_id IS NOT NULL))`,
     [productionId, domainView,
      reportMeta.wildcard, reportMeta.ids,
      reportPub.wildcard, reportPub.ids,
      eventReports.wildcard, eventReports.ids,
-     actor.userId],
+     actor.userId, candidateIds ?? null],
   );
   for (const r of mounted.rows) ids.add(r.id);
 
   // 挂载让渡（集合式，与 canViewWiki 的单点分支同读共享核——不得分叉）
-  const conceded = await mountConcededNodeIds(actor, productionId, { kind: "wiki" });
+  const candidateNodes = candidateIds
+    ? (await pool.query<{ id: string }>(
+      `SELECT id FROM node WHERE production_id = $1 AND wiki_id = ANY($2::uuid[])`,
+      [productionId, candidateIds],
+    )).rows.map(row => row.id)
+    : undefined;
+  const conceded = await mountConcededNodeIds(actor, productionId,
+    candidateNodes ? { nodeIds: candidateNodes } : { kind: "wiki" });
   if (conceded.size > 0) {
     const concededWikis = await pool.query<{ id: string }>(
       `SELECT wiki_id::text AS id FROM node

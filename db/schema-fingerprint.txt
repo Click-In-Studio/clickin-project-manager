@@ -1171,6 +1171,11 @@ COL|wiki_proposal|tags|ARRAY|_text|YES|
 COL|wiki_proposal|target_wiki_id|uuid|uuid|YES|
 COL|wiki_proposal|title|text|text|YES|
 COL|wiki_proposal|tool_call_id|text|text|NO|
+COL|wiki_recent_visit|id|text|text|NO|
+COL|wiki_recent_visit|last_viewed_at|timestamp with time zone|timestamptz|NO|
+COL|wiki_recent_visit|production_id|text|text|NO|
+COL|wiki_recent_visit|user_id|uuid|uuid|NO|
+COL|wiki_recent_visit|wiki_id|uuid|uuid|NO|
 COL|wiki_revision|author_user_id|uuid|uuid|YES|
 COL|wiki_revision|body|text|text|NO|
 COL|wiki_revision|created_at|timestamp with time zone|timestamptz|NO|now()
@@ -1810,12 +1815,17 @@ CON|wiki_proposal|wiki_proposal_production_tool_call_uniq|UNIQUE (production_id,
 CON|wiki_proposal|wiki_proposal_proposed_by_fkey|FOREIGN KEY (proposed_by) REFERENCES app_user(id)
 CON|wiki_proposal|wiki_proposal_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'applied'::text, 'blocked_no_permission'::text, 'blocked_business_rule'::text, 'rejected'::text])))
 CON|wiki_proposal|wiki_proposal_target_wiki_id_fkey|FOREIGN KEY (target_wiki_id) REFERENCES wiki(id) ON DELETE SET NULL
+CON|wiki_recent_visit|wiki_recent_visit_pkey|PRIMARY KEY (id)
+CON|wiki_recent_visit|wiki_recent_visit_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|wiki_recent_visit|wiki_recent_visit_user_id_production_id_wiki_id_key|UNIQUE (user_id, production_id, wiki_id)
+CON|wiki_recent_visit|wiki_recent_visit_wiki_id_production_id_fkey|FOREIGN KEY (wiki_id, production_id) REFERENCES wiki(id, production_id) ON DELETE CASCADE
 CON|wiki_revision|wiki_revision_author_user_id_fkey|FOREIGN KEY (author_user_id) REFERENCES app_user(id)
 CON|wiki_revision|wiki_revision_pkey|PRIMARY KEY (id)
 CON|wiki_revision|wiki_revision_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
 CON|wiki_tag|wiki_tag_pkey|PRIMARY KEY (wiki_id, tag)
 CON|wiki_tag|wiki_tag_wiki_id_fkey|FOREIGN KEY (wiki_id) REFERENCES wiki(id) ON DELETE CASCADE
 CON|wiki|wiki_created_by_fkey|FOREIGN KEY (created_by) REFERENCES app_user(id)
+CON|wiki|wiki_id_production_uniq|UNIQUE (id, production_id)
 CON|wiki|wiki_pkey|PRIMARY KEY (id)
 CON|wiki|wiki_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 ENUM|block_type|dialogue,stage,lyric,chapter_marker,scene_marker,rehearsal_marker
@@ -2193,11 +2203,16 @@ IDX|wiki_entity_link|wiki_entity_link_entity_idx|CREATE INDEX wiki_entity_link_e
 IDX|wiki_entity_link|wiki_entity_link_pkey|CREATE UNIQUE INDEX wiki_entity_link_pkey ON public.wiki_entity_link USING btree (wiki_id, entity_type, entity_id, origin)
 IDX|wiki_proposal|wiki_proposal_pkey|CREATE UNIQUE INDEX wiki_proposal_pkey ON public.wiki_proposal USING btree (id)
 IDX|wiki_proposal|wiki_proposal_production_tool_call_uniq|CREATE UNIQUE INDEX wiki_proposal_production_tool_call_uniq ON public.wiki_proposal USING btree (production_id, tool_call_id)
+IDX|wiki_recent_visit|wiki_recent_visit_order_idx|CREATE INDEX wiki_recent_visit_order_idx ON public.wiki_recent_visit USING btree (user_id, production_id, last_viewed_at DESC, wiki_id DESC)
+IDX|wiki_recent_visit|wiki_recent_visit_pkey|CREATE UNIQUE INDEX wiki_recent_visit_pkey ON public.wiki_recent_visit USING btree (id)
+IDX|wiki_recent_visit|wiki_recent_visit_user_id_production_id_wiki_id_key|CREATE UNIQUE INDEX wiki_recent_visit_user_id_production_id_wiki_id_key ON public.wiki_recent_visit USING btree (user_id, production_id, wiki_id)
+IDX|wiki_recent_visit|wiki_recent_visit_wiki_idx|CREATE INDEX wiki_recent_visit_wiki_idx ON public.wiki_recent_visit USING btree (wiki_id, production_id)
 IDX|wiki_revision|wiki_revision_pkey|CREATE UNIQUE INDEX wiki_revision_pkey ON public.wiki_revision USING btree (id)
 IDX|wiki_revision|wiki_revision_wiki_idx|CREATE INDEX wiki_revision_wiki_idx ON public.wiki_revision USING btree (wiki_id, created_at)
 IDX|wiki_tag|wiki_tag_pkey|CREATE UNIQUE INDEX wiki_tag_pkey ON public.wiki_tag USING btree (wiki_id, tag)
 IDX|wiki_tag|wiki_tag_tag_idx|CREATE INDEX wiki_tag_tag_idx ON public.wiki_tag USING btree (tag)
 IDX|wiki|wiki_body_trgm_idx|CREATE INDEX wiki_body_trgm_idx ON public.wiki USING gin (body gin_trgm_ops)
+IDX|wiki|wiki_id_production_uniq|CREATE UNIQUE INDEX wiki_id_production_uniq ON public.wiki USING btree (id, production_id)
 IDX|wiki|wiki_mentions_idx|CREATE INDEX wiki_mentions_idx ON public.wiki USING gin (mentions)
 IDX|wiki|wiki_pkey|CREATE UNIQUE INDEX wiki_pkey ON public.wiki USING btree (id)
 IDX|wiki|wiki_production_idx|CREATE INDEX wiki_production_idx ON public.wiki USING btree (production_id)
