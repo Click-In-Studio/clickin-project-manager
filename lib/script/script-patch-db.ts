@@ -1,3 +1,5 @@
+import { conditionScriptPatchInTx } from "./script-patch-basis-db";
+import type { ScriptPatchBasis } from "./script-patch-basis";
 import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import type { Block, BlockType, Character, Scene, MarkerMeta } from "./script-types";
@@ -152,6 +154,7 @@ export async function applyPatchToDB(
   productionId: string,
   versionId: string,
   patch: ScriptPatch,
+  basis?: ScriptPatchBasis,
 ): Promise<void> {
   if (!patch.blockOps.length && !patch.charOps.length && !patch.sceneOps.length) return;
 
@@ -198,6 +201,9 @@ export async function applyPatchToDB(
       "SELECT cv.character_id, cv.name, cv.sort_order, cv.is_aggregate FROM character_version cv WHERE cv.version_id = $1 ORDER BY cv.sort_order",
       [versionId]
     );
+
+    // 外部编辑请求在同一锁内校验旧基线；站内直接写调用不携带客户端基线。
+    if (basis) patch = await conditionScriptPatchInTx(client, versionId, patch, basis, blockRows.rows.map(r => r.block_id));
 
     // Working ordered block list (mutated as ops are applied)
     const txBlocks: TxBlock[] = blockRows.rows.map((r, position) => ({

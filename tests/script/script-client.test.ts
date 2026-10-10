@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { ScriptPatchConflict } from "@/lib/script/script-patch-basis";
 import { BASE_PATH } from "@/lib/base-path";
 import {
   fetchScriptState, loadScriptEnvelope, patchScript, putScriptConfig,
@@ -44,11 +45,13 @@ describe("剧本状态", () => {
     expect(lastCall()[0]).toBe(`${BASE_PATH}/api/script/${S}`);
   });
 
-  it("patchScript 回序号或 null；putScriptConfig 回 ok", async () => {
+  it("patchScript 区分冲突与网络失败；putScriptConfig 回 ok", async () => {
     respond(200, { ok: true, serverSeq: 7 });
     expect(await patchScript(S, V, { blockOps: [] })).toEqual({ ok: true, serverSeq: 7 });
     expect(lastCall()).toEqual([`${BASE_PATH}/api/script/${S}?v=${V}`, expect.objectContaining({ method: "PATCH", body: JSON.stringify({ blockOps: [] }) })]);
     respond(409);
+    await expect(patchScript(S, V, {})).rejects.toBeInstanceOf(ScriptPatchConflict);
+    respond(503);
     expect(await patchScript(S, V, {})).toBe(null);
     respond(200);
     expect(await putScriptConfig(S, null, { useRehearsalMarks: true } as never)).toBe(true);

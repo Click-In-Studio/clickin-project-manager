@@ -496,7 +496,7 @@ describe("head-only 写保护 — 历史版本只读", () => {
 
   const patchWith = (v: string) => patchScriptHandler(
     req(`/api/script/${headProdId}?v=${v}`, {
-      method: "PATCH", body: JSON.stringify({ clientSeq: 1, blockOps: [], charOps: [], sceneOps: [] }),
+      method: "PATCH", body: JSON.stringify({ clientSeq: 1, blockOps: [], charOps: [], sceneOps: [], basis: { blocks: {}, tags: {}, characters: {}, scenes: {} } }),
       session: adminSession(),
     }),
     ctx({ id: headProdId }),

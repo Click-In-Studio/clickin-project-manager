@@ -13,6 +13,9 @@ import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { createProduction, deleteProduction } from "@/lib/production/production-db";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { addProductionMember, setMemberRoles } from "@/lib/perm/member-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { buildScriptPatchBasis } from "@/lib/script/script-patch-basis";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 import { getPool } from "@/lib/pg";
 import { TEST_USER, TEST_OWNER } from "../_support/helpers";
 import type { Block, ScriptState } from "@/lib/script/script-types";
@@ -189,84 +192,33 @@ describe("script op concurrency — advisory lock ensures both patches survive",
   const BLOCK_A = "race-block-aaaa";
   const BLOCK_B = "race-block-bbbb";
 
-  it("2 concurrent block inserts both appear in final state", async () => {
-    const patch = (blockId: string, content: string) =>
-      JSON.stringify({
-        clientSeq: 1,
-        blockOps: [{ op: "insert", block: stageBlock(blockId, content), afterId: null }],
-        charOps: [],
-        sceneOps: [],
-      });
-
+  it("同一结构基线的并发插入：一个成功，另一个明确冲突", async () => {
+    const base = (await loadProduction(SCRIPT_PROD, scriptVersionId))!.state;
+    const patch = (id: string): ScriptPatch => ({ clientSeq: 1, blockOps: [{ op: "insert", block: stageBlock(id, id), afterId: null }], charOps: [], sceneOps: [] });
     const url = `/api/script/${SCRIPT_PROD}?v=${scriptVersionId}`;
-
-    const [r1, r2] = await Promise.all([
-      patchScriptHandler(
-        req(url, { method: "PATCH", body: patch(BLOCK_A, "竞态A内容"), session: memberSession() }),
-        ctx({ id: SCRIPT_PROD }),
-      ),
-      patchScriptHandler(
-        req(url, { method: "PATCH", body: patch(BLOCK_B, "竞态B内容"), session: memberSession() }),
-        ctx({ id: SCRIPT_PROD }),
-      ),
-    ]);
-
-    expect(r1.status).toBe(200);
-    expect(r2.status).toBe(200);
-    const b1 = (await r1.json()) as { ok: boolean; serverSeq: number };
-    const b2 = (await r2.json()) as { ok: boolean; serverSeq: number };
-    expect(b1.ok).toBe(true);
-    expect(b2.ok).toBe(true);
-    // Server seqs must be distinct (each patch gets its own tick)
-    expect(b1.serverSeq).not.toBe(b2.serverSeq);
-
-    // Verify both blocks are persisted in the DB
-    const state = await getScriptHandler(
-      req(url, { session: memberSession() }),
-      ctx({ id: SCRIPT_PROD }),
-    );
-    expect(state.status).toBe(200);
-    const scriptState = (await state.json()) as ScriptState;
-    const ids = scriptState.blocks.map((b) => b.id);
-    expect(ids).toContain(BLOCK_A);
-    expect(ids).toContain(BLOCK_B);
+    const send = (p: ScriptPatch) => patchScriptHandler(req(url, {
+      method: "PATCH", session: memberSession(),
+      body: JSON.stringify({ ...p, basis: buildScriptPatchBasis(base, p, new Map()) }),
+    }), ctx({ id: SCRIPT_PROD }));
+    const results = await Promise.all([send(patch(BLOCK_A)), send(patch(BLOCK_B))]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    const now = (await loadProduction(SCRIPT_PROD, scriptVersionId))!.state;
+    expect(now.blocks.filter(b => b.id === BLOCK_A || b.id === BLOCK_B)).toHaveLength(1);
   });
 
-  it("2 concurrent updates on the same block: last write wins, no crash", async () => {
-    // After the previous test, BLOCK_A exists — update it from two clients simultaneously
-    const patch = (content: string) =>
-      JSON.stringify({
-        clientSeq: 2,
-        blockOps: [{ op: "update", block: stageBlock(BLOCK_A, content) }],
-        charOps: [],
-        sceneOps: [],
-      });
-
+  it("同一块的并发更新：一个成功，旧依据的另一个明确冲突", async () => {
+    const base = (await loadProduction(SCRIPT_PROD, scriptVersionId))!.state;
+    const block = base.blocks.find(b => b.id === BLOCK_A || b.id === BLOCK_B)!;
+    const patch = (content: string): ScriptPatch => ({ clientSeq: 2, blockOps: [{ op: "update", block: { ...block, content } }], charOps: [], sceneOps: [] });
     const url = `/api/script/${SCRIPT_PROD}?v=${scriptVersionId}`;
-
-    const [r1, r2] = await Promise.all([
-      patchScriptHandler(
-        req(url, { method: "PATCH", body: patch("并发修改X"), session: memberSession() }),
-        ctx({ id: SCRIPT_PROD }),
-      ),
-      patchScriptHandler(
-        req(url, { method: "PATCH", body: patch("并发修改Y"), session: memberSession() }),
-        ctx({ id: SCRIPT_PROD }),
-      ),
-    ]);
-
-    expect(r1.status).toBe(200);
-    expect(r2.status).toBe(200);
-
-    // Block must still exist; content is one of the two values (last write wins)
-    const state = await getScriptHandler(
-      req(url, { session: memberSession() }),
-      ctx({ id: SCRIPT_PROD }),
-    );
-    const scriptState = (await state.json()) as ScriptState;
-    const blockA = scriptState.blocks.find((b) => b.id === BLOCK_A);
-    expect(blockA).not.toBeUndefined();
-    expect(["并发修改X", "并发修改Y"]).toContain(blockA!.content);
+    const send = (p: ScriptPatch) => patchScriptHandler(req(url, {
+      method: "PATCH", session: memberSession(),
+      body: JSON.stringify({ ...p, basis: buildScriptPatchBasis(base, p, new Map()) }),
+    }), ctx({ id: SCRIPT_PROD }));
+    const results = await Promise.all([send(patch("并发修改X")), send(patch("并发修改Y"))]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    const now = (await loadProduction(SCRIPT_PROD, scriptVersionId))!.state;
+    expect(["并发修改X", "并发修改Y"]).toContain(now.blocks.find(b => b.id === block.id)!.content);
   });
 });
 
@@ -338,15 +290,12 @@ describe("network fluctuation — retry / at-least-once delivery", () => {
     // Fire a script write and two reads simultaneously.
     // All reads must return HTTP 200 with a valid ScriptState — no half-written view.
     const url = `/api/script/${SCRIPT_PROD}?v=${scriptVersionId}`;
+    const base = (await loadProduction(SCRIPT_PROD, scriptVersionId))!.state;
+    const patch: ScriptPatch = { clientSeq: 3, blockOps: [{ op: "insert", block: stageBlock("race-block-cccc", "并发读写测试"), afterId: null }], charOps: [], sceneOps: [] };
     const writeReq = patchScriptHandler(
       req(url, {
         method: "PATCH",
-        body: JSON.stringify({
-          clientSeq: 3,
-          blockOps: [{ op: "insert", block: stageBlock("race-block-cccc", "并发读写测试"), afterId: null }],
-          charOps: [],
-          sceneOps: [],
-        }),
+        body: JSON.stringify({ ...patch, basis: buildScriptPatchBasis(base, patch, new Map()) }),
         session: memberSession(),
       }),
       ctx({ id: SCRIPT_PROD }),

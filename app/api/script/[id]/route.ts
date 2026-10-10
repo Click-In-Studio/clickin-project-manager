@@ -8,6 +8,7 @@ import { rejectNonHeadWrite } from "@/lib/script/head-version";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getActiveVersionId, getVersion } from "@/lib/script/version-db";
 import { loadProduction } from "@/lib/script/script-state-db";
+import { ScriptPatchConflict, type ScriptPatchBasis } from "@/lib/script/script-patch-basis";
 import { applyPatchToDB } from "@/lib/script/script-patch-db";
 
 async function getCtx(req: NextRequest, productionId: string) {
@@ -62,7 +63,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
   const current = await loadProduction(id, versionId);
   if (!current) return Response.json({ error: "版本不存在" }, { status: 404 });
 
-  const patch = (await req.json()) as ScriptPatch;
+  const patch = (await req.json()) as ScriptPatch & { basis?: ScriptPatchBasis };
   const needed = requiredPermissions(patch, current.state);
   for (const perm of needed) {
     // E1 过渡双制：node: 前缀键走行判定，其余仍走原子键（E2 收敛）
@@ -74,10 +75,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<"/api/script/[id
     }
   }
 
+  if (!patch.basis) return Response.json({ error: "缺少编辑依据，请重新加载剧本" }, { status: 409 });
+
   // userToken unused in atomic path (Feishu sync removed); accepted but ignored
   void req.cookies.get(TOKEN_COOKIE)?.value;
 
-  await applyPatchToDB(id, versionId, patch);
+  try {
+    await applyPatchToDB(id, versionId, patch, patch.basis);
+  } catch (error) {
+    if (error instanceof ScriptPatchConflict) {
+      return Response.json({ error: "剧本已被他人修改，本地修改未上传", code: "SCRIPT_PATCH_CONFLICT" }, { status: 409 });
+    }
+    throw error;
+  }
   const serverSeq = tickAndBroadcastSeq(id, versionId);
   if (patchAffectsMarkerProjection(patch, current.state)) {
     broadcastEvent(id, versionId, "markers", { seq: serverSeq });

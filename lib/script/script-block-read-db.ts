@@ -1,4 +1,5 @@
 import { getPool } from "../pg";
+import type { PoolClient } from "pg";
 import type { Block } from "./script-types";
 import { MARKER_TYPES_SQL } from "./script-marker-sql";
 import { cleanMarkerMeta, fromDbType, isChapterSceneMarkerType, isMarkerBlockType, type BlockRow, type ScCharRow } from "./script-row-model";
@@ -29,8 +30,7 @@ export type LoadedVersionBlocks = {
   snapshotIds: Map<string, string>;
 };
 
-export async function assembleVersionBlocks(rows: BlockRow[]): Promise<LoadedVersionBlocks> {
-  const pool = getPool();
+export async function assembleVersionBlocks(rows: BlockRow[], pool: Pick<PoolClient, "query"> = getPool()): Promise<LoadedVersionBlocks> {
   // script_character joins on snapshot_id (script.id)
   const snapshotIds_arr = rows.map(r => r.snapshot_id);
   const scCharRes = snapshotIds_arr.length > 0

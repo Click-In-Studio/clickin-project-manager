@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { getPool } from "../pg";
 
 // 块标签（#486 从 lib/db.ts 搬出）：tag_group / tag_option 的 CRUD 与 block_tag 的读写。
@@ -302,26 +303,49 @@ export async function getBlockTagsByIds(productionId: string, blockIds: string[]
   }));
 }
 
+// 标签单独写接口与编辑器整批 PATCH 使用同一剧本锁，检查后不能被另一路标签写穿插。
+async function withBlockTagLock(blockId: string, write: (client: PoolClient) => Promise<void>): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const versions = await client.query<{ version_id: string }>(
+      "SELECT version_id FROM script_version WHERE block_id = $1 ORDER BY version_id", [blockId],
+    );
+    for (const row of versions.rows) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [row.version_id]);
+    }
+    await write(client);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
+}
+
 export async function upsertBlockTag(
   blockId: string,
   groupId: string,
   optionId: string | null,
   value: number | null
 ): Promise<void> {
-  await getPool().query(
-    `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
+  await withBlockTagLock(blockId, async client => {
+    await client.query(
+      `INSERT INTO block_tag (block_id, group_id, option_id, value, updated_at)
      VALUES ($1, $2, $3, $4, now())
      ON CONFLICT (block_id, group_id) DO UPDATE
        SET option_id  = EXCLUDED.option_id,
            value      = EXCLUDED.value,
            updated_at = now()`,
-    [blockId, groupId, optionId, value]
-  );
+      [blockId, groupId, optionId, value]
+    );
+  });
 }
 
 export async function deleteBlockTag(blockId: string, groupId: string): Promise<void> {
-  await getPool().query(
-    'DELETE FROM block_tag WHERE block_id = $1 AND group_id = $2',
-    [blockId, groupId]
-  );
+  await withBlockTagLock(blockId, async client => {
+    await client.query(
+      'DELETE FROM block_tag WHERE block_id = $1 AND group_id = $2',
+      [blockId, groupId]
+    );
+  });
 }
