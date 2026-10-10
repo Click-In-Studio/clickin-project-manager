@@ -1,15 +1,16 @@
 // ask_user（#290 在自建运行时里的形态）：模型向用户提问 = 一个 await 表状态的工具。
-// 与审批门同款机制（agent_question 表 + 轮询），重启后从表续；同一 toolCallId 已有待答
+// 与审批门同款机制（agent_question 表 + 决议通知），重启后从表续；同一 toolCallId 已有待答
 // 问题则接着等它，不重问（恢复路径把 ask_user 当只读工具重跑时天然幂等）。
 // 卡片数据形态 = lib/agent/chat/stream-reducer.ts 的 QuestionInfo（形状当初对齐网关的
 // question.* 协议以求前端零改动；网关已退役，两边加字段要同批动）。
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
+import { EVENT_CHANNEL, subscribeDecisionEvents } from "./events";
+import { EVENT_FALLBACK_MS, EventWakeup } from "./event-wakeup";
 import type { QuestionInfo, QuestionItem } from "@/lib/agent/chat/stream-reducer";
 import { newQuestionId } from "./ids";
 
-const POLL_MS = 400;
 export const QUESTION_TTL_MS = Number(process.env.AGENT_QUESTION_TTL_MS ?? 900_000);
 
 export type QuestionOutcome =
@@ -47,24 +48,34 @@ export async function createOrReuseQuestion(
 export async function awaitQuestion(
   id: string, signal?: AbortSignal, pool: Pool = getPool(), opts: { isDetached?: () => boolean } = {},
 ): Promise<QuestionOutcome> {
-  while (true) {
-    if (signal?.aborted) {
-      if (opts.isDetached?.()) return { kind: "detached" }; // 排水脱离：不碰表
-      await pool.query(`UPDATE agent_question SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
-      return { kind: "cancelled" };
+  const wakeup = new EventWakeup(signal);
+  let unsubscribe: (() => void) | undefined;
+  try {
+    // 先订阅后读状态，决议发生在读库或等待建立期间也会被下一次检查看到。
+    if (!signal?.aborted) unsubscribe = await subscribeDecisionEvents("question", id, wakeup.wake);
+    while (true) {
+      if (signal?.aborted) {
+        if (opts.isDetached?.()) return { kind: "detached" }; // 排水脱离：不碰表
+        await pool.query(`UPDATE agent_question SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
+        return { kind: "cancelled" };
+      }
+      const r = await pool.query<{ status: string; answer: Record<string, string[]> | null; expires_at: Date }>(
+        `SELECT status, answer, expires_at FROM agent_question WHERE id = $1`, [id],
+      );
+      if (signal?.aborted) continue;
+      const row = r.rows[0];
+      if (!row) return { kind: "cancelled" };
+      if (row.status === "answered") return { kind: "answered", answers: row.answer ?? {} };
+      if (row.status === "cancelled") return { kind: "cancelled" };
+      if (row.status === "expired" || row.expires_at.getTime() <= Date.now()) {
+        await pool.query(`UPDATE agent_question SET status = 'expired', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
+        return { kind: "expired" };
+      }
+      await wakeup.wait(Math.max(0, Math.min(EVENT_FALLBACK_MS, row.expires_at.getTime() - Date.now())));
     }
-    const r = await pool.query<{ status: string; answer: Record<string, string[]> | null; expires_at: Date }>(
-      `SELECT status, answer, expires_at FROM agent_question WHERE id = $1`, [id],
-    );
-    const row = r.rows[0];
-    if (!row) return { kind: "cancelled" };
-    if (row.status === "answered") return { kind: "answered", answers: row.answer ?? {} };
-    if (row.status === "cancelled") return { kind: "cancelled" };
-    if (row.status === "expired" || row.expires_at.getTime() < Date.now()) {
-      await pool.query(`UPDATE agent_question SET status = 'expired', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
-      return { kind: "expired" };
-    }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+  } finally {
+    unsubscribe?.();
+    wakeup.close();
   }
 }
 
@@ -88,9 +99,15 @@ export async function questionSession(id: string, pool: Pool = getPool()): Promi
 export async function resolveQuestion(
   id: string, resolution: { answers: Record<string, string[]> } | { cancel: true }, pool: Pool = getPool(),
 ): Promise<boolean> {
-  const r = "cancel" in resolution
-    ? await pool.query(`UPDATE agent_question SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id])
-    : await pool.query(`UPDATE agent_question SET status = 'answered', answer = $2::jsonb, resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id, JSON.stringify(resolution.answers)]);
+  const cancelled = "cancel" in resolution;
+  const r = await pool.query(
+    `WITH resolved AS (
+       UPDATE agent_question SET status = $2, answer = $3::jsonb, resolved_at = now()
+       WHERE id = $1 AND status = 'pending' RETURNING id
+     )
+     SELECT id, pg_notify($4, 'question:' || id || ':0') FROM resolved`,
+    [id, cancelled ? "cancelled" : "answered", cancelled ? null : JSON.stringify(resolution.answers), EVENT_CHANNEL],
+  );
   return (r.rowCount ?? 0) > 0;
 }
 

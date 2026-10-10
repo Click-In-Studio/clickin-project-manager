@@ -11,6 +11,8 @@
 
 import type { Pool } from "pg";
 import { getPool } from "@/lib/pg";
+import { EVENT_CHANNEL, subscribeDecisionEvents } from "./events";
+import { EVENT_FALLBACK_MS, EventWakeup } from "./event-wakeup";
 import type { ApprovalInfo } from "@/lib/agent/chat/stream-reducer";
 import { newApprovalId } from "./ids";
 import { APPROVAL_TTL_MS } from "./config";
@@ -23,7 +25,6 @@ export type ApprovalOutcome =
   /** 本进程脱离（排水），表状态原封不动，由下一个进程接着等 */
   | { kind: "detached" };
 
-const POLL_MS = 400;
 
 export interface ApprovalCard {
   title: string;
@@ -102,29 +103,39 @@ export async function approvalAllowsReexecute(sessionId: string, toolCallId: str
   return (r.rowCount ?? 0) > 0;
 }
 
-/** 轮询表状态直到有决议/过期/中止。轮询而非 LISTEN：审批是分钟级人类动作，400ms 足够。 */
+/** 通知驱动检查表状态；中止立即唤醒，到期按截止时间检查，低频查询兜底。 */
 export async function awaitApproval(
   id: string, signal?: AbortSignal, pool: Pool = getPool(), opts: { isDetached?: () => boolean } = {},
 ): Promise<ApprovalOutcome> {
-  while (true) {
-    if (signal?.aborted) {
-      if (opts.isDetached?.()) return { kind: "detached" }; // 排水脱离：不碰表
-      await pool.query(`UPDATE agent_approval SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
-      return { kind: "denied", reason: "本轮已中止" };
+  const wakeup = new EventWakeup(signal);
+  let unsubscribe: (() => void) | undefined;
+  try {
+    // 先订阅后读状态，决议发生在读库或等待建立期间也会被下一次检查看到。
+    if (!signal?.aborted) unsubscribe = await subscribeDecisionEvents("approval", id, wakeup.wake);
+    while (true) {
+      if (signal?.aborted) {
+        if (opts.isDetached?.()) return { kind: "detached" }; // 排水脱离：不碰表
+        await pool.query(`UPDATE agent_approval SET status = 'cancelled', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
+        return { kind: "denied", reason: "本轮已中止" };
+      }
+      const r = await pool.query<{ status: string; decision: string | null; reason: string | null; expires_at: Date }>(
+        `SELECT status, decision, reason, expires_at FROM agent_approval WHERE id = $1`, [id],
+      );
+      if (signal?.aborted) continue;
+      const row = r.rows[0];
+      if (!row) return { kind: "denied", reason: "审批记录不存在" };
+      if (row.status === "allowed") return { kind: "allowed", decision: "allow-once" };
+      if (row.status === "denied") return { kind: "denied", reason: row.reason };
+      if (row.status === "cancelled") return { kind: "denied", reason: row.reason ?? "已取消" };
+      if (row.status === "expired" || row.expires_at.getTime() <= Date.now()) {
+        await pool.query(`UPDATE agent_approval SET status = 'expired', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
+        return { kind: "expired" };
+      }
+      await wakeup.wait(Math.max(0, Math.min(EVENT_FALLBACK_MS, row.expires_at.getTime() - Date.now())));
     }
-    const r = await pool.query<{ status: string; decision: string | null; reason: string | null; expires_at: Date }>(
-      `SELECT status, decision, reason, expires_at FROM agent_approval WHERE id = $1`, [id],
-    );
-    const row = r.rows[0];
-    if (!row) return { kind: "denied", reason: "审批记录不存在" };
-    if (row.status === "allowed") return { kind: "allowed", decision: "allow-once" };
-    if (row.status === "denied") return { kind: "denied", reason: row.reason };
-    if (row.status === "cancelled") return { kind: "denied", reason: row.reason ?? "已取消" };
-    if (row.status === "expired" || row.expires_at.getTime() < Date.now()) {
-      await pool.query(`UPDATE agent_approval SET status = 'expired', resolved_at = now() WHERE id = $1 AND status = 'pending'`, [id]);
-      return { kind: "expired" };
-    }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+  } finally {
+    unsubscribe?.();
+    wakeup.close();
   }
 }
 
@@ -140,10 +151,13 @@ export async function resolveApproval(
   id: string, decision: ApprovalDecision, resolvedBy: string, reason?: string, pool: Pool = getPool(),
 ): Promise<boolean> {
   const r = await pool.query(
-    `UPDATE agent_approval
-     SET status = $2, decision = $3, reason = $4, resolved_by = $5, resolved_at = now()
-     WHERE id = $1 AND status = 'pending'`,
-    [id, decision === "deny" ? "denied" : "allowed", decision, reason ?? null, resolvedBy],
+    `WITH resolved AS (
+       UPDATE agent_approval
+       SET status = $2, decision = $3, reason = $4, resolved_by = $5, resolved_at = now()
+       WHERE id = $1 AND status = 'pending' RETURNING id
+     )
+     SELECT id, pg_notify($6, 'approval:' || id || ':0') FROM resolved`,
+    [id, decision === "deny" ? "denied" : "allowed", decision, reason ?? null, resolvedBy, EVENT_CHANNEL],
   );
   return (r.rowCount ?? 0) > 0;
 }
