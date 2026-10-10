@@ -2,10 +2,10 @@ import { type NextRequest } from "next/server";
 import { getSession } from "@/lib/account/session";
 import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { getCueList, listCueListRoleMembers, hasListAccess } from "@/lib/ops/cue-list-db";
-import { updateCue, deleteCue, getCue } from "@/lib/ops/cue-db";
+import { updateCueConditionally, deleteCue } from "@/lib/ops/cue-db";
+import { CuePatchConflict, type CueFieldPatch, type CuePatchBasis } from "@/lib/ops/cue-edit-types";
 import { getProductionName } from "@/lib/production/production-db";
 import { getVersion } from "@/lib/script/version-db";
-import type { CueAnchor } from "@/lib/ops/cue-types";
 import { broadcastCueUpdate } from "@/lib/server-cache";
 import { buildCueWarningCard } from "@/lib/platform/feishu/feishu-bot";
 import { SERVER_URL } from "@/lib/server-url";
@@ -55,33 +55,31 @@ export async function PATCH(
   const resolved = await resolveVersion(id, req.nextUrl.searchParams.get("v"));
   if (resolved.error) return resolved.error;
   const { versionId } = resolved;
-  const body = await req.json() as {
-    number?: string; name?: string; content?: string;
-    start?: CueAnchor; end?: CueAnchor; warning?: boolean;
-  };
+  const { basis, ...fields } = await req.json() as CueFieldPatch & { basis?: CuePatchBasis };
+  if (!basis || typeof basis !== "object" || Array.isArray(basis)) {
+    return Response.json({ error: "缺少编辑依据，请重新加载 Cue", code: "CUE_PATCH_CONFLICT" }, { status: 409 });
+  }
 
   // Snapshot current warning state before update (for notification trigger)
-  const prevCue = body.warning === true ? await getCue(cueId, cueListId) : null;
-  const warningNewlySet = body.warning === true && prevCue !== null && !prevCue.warning;
-
-  await updateCue(cueId, cueListId, {
-    number:  body.number  !== undefined ? body.number.trim()  : undefined,
-    name:    body.name    !== undefined ? body.name.trim()    : undefined,
-    content: body.content !== undefined ? body.content.trim() : undefined,
-    start:   body.start,
-    end:     body.end,
-    warning: body.warning,
-  }, versionId);
+  let saved;
+  try {
+    saved = await updateCueConditionally(cueId, cueListId, fields, basis, versionId);
+  } catch (error) {
+    if (error instanceof CuePatchConflict) {
+      return Response.json({ error: "Cue 已被修改或删除，本地修改未上传", code: "CUE_PATCH_CONFLICT" }, { status: 409 });
+    }
+    throw error;
+  }
   broadcastCueUpdate(id);
 
   // Fire-and-forget: notify cue list editors when a warning is newly set
-  if (warningNewlySet) {
-    notifyCueWarning(id, cueListId, cueId, prevCue!.number, prevCue!.name).catch(e =>
+  if (saved.warningNewlySet) {
+    notifyCueWarning(id, cueListId, cueId, saved.cue.number, saved.cue.name).catch(e =>
       console.error("[cue-warning] notify failed:", e)
     );
   }
 
-  return Response.json({ ok: true });
+  return Response.json({ ok: true, cue: saved.cue });
 }
 
 async function notifyCueWarning(

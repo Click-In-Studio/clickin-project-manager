@@ -8,14 +8,15 @@ import type { CuePresence } from "./types";
 
 export default function CueChip({
   cue, colorIdx, selected, warning, editable, presenceUsers, highlighted,
-  onSelect, onCommitNumber, onCommitName, onDragStart,
+  onSelect, onCommitNumber, onCommitName, onEditingChange, onDragStart,
 }: {
   cue: Cue; colorIdx: number; selected: boolean; warning: boolean; editable: boolean;
   presenceUsers: CuePresence[];
   highlighted?: boolean;
   onSelect: () => void;
-  onCommitNumber: (v: string) => void;
-  onCommitName: (v: string) => void;
+  onCommitNumber: (v: string, basis: string) => void;
+  onCommitName: (v: string, basis: string) => void;
+  onEditingChange?: (editing: boolean) => void;
   onDragStart?: (e: React.MouseEvent) => void;
 }) {
   const c = colorFor(colorIdx);
@@ -44,6 +45,7 @@ export default function CueChip({
           <InlineField
             value={cue.number}
             onCommit={onCommitNumber}
+            onEditingChange={onEditingChange}
             placeholder="Q#"
             className="w-8 bg-white/20 text-white text-[10px] font-mono rounded px-0.5 outline-none placeholder:text-white/40 min-w-0"
           />
@@ -51,6 +53,7 @@ export default function CueChip({
           <InlineField
             value={cue.name}
             onCommit={onCommitName}
+            onEditingChange={onEditingChange}
             placeholder="名称"
             className="w-20 bg-white/20 text-white text-[10px] rounded px-0.5 outline-none placeholder:text-white/40 min-w-0"
           />

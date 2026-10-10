@@ -25,24 +25,26 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("cue CRUD", () => {
   it("patchCue：带版本参数的 PATCH；ok / 409 带 error / 其他状态", async () => {
-    respond(200);
-    expect(await patchCue(P, L, C, "v1", { name: "n" })).toEqual({ ok: true });
+    respond(200, { cue: { id: C, name: "n" } });
+    expect(await patchCue(P, L, C, "v1", { name: "n" }, { name: "old" })).toEqual({ ok: true, cue: { id: C, name: "n" } });
     expect(lastCall()[0]).toBe(`${BASE_PATH}/api/production/${P}/cuelists/${L}/cues/${C}?v=v1`);
-    expect(lastCall()[1]).toMatchObject({ method: "PATCH", body: JSON.stringify({ name: "n" }) });
+    expect(lastCall()[1]).toMatchObject({ method: "PATCH", body: JSON.stringify({ name: "n", basis: { name: "old" } }) });
     respond(409, { error: "被拒" });
-    expect(await patchCue(P, L, C, null, { name: "n" })).toEqual({ ok: false, status: 409, error: "被拒" });
+    expect(await patchCue(P, L, C, null, { name: "n" }, { name: "old" })).toEqual({ ok: false, status: 409, error: "被拒" });
     expect(lastCall()[0]).toBe(`${BASE_PATH}/api/production/${P}/cuelists/${L}/cues/${C}`);
     respond(500);
-    expect(await patchCue(P, L, C, undefined, {})).toEqual({ ok: false, status: 500 });
+    expect(await patchCue(P, L, C, undefined, {}, {})).toEqual({ ok: false, status: 500 });
   });
 
-  it("fetchListCues：非 ok 与网络错都按空表", async () => {
+  it("fetchListCues：失败与成功空表明确区分", async () => {
     respond(200, [{ id: "a" }]);
     expect(await fetchListCues(P, L, "v2")).toEqual([{ id: "a" }]);
     expect(lastCall()[0]).toBe(`${BASE_PATH}/api/production/${P}/cuelists/${L}/cues?v=v2`);
     respond(403);
-    expect(await fetchListCues(P, L, null)).toEqual([]);
+    expect(await fetchListCues(P, L, null)).toBeNull();
     fetchMock.mockRejectedValueOnce(new Error("net"));
+    expect(await fetchListCues(P, L, null)).toBeNull();
+    respond(200, []);
     expect(await fetchListCues(P, L, null)).toEqual([]);
   });
 
