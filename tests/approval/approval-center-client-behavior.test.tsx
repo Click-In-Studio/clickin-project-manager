@@ -323,6 +323,26 @@ describe("审批中心游标分页", () => {
     expect(container.textContent).toContain("新结果");
   });
 
+  it("切换时间范围重新计算起点并废弃原范围游标", async () => {
+    await resolveRequest(pendingRequests[0]);
+    const now = Date.now();
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      await changeSelect(selectFor("时间")!, "7d");
+      const first = new URL(pendingRequests[1].url, "http://localhost").searchParams;
+      expect(first.get("from")).toBe(new Date(now - 7 * 86_400_000).toISOString());
+      await resolveRequest(pendingRequests[1], paged([item("old", "近七天记录")], "7d-cursor"));
+      dateSpy.mockReturnValue(now + 60_000);
+      await changeSelect(selectFor("时间")!, "30d");
+      const next = new URL(pendingRequests[2].url, "http://localhost").searchParams;
+      expect(next.get("from")).toBe(new Date(now + 60_000 - 30 * 86_400_000).toISOString());
+      expect(next.has("cursor")).toBe(false);
+      expect(container.textContent).not.toContain("近七天记录");
+    } finally {
+      dateSpy.mockRestore();
+    }
+  });
+
   it("续页固定相对时间起点，并保持选择中的详情", async () => {
     await resolveRequest(pendingRequests[0]);
     await changeSelect(selectFor("时间")!, "7d");
