@@ -12,6 +12,8 @@ import ChevronIcon from "@/components/ui/ChevronIcon";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import Kbd from "@/components/ui/Kbd";
 import { formatShortcut, useIsMacLike } from "@/components/ui/shortcut-label";
+import { useScriptRecovery } from "./script-editor/use-script-recovery";
+import { buildScriptPatchBasis, ScriptPatchConflict } from "@/lib/script/script-patch-basis";
 import { useDocumentVisible } from "@/hooks/useVisibleEventSource";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import { BASE_PATH } from "@/lib/base-path";
@@ -166,7 +168,10 @@ export default function ScriptEditor({
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || baseCanEditTextLayout || canEditRehearsalMark;
   const [rehearsalMode, setRehearsalMode] = useState(initialDisplay.rehearsalMode);
   const [personalMode, setPersonalMode, personalModeReady] = useStoredScriptPersonalMode(effectiveScriptId);
-  const isContentLocked = !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;
+  const [recoveryLocked, setRecoveryLocked] = useState(false);
+  const [syncConflict, setSyncConflict] = useState(false);
+  const recoveryTriggerRef = useRef<() => void>(() => {});
+  const isContentLocked = recoveryLocked || !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;
   const canEditTextLayout = baseCanEditTextLayout && !isContentLocked;
   const canEditText = baseCanEditText && !isContentLocked;
   const canEditMetadata = baseCanEditMetadata && !isContentLocked;
@@ -1514,7 +1519,7 @@ export default function ScriptEditor({
   const pendingMovedBlockIdsRef = useRef<Set<string>>(new Set());
 
   // Stable ref to the push function so the debounce closure never goes stale.
-  const pushPatchRef = useRef<(curr: ScriptState) => Promise<boolean>>(async () => false);
+  const pushPatchRef = useRef<(curr: ScriptState, recovering?: boolean) => Promise<boolean>>(async () => false);
   const [syncDebounce] = useState(() => createSaveDebounce(() => {
     const curr: ScriptState = {
       config: scriptConfigRef.current,
@@ -1541,6 +1546,7 @@ export default function ScriptEditor({
       const nextIndex = nextIndexById.get(id);
       if (nextIndex === undefined || !oldBaseline || sameBlocks([localBlock], [oldBaseline])) continue;
       nextBlocks[nextIndex] = localBlock;
+      nextBaseline[nextIndex] = oldBaseline;
       nextLoaded.add(id);
     }
 
@@ -1551,7 +1557,10 @@ export default function ScriptEditor({
     const nextSyncedTags = new Map(serverTags);
     for (const [id, localTags] of currentTags) {
       const baselineTags = previousSyncedTags.get(id) ?? [];
-      if (JSON.stringify(localTags) !== JSON.stringify(baselineTags)) nextTags.set(id, localTags);
+      if (JSON.stringify(localTags) !== JSON.stringify(baselineTags)) {
+        nextTags.set(id, localTags);
+        nextSyncedTags.set(id, baselineTags);
+      }
     }
 
     requestVirtualWindowRefresh();
@@ -1584,9 +1593,91 @@ export default function ScriptEditor({
   }, [applyWindowRange, markOwnershipDirty, requestVirtualWindowRefresh]);
   useLayoutEffect(() => { applyWindowBootstrapRef.current = applyWindowBootstrap; }, [applyWindowBootstrap]);
 
+  const discardPendingEditsRef = useRef(false);
+  const recoveryNeedsReloadRef = useRef(false);
+  const { status: recoveryStatus, suspendedRef: recoverySuspendedRef, suspend: suspendRecovery, recover: recoverScript } = useScriptRecovery({
+    pause: () => {
+      setRecoveryLocked(true);
+      syncDebounce.cancel();
+      deferredSyncRef.current = false;
+      if (syncRetryTimerRef.current !== null) {
+        clearTimeout(syncRetryTimerRef.current);
+        syncRetryTimerRef.current = null;
+      }
+      windowRequestRef.current?.controller.abort();
+      windowRequestRef.current = null;
+      windowRequestGenerationRef.current++;
+      if (streamDebounceTimerRef.current) {
+        clearTimeout(streamDebounceTimerRef.current);
+        streamDebounceTimerRef.current = null;
+      }
+    },
+    reconcile: async () => {
+      if (isSyncingRef.current) {
+        await new Promise<void>(resolve => syncIdleWaitersRef.current.push(resolve));
+      }
+      if (syncUnmountedRef.current) return;
+      // 条件保存使用旧基线。若服务器已改变，整批拒绝，随后读线上最新快照。
+      if (!discardPendingEditsRef.current) {
+        const saved = await pushPatchRef.current({
+          config: scriptConfigRef.current,
+          blocks: normalizeScriptBlockStream(blocksRef.current),
+          characters: charactersRef.current,
+          scenes: scenesRef.current,
+        }, true);
+        if (!saved) throw new Error("剧本修改尚未同步");
+      }
+      if (syncUnmountedRef.current) return;
+      recoveryNeedsReloadRef.current = false;
+      if (initialWindow && activeVersionId) {
+        const bootstrap = await fetchScriptWindowBootstrap(
+          effectiveScriptId, activeVersionId, windowRangeRef.current.start, INITIAL_WINDOW_SIZE,
+        );
+        if (!bootstrap) throw new Error("剧本重连加载失败");
+        if (syncUnmountedRef.current) return;
+        syncedStateRef.current = null;
+        syncedBlockTagMapRef.current = new Map(blockTagMapRef.current);
+        applyWindowBootstrap(bootstrap);
+        charactersRef.current = bootstrap.characters;
+        scenesRef.current = bootstrap.scenes;
+        scriptConfigRef.current = bootstrap.config;
+      } else {
+        const state = await fetchScriptState(effectiveScriptId, activeVersionId);
+        if (!state) throw new Error("剧本重连加载失败");
+        if (syncUnmountedRef.current) return;
+        syncedStateRef.current = state;
+        blocksRef.current = state.blocks;
+        charactersRef.current = state.characters;
+        scenesRef.current = state.scenes;
+        scriptConfigRef.current = state.config ?? DEFAULT_SCRIPT_CONFIG;
+        setBlocks(state.blocks);
+        setCharacters(state.characters);
+        setScenes(state.scenes);
+        setScriptConfig(scriptConfigRef.current);
+        requestVirtualWindowRefresh();
+      }
+      pendingTagInsertsRef.current.clear();
+      pendingMovedBlockIdsRef.current.clear();
+      undoStack.current = [];
+      redoStack.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
+      discardPendingEditsRef.current = false;
+      // 归零只重置通知基线，快照才是数据真相；读取期间收到通知则再读一轮。
+      serverSeqRef.current = 0;
+      if (recoveryNeedsReloadRef.current) void recoverScript();
+      setSyncWaitingForNetwork(false);
+    },
+  });
+  useLayoutEffect(() => {
+    recoveryTriggerRef.current = () => { void recoverScript(); };
+    setRecoveryLocked(recoveryStatus !== "ready");
+  }, [recoverScript, recoveryStatus]);
+
   useEffect(() => {
-    pushPatchRef.current = async (curr: ScriptState) => {
-      if (!canEdit) return true;
+    pushPatchRef.current = async (curr: ScriptState, recovering = false) => {
+      if (recoverySuspendedRef.current && !recovering) return false;
+      if (!canEdit && !recovering) return true;
       if (loadState !== "ready" || syncedStateRef.current === null) return false;
       if (isSyncingRef.current) { deferredSyncRef.current = true; return false; }
       // 正文预取永远给写入让路；可见缺块属于用户正在等待的前台请求，不在这里取消。
@@ -1664,7 +1755,8 @@ export default function ScriptEditor({
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
           return true;
         }
-        const body = await patchScript(effectiveScriptId, activeVersionId, patch);
+        const basis = buildScriptPatchBasis(syncedStateRef.current, patch, syncedTagMap);
+        const body = await patchScript(effectiveScriptId, activeVersionId, { ...patch, basis });
         if (!body) throw new Error("script patch failed");
         if (body) {
           if (syncRetryTimerRef.current !== null) {
@@ -1686,7 +1778,11 @@ export default function ScriptEditor({
               windowRangeRef.current.start,
               INITIAL_WINDOW_SIZE,
             );
-            if (bootstrap) applyWindowBootstrap(bootstrap);
+            if (bootstrap) {
+              syncedStateRef.current = curr;
+              syncedBlockTagMapRef.current = new Map(currTagMap);
+              applyWindowBootstrap(bootstrap);
+            }
             else {
               syncedStateRef.current = curr;
               syncedBlockTagMapRef.current = new Map(currTagMap);
@@ -1708,13 +1804,19 @@ export default function ScriptEditor({
           for (const id of movedIdsForPatch) pendingMovedBlockIdsRef.current.delete(id);
         }
         return true;
-      } catch {
+      } catch (error) {
+        if (error instanceof ScriptPatchConflict) {
+          setSyncConflict(true);
+          discardPendingEditsRef.current = true;
+          if (!recovering && !recoverySuspendedRef.current) queueMicrotask(() => recoveryTriggerRef.current());
+          return true;
+        }
         // 弱网下保留本地内容并明确标记未同步；即使用户不再敲字也会自动重试。
         setSyncWaitingForNetwork(true);
         if (syncRetryTimerRef.current !== null) clearTimeout(syncRetryTimerRef.current);
         syncRetryTimerRef.current = setTimeout(() => {
           syncRetryTimerRef.current = null;
-          if (!syncUnmountedRef.current) syncDebounce.trigger();
+          if (!syncUnmountedRef.current && !recoverySuspendedRef.current) syncDebounce.trigger();
         }, 2000);
         return false;
       } finally {
@@ -1722,10 +1824,10 @@ export default function ScriptEditor({
         const waiters = syncIdleWaitersRef.current;
         syncIdleWaitersRef.current = [];
         for (const resolve of waiters) resolve();
-        if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current) syncDebounce.trigger(); }
+        if (deferredSyncRef.current) { deferredSyncRef.current = false; if (!syncUnmountedRef.current && !recoverySuspendedRef.current) syncDebounce.trigger(); }
       }
     };
-  }, [effectiveScriptId, activeVersionId, applyWindowBootstrap, canEdit, initialWindow, loadState, syncDebounce]);
+  }, [effectiveScriptId, activeVersionId, applyWindowBootstrap, canEdit, initialWindow, loadState, syncDebounce, recoverySuspendedRef]);
 
   useEffect(() => {
     if (initialWindow && initialWindow.versionId === activeVersionId) {
@@ -1844,8 +1946,10 @@ export default function ScriptEditor({
       const serverBlock = body.window.blocks[offset];
       if (nextBlocks[index]?.id !== serverBlock.id || nextBaselineBlocks[index]?.id !== serverBlock.id) return false;
       const locallyDirty = !sameBlocks([nextBlocks[index]], [nextBaselineBlocks[index]]);
-      nextBaselineBlocks[index] = serverBlock;
-      if (!locallyDirty) nextBlocks[index] = serverBlock;
+      if (!locallyDirty) {
+        nextBaselineBlocks[index] = serverBlock;
+        nextBlocks[index] = serverBlock;
+      }
     }
 
     const nextTagMap = new Map(blockTagMapRef.current);
@@ -1859,8 +1963,10 @@ export default function ScriptEditor({
         if (serverTags.length > 0) nextTagMap.set(block.id, serverTags);
         else nextTagMap.delete(block.id);
       }
-      if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
-      else nextSyncedTagMap.delete(block.id);
+      if (JSON.stringify(localTags) === JSON.stringify(baselineTags)) {
+        if (serverTags.length > 0) nextSyncedTagMap.set(block.id, serverTags);
+        else nextSyncedTagMap.delete(block.id);
+      }
     }
 
     const currentRange = windowRangeRef.current;
@@ -1883,7 +1989,7 @@ export default function ScriptEditor({
   // 分窗正文：当前视口优先，前后各留一段缓冲。请求切换时取消旧网络工作；即使浏览器
   // 来不及真正取消，generation 也保证旧响应不能夺回视口或覆盖新结构。
   useEffect(() => {
-    if (!initialWindow || loadState !== "ready" || !activeVersionId) return;
+    if (!initialWindow || loadState !== "ready" || !activeVersionId || recoverySuspendedRef.current) return;
     const desiredStart = explicitLoadTargetIndex === null
       ? Math.max(0, windowRange.start - 80)
       : Math.max(0, explicitLoadTargetIndex - Math.floor(INITIAL_WINDOW_SIZE / 2));
@@ -1978,11 +2084,11 @@ export default function ScriptEditor({
       controller.abort();
       if (slowTimer !== null) window.clearTimeout(slowTimer);
     };
-  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, mergeScriptWindow, windowRange, windowRetryToken]);
+  }, [activeVersionId, effectiveScriptId, explicitLoadTargetIndex, initialWindow, loadState, mergeScriptWindow, windowRange, windowRetryToken, recoveryStatus, recoverySuspendedRef]);
 
   // 用户停留后从当前视窗向外补齐；与前台缺块共用请求槽，滚动、跳转和保存可随时插队。
   useScriptWindowPrefetch({
-    enabled: Boolean(initialWindow) && loadState === "ready",
+    enabled: Boolean(initialWindow) && loadState === "ready" && recoveryStatus === "ready",
     scriptId: effectiveScriptId,
     versionId: activeVersionId,
     syncWaitingForNetwork,
@@ -2030,6 +2136,12 @@ export default function ScriptEditor({
   // 后台标签不占同源连接名额（#467）——门控抽成了共享 hook，cue / wiki / 场景表
   // 同款接入；本组件的建连被下面的 leader 选举包着，所以只用可见性这一层。
   const streamVisible = useDocumentVisible();
+  const streamStartedRef = useRef(false);
+  const streamConnectedRef = useRef(false);
+  const [streamRetryToken, setStreamRetryToken] = useState(0);
+  useEffect(() => {
+    if (!streamVisible && streamStartedRef.current) suspendRecovery();
+  }, [streamVisible, suspendRecovery]);
 
   // ── Hash-based deep link + position restore ──────────────────────────────────
   useEffect(() => {
@@ -2095,10 +2207,14 @@ export default function ScriptEditor({
   useEffect(() => {
     if (loadState !== "ready" || !streamVisible) return;
 
+    if (streamStartedRef.current) suspendRecovery();
+    streamStartedRef.current = true;
     let es: EventSource | null = null;
     let leaderRenewTimer: ReturnType<typeof setInterval> | null = null;
     let electionTimer: ReturnType<typeof setInterval> | null = null;
     let isLeader = false;
+    let electionStarted = false;
+    let receivedConnection = false;
     let closed = false;
     const tabId = `${clientId || "tab"}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
     const streamKey = `${effectiveScriptId}:${activeVersionId ?? ""}`;
@@ -2110,6 +2226,10 @@ export default function ScriptEditor({
       : null;
 
     const handleSeq = (seq: number) => {
+      if (recoverySuspendedRef.current) {
+        recoveryNeedsReloadRef.current = true;
+        return;
+      }
       if (seq <= serverSeqRef.current) return;
 
       if (streamDebounceTimerRef.current) clearTimeout(streamDebounceTimerRef.current);
@@ -2119,6 +2239,7 @@ export default function ScriptEditor({
         // the 300 ms window and already advanced serverSeqRef.  If so there is
         // nothing to fetch — the server state equals what we already synced.
         if (seq <= serverSeqRef.current) return;
+        const generation = windowRequestGenerationRef.current;
         try {
           if (initialWindow && activeVersionId) {
             const bootstrap = await fetchScriptWindowBootstrap(
@@ -2127,13 +2248,13 @@ export default function ScriptEditor({
               windowRangeRef.current.start,
               INITIAL_WINDOW_SIZE,
             );
-            if (!bootstrap || seq <= serverSeqRef.current) return;
+            if (!bootstrap || generation !== windowRequestGenerationRef.current || recoverySuspendedRef.current || seq <= serverSeqRef.current) return;
             serverSeqRef.current = seq;
             applyWindowBootstrap(bootstrap);
             return;
           }
           const serverState = await fetchScriptState(effectiveScriptId, activeVersionId);
-          if (!serverState) return;
+          if (!serverState || generation !== windowRequestGenerationRef.current || recoverySuspendedRef.current) return;
 
           const oldSynced = syncedStateRef.current;
           serverSeqRef.current = seq;
@@ -2148,7 +2269,13 @@ export default function ScriptEditor({
           setScenes(normalized.scenes);
           setScriptConfig(normalized.config);
           setSceneDetails((prev) => syncSceneDetailsWithScenes(prev, normalized.scenes));
-          syncedStateRef.current = { ...serverState, blocks: normalized.blocks, scenes: normalized.scenes, config: normalized.config };
+          const localById = new Map(blocksRef.current.map(block => [block.id, block]));
+          const oldById = new Map((oldSynced?.blocks ?? []).map(block => [block.id, block]));
+          syncedStateRef.current = { ...serverState, blocks: serverState.blocks.map(block => {
+            const old = oldById.get(block.id);
+            const local = localById.get(block.id);
+            return old && local && !sameBlocks([old], [local]) ? old : block;
+          }) };
         } catch { /* ignore */ }
       }, 300);
     };
@@ -2174,6 +2301,7 @@ export default function ScriptEditor({
     };
 
     const handleConfig = (cfg: ScriptConfig) => {
+      if (recoverySuspendedRef.current) { recoveryNeedsReloadRef.current = true; return; }
       setScriptConfig(prev => ({ ...DEFAULT_SCRIPT_CONFIG, ...prev, ...cfg }));
     };
 
@@ -2184,6 +2312,20 @@ export default function ScriptEditor({
       const streamQuery = streamParams.toString() ? `?${streamParams.toString()}` : "";
       const nextEs = new EventSource(`${BASE_PATH}/api/script/${effectiveScriptId}/stream${streamQuery}`);
       eventSourceRef.current = nextEs;
+      let opened = false;
+      nextEs.onopen = () => {
+        streamConnectedRef.current = true;
+        if (opened || recoverySuspendedRef.current) {
+          void recoverScript();
+        }
+        opened = true;
+        bc?.postMessage({ source: tabId, type: "connected" });
+      };
+      nextEs.onerror = () => {
+        streamConnectedRef.current = false;
+        suspendRecovery();
+        bc?.postMessage({ source: tabId, type: "disconnect" });
+      };
 
       nextEs.onmessage = (e: MessageEvent) => {
         const { seq } = JSON.parse(e.data as string) as { seq: number };
@@ -2229,6 +2371,7 @@ export default function ScriptEditor({
         clearInterval(leaderRenewTimer);
         leaderRenewTimer = null;
       }
+      if (es) bc?.postMessage({ source: tabId, type: "disconnect" });
       es?.close();
       if (eventSourceRef.current === es) eventSourceRef.current = null;
       es = null;
@@ -2264,25 +2407,47 @@ export default function ScriptEditor({
     const maybeElectLeader = () => {
       if (closed || isLeader) return;
       const current = readLeader();
-      if (!current || current.expiresAt <= Date.now()) startLeader();
+      if (!current || current.expiresAt <= Date.now()) {
+        if (electionStarted) suspendRecovery();
+        startLeader();
+      }
+      electionStarted = true;
     };
 
     if (bc) {
       bc.onmessage = (event: MessageEvent) => {
-        const msg = event.data as { source?: string; type?: string; data?: unknown };
-        if (msg.source === tabId) return;
+        const msg = event.data as { source?: string; target?: string; type?: string; data?: unknown };
+        if (msg.source === tabId || (msg.target && msg.target !== tabId)) return;
+        if (msg.type === "join" && isLeader) {
+          bc?.postMessage({ source: tabId, target: msg.source, type: es?.readyState === EventSource.OPEN ? "connected" : "disconnect" });
+          return;
+        }
+        if (msg.type === "connected") {
+          streamConnectedRef.current = true;
+          if (!receivedConnection && recoverySuspendedRef.current) void recoverScript();
+          receivedConnection = true;
+          return;
+        }
+        if (msg.type === "disconnect") {
+          streamConnectedRef.current = false;
+          if (receivedConnection || recoverySuspendedRef.current) suspendRecovery();
+          receivedConnection = false;
+          return;
+        }
         if (msg.type === "seq" && typeof msg.data === "number") handleSeq(msg.data);
         else if (msg.type === "presence" && Array.isArray(msg.data)) handlePresence(msg.data as RemotePresence[]);
         else if (msg.type === "config" && msg.data && typeof msg.data === "object") handleConfig(msg.data as ScriptConfig);
       };
       electionTimer = setInterval(maybeElectLeader, 2_500);
       maybeElectLeader();
+      bc.postMessage({ source: tabId, type: "join" });
     } else {
       es = openEventSource(clientId || tabId, () => {});
     }
 
     return () => {
       closed = true;
+      streamConnectedRef.current = false;
       stopLeader(true);
       if (electionTimer) clearInterval(electionTimer);
       bc?.close();
@@ -2295,7 +2460,7 @@ export default function ScriptEditor({
         presenceLayoutTimerRef.current = null;
       }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, markOwnershipDirty, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap, recoverScript, suspendRecovery, recoverySuspendedRef, streamRetryToken]);
 
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
@@ -4775,7 +4940,22 @@ export default function ScriptEditor({
           )}
         </div>
       )}
-      {syncWaitingForNetwork && (
+      {recoveryStatus !== "ready" && (
+        <div role="status" className="fixed right-4 top-16 z-30 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1 text-xs text-amber-800 shadow-sm">
+          {recoveryStatus === "failed" ? "重连失败，暂时无法编辑" : "重连中…"}
+          {recoveryStatus === "failed" && <button className="ml-2 underline" onClick={() => {
+            if (streamConnectedRef.current) void recoverScript();
+            else setStreamRetryToken(token => token + 1);
+          }}>重试</button>}
+        </div>
+      )}
+      {syncConflict && recoveryStatus === "ready" && (
+        <div role="status" className="fixed right-4 top-16 z-30 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1 text-xs text-amber-800 shadow-sm">
+          剧本已被他人修改，部分本地修改未上传，已加载最新内容
+          <button className="ml-2 underline" onClick={() => setSyncConflict(false)}>知道了</button>
+        </div>
+      )}
+      {syncWaitingForNetwork && recoveryStatus === "ready" && !syncConflict && (
         <div
           role="status"
           className="fixed right-4 top-16 z-30 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1 text-xs text-amber-800 shadow-sm"

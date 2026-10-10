@@ -38,8 +38,8 @@ export type VisibleEventSourceHandlers = {
    * 跳过首次是因为首次建连紧跟着页面自己的初始数据加载，窗口只有几百毫秒，
    * 补齐的收益抵不过每次开页多一轮请求。
    *
-   * 例外：script stream 不需要它——那条流在建连帧里就带当前 seq，客户端比对
-   * 版本号即可，比无条件重拉便宜得多。没有版本号的流（cue / wiki）才走这里。
+   * 剧本编辑器的连接由 leader 选举管理，只使用 useDocumentVisible；它自行处理
+   * 重连后的条件保存与窗口重载，不能依赖建连时回放修改通知。
    */
   onReopen?: () => void;
   /**

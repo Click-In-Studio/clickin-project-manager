@@ -7,7 +7,7 @@ const page = readFileSync("app/production/[id]/script/page.tsx", "utf8");
 
 describe("ScriptEditor 个人只读门接线", () => {
   it("权限、个人只读、排练共同收敛为内容写门", () => {
-    expect(editor).toContain('const isContentLocked = !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;');
+    expect(editor).toContain('const isContentLocked = recoveryLocked || !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;');
     expect(editor).toContain("const baseCanEdit = baseCanEditText || baseCanEditMetadata || baseCanEditTextLayout || canEditRehearsalMark;");
     expect(editor).toContain("const canEditText = baseCanEditText && !isContentLocked;");
     expect(editor).toContain("const canEditMetadata = baseCanEditMetadata && !isContentLocked;");

@@ -13,6 +13,9 @@ import { NextRequest } from "next/server";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
+import { loadProduction } from "@/lib/script/script-state-db";
+import { buildScriptPatchBasis } from "@/lib/script/script-patch-basis";
+import type { ScriptPatch } from "@/lib/script/script-ops";
 import { getActiveVersionId } from "@/lib/script/version-db";
 import { createSession, SESSION_COOKIE } from "@/lib/account/session";
 import { getPool } from "@/lib/pg";
@@ -30,6 +33,11 @@ let nonMemberId: string;
 let unrelatedGrantMemberId: string;
 
 const ctx = () => ({ params: Promise.resolve({ id: prodId }) });
+
+async function withBasis(patch: unknown) {
+  const state = (await loadProduction(prodId, versionId))!.state;
+  return { ...patch as ScriptPatch, basis: buildScriptPatchBasis(state, patch as ScriptPatch, new Map()) };
+}
 
 function req(path: string, userId: string, method: "GET" | "PATCH", body?: unknown): NextRequest {
   return new NextRequest(`http://localhost/api/script/${prodId}${path}`, {
@@ -101,9 +109,14 @@ describe("owner 非成员、零 grant 行", () => {
     expect((await getScriptWindow(req(`/window?v=${versionId}&start=0&limit=2`, ownerId, "GET"), ctx())).status).toBe(200);
     expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, ownerId, "GET"), ctx())).status).toBe(200);
   });
+  it("旧页面请求缺编辑依据时明确拒绝，不允许无条件写回", async () => {
+    const res = await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", insertBlock()), ctx());
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("缺少编辑依据");
+  });
   it("写门：PATCH 逐键循环（blocks@edit + character@edit）全过", async () => {
-    expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", insertBlock()), ctx())).status).toBe(200);
-    expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", upsertChar()), ctx())).status).toBe(200);
+    expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", await withBasis(insertBlock())), ctx())).status).toBe(200);
+    expect((await patchScript(req(`?v=${versionId}`, ownerId, "PATCH", await withBasis(upsertChar())), ctx())).status).toBe(200);
   });
 });
 
@@ -134,15 +147,15 @@ describe("普通成员只持单枚键", () => {
     expect((await getScriptWindow(req(`/window?v=${versionId}`, memberId, "GET"), ctx())).status).toBe(200);
     expect((await searchScriptWindow(req(`/window-search?v=${versionId}&q=x`, memberId, "GET"), ctx())).status).toBe(200);
     expect((await patchBlockTags(req("/block-tags", memberId, "PATCH", { blockId: "x", groupId: "g", optionId: null }), ctx())).status).toBe(403);
-    const res = await patchScript(req(`?v=${versionId}`, memberId, "PATCH", insertBlock()), ctx());
+    const res = await patchScript(req(`?v=${versionId}`, memberId, "PATCH", await withBasis(insertBlock())), ctx());
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/node:script\/\*\/blocks@edit/);
   });
 
   it("再持 blocks@edit：插块过、改角色仍 403（逐键循环没被旁路撑开）", async () => {
     await giveRow(memberId, "script", "blocks", "edit");
-    expect((await patchScript(req(`?v=${versionId}`, memberId, "PATCH", insertBlock()), ctx())).status).toBe(200);
-    const res = await patchScript(req(`?v=${versionId}`, memberId, "PATCH", upsertChar()), ctx());
+    expect((await patchScript(req(`?v=${versionId}`, memberId, "PATCH", await withBasis(insertBlock())), ctx())).status).toBe(200);
+    const res = await patchScript(req(`?v=${versionId}`, memberId, "PATCH", await withBasis(upsertChar())), ctx());
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/node:character/);
   });

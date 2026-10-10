@@ -344,7 +344,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 6566, // #894 个人模式保存闭环与 #893 手机入口合并（+35）
+  "components/script/ScriptEditor.tsx": 6746, // #933 重连加载、条件保存与恢复提示（+180）
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1451, // #655 失效的 Cue 面板跨表列出（+2）：表名标签与表名索引
   "components/ops/PlanningClient.tsx": 98,

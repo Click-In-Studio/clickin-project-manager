@@ -3,6 +3,7 @@
 // 逐条一致——需要按状态码分支的（加载、删场次）把 status 一起交回，其余按 ok 折成 null / boolean。
 //
 // 跨域端点（/api/me、mention-users、assets/*/mounts）不在这里，等各自域的 client。
+import { ScriptPatchConflict } from "./script-patch-basis";
 import { BASE_PATH } from "@/lib/base-path";
 import type { ScriptConfig, ScriptState } from "@/lib/script/script-types";
 import type { TagGroup, BlockTagValue } from "./script-block-tag-db";
@@ -108,6 +109,7 @@ export async function patchScript(
   const res = await fetch(`${BASE_PATH}/api/script/${scriptId}${versionQuery(versionId)}`, {
     method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(patch),
   });
+  if (res.status === 409) throw new ScriptPatchConflict();
   return res.ok ? (await res.json() as { ok: boolean; serverSeq: number }) : null;
 }
 
