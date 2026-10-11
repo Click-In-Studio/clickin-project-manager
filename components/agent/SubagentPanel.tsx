@@ -42,7 +42,7 @@ export default function SubagentPanel({
   onParentRun,
 }: {
   sessionKey: string;
-  onParentRun: (status: "running" | "compacting" | "done") => Promise<boolean>;
+  onParentRun: (status: "queued" | "running" | "compacting" | "done") => Promise<boolean>;
 }) {
   const [children, setChildren] = useState<SubagentView[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -53,7 +53,7 @@ export default function SubagentPanel({
   callback.current = onParentRun;
   const pendingParent = useRef<{
     stamp: string;
-    status: "running" | "compacting" | "done";
+    status: "queued" | "running" | "compacting" | "done";
   } | null>(null);
   const acknowledgedParent = useRef<string | null>(null);
   const refreshingParent = useRef(false);

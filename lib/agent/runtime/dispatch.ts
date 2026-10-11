@@ -102,6 +102,7 @@ export function createRunnerStreamResponse(
           send({ type: "session", key: sessionKey, runId: started.runId });
         } else {
           const state = await currentRunStatus(sessionKey);
+          if (state === "queued") send({ type: "queued", active: true });
           if (state === "compacting") send({ type: "compacting", active: true });
           if (state === null) {
             finish({ type: "final", text: "", fallback: true });
@@ -159,7 +160,7 @@ async function currentRunStatus(sessionId: string): Promise<string | null> {
   const r = await getPool().query<{ status: string }>(
     `SELECT status FROM agent_run
       WHERE session_id = $1
-        AND status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')
+        AND status IN ('queued', 'running', 'compacting', 'awaiting_approval', 'awaiting_answer')
       ORDER BY started_at DESC LIMIT 1`,
     [sessionId],
   );

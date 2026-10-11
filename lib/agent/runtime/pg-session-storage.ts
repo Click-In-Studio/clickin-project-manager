@@ -8,6 +8,7 @@
 
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
+import { RUNNER_OWNER } from "./config";
 import { BaseSessionStorage } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base";
 import type {
   MessageEntry,
@@ -29,6 +30,9 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
   /** 脱离（§4.4 ② 排水时等待态 run 交给下一个进程）：之后的追加一律丢弃——
    *  本地 harness 被中止时会想写一条 aborted assistant，落库就把等待态毁了。 */
   private detached = false;
+  private fence: { runId: string; epoch: number } | null = null;
+
+  bindRun(runId: string, epoch: number): void { this.fence = { runId, epoch }; }
 
   detach(): void {
     this.detached = true;
@@ -40,6 +44,13 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
     entries: SessionTreeEntry[],
   ) {
     super(metadata, entries);
+  }
+
+  /** 排队与身份检查只读元数据，不提前装载 transcript。 */
+  static async metadata(sessionId: string): Promise<PgSessionMetadata | null> {
+    const r = await getPool().query<SessionRow>("SELECT id,user_id,production_id,created_at FROM agent_session WHERE id=$1", [sessionId]);
+    const row = r.rows[0];
+    return row ? { id: row.id, userId: row.user_id, productionId: row.production_id, createdAt: row.created_at.toISOString() } : null;
   }
 
   /** 装载既有会话；不存在返回 null（调用方决定 404 还是新建）。 */
@@ -80,12 +91,14 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
 
   private async persist(entry: SessionTreeEntry, executor: Pool | PoolClient = this.pool): Promise<void> {
     const meta = await this.getMetadata();
-    await executor.query(
+    const inserted = await executor.query(
       `INSERT INTO agent_session_entry (session_id, seq, entry_id, parent_id, type, payload)
        SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5::jsonb
-       FROM agent_session_entry WHERE session_id = $1`,
-      [meta.id, entry.id, entry.parentId, entry.type, JSON.stringify(entry)],
+       FROM agent_session_entry WHERE session_id = $1
+       HAVING $6::text IS NULL OR EXISTS(SELECT 1 FROM agent_run WHERE id=$6 AND execution_epoch=$7 AND owner=$8)`,
+      [meta.id, entry.id, entry.parentId, entry.type, JSON.stringify(entry), this.fence?.runId ?? null, this.fence?.epoch ?? 0, RUNNER_OWNER],
     );
+    if (!inserted.rowCount) throw new Error("会话执行租约已失效");
     // 会话活跃时间：只有消息类条目算"最后一条消息"
     await executor.query(
       `UPDATE agent_session SET updated_at = now()${entry.type === "message" ? ", last_message_at = now()" : ""} WHERE id = $1`,

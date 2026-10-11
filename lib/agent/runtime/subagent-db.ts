@@ -118,8 +118,8 @@ export async function queueSubagent(input: {
       );
     }
     await client.query(
-      `INSERT INTO agent_run(id,session_id,subagent_id,budget_run_id,status,model,initial_message,delegation_key)
-       VALUES($1,$2,$2,$3,'queued',$4,$5,$6)`,
+      `INSERT INTO agent_run(id,session_id,subagent_id,budget_run_id,status,model,initial_message,delegation_key,admission_class)
+       VALUES($1,$2,$2,$3,'queued',$4,$5,$6,'subagent')`,
       [
         newRunId(),
         id,
@@ -177,7 +177,7 @@ export async function claimSubagents(): Promise<SubagentJob[]> {
       )
         continue;
       const update = await client.query<{ execution_started_at: Date }>(
-        `UPDATE agent_run SET status='running',owner=$2,heartbeat_at=now(),execution_started_at=now()
+        `UPDATE agent_run SET status='running',owner=$2,heartbeat_at=now()
          WHERE id=$1 AND status='queued' RETURNING execution_started_at`,
         [row.id, RUNNER_OWNER],
       );

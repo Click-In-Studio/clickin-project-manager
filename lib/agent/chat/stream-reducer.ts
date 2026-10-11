@@ -46,6 +46,7 @@ export type Bubble =
   | { kind: "notice"; text: string };
 
 export type StreamLine =
+  | { type: "queued"; active: boolean }
   | { type: "delta"; text: string }
   | { type: "thinking"; text: string }
   | { type: "final"; text: string; fallback?: boolean }
@@ -124,6 +125,11 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
         next[next.length - 1] = { kind: "thinking", text: last.text, compactionPending: true };
       }
       return next;
+    }
+    case "queued": {
+      const waiting = next.filter((b) => b.kind !== "notice" || b.text !== "排队中，轮到后自动继续。");
+      if (line.active) waiting.push({ kind: "notice", text: "排队中，轮到后自动继续。" });
+      return waiting;
     }
     case "tool-result": {
       // 结果先于 done 标记到达（gateway 的 tool 流早于 item 流的 end）。

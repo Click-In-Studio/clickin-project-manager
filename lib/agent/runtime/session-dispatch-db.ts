@@ -27,7 +27,7 @@ export async function pendingEventsForRun(
     WHERE i.session_id=$1 AND i.kind='subagent_event' AND
       (i.claimed_run_id IS NULL OR i.claimed_run_id=$2 OR NOT EXISTS(
         SELECT 1 FROM agent_run r WHERE r.id=i.claimed_run_id
-          AND r.status IN ('running','compacting','awaiting_approval','awaiting_answer')))
+          AND r.status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')))
     RETURNING i.*`,
       [sessionId, runId],
     );
@@ -60,7 +60,7 @@ export async function claimPendingSession(
     ]);
     const active = await client.query(
       `SELECT 1 FROM agent_run WHERE session_id=$1
-      AND status IN ('running','compacting','awaiting_approval','awaiting_answer')`,
+      AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')`,
       [sessionId],
     );
     if (active.rowCount) {
@@ -92,7 +92,7 @@ export async function claimPendingSession(
           : null;
     await client.query(
       `INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at,model,budget_run_id)
-      VALUES($1,$2,'running',$3,now(),$4,$5)`,
+      VALUES($1,$2,'queued',$3,now(),$4,$5)`,
       [runId, sessionId, owner, model, budget],
     );
     await client.query(

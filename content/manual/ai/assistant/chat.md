@@ -7,7 +7,7 @@ who: 所有成员（项目会话需要专业档项目）
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/what-it-is, ai/skills/skills, ai/automation/schedules]
-updated: 2026-10-10
+updated: 2026-10-11
 ---
 
 ## 这是什么
@@ -21,6 +21,10 @@ updated: 2026-10-10
 ![AI 对话内容：宽窗口放在右侧面板，手机占满屏幕](/manual/ai/popout.png)
 
 ## 怎么操作
+
+### 忙碌时排队
+
+同时使用的人较多时，对话会显示「排队中」，轮到后自动继续，不需要重复发送。等待你的回答或确认时，其他对话仍可推进；回答或确认后，这段对话会自动恢复。排队中的对话也可以停止。
 
 ### 两种会话
 

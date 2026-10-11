@@ -1,3 +1,4 @@
+import { admittedMmpRun } from "./admitted-run";
 // MMP 动态 capability 的统一执行器。调用方必须先完成附件归属或资产预览权限校验，
 // 本层只接受已经授权的稳定文件行，不把 media_id 暴露为 Click-In 授权凭证。
 
@@ -79,13 +80,13 @@ export async function runMmpCapability(
     }
 
     const source = media.get(presignedGet(args.file.r2Key, 15 * 60), undefined, args.file.mimeType);
-    const done = await client.run({
+    const done = await admittedMmpRun(client, {
       type: current.id,
       media: mmpMediaHandle(args.file.fileId, source),
       ...(tier ? { tier: tier as "cpu" | "gpu-fast" | "gpu" | "remote" } : {}),
       ...(args.params ? { params: args.params } : {}),
       priority: "interactive",
-    }, { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal });
+    }, { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal }, args.file.fileId);
     rememberMmpMediaId(args.file.fileId, done.media_id);
     if (!done.cached) {
       const timings = done.timings_ms ?? (done.result as { timings_ms?: Record<string, number> } | undefined)?.timings_ms;

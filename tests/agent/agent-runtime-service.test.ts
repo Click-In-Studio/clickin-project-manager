@@ -661,6 +661,48 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
   });
 
+  it("等待输入卸载上下文，单个驻留名额仍能推进其他对话并恢复原任务", async () => {
+    const { admissionLimits } = await import("@/lib/agent/runtime/admission");
+    const { resolveQuestion } = await import("@/lib/agent/runtime/questions");
+    const oldLimit = admissionLimits.context;
+    admissionLimits.context = 1;
+    const firstKey=createNewSessionKey(userId), secondKey=createNewSessionKey(userId);
+    sessions.push(firstKey,secondKey);
+    const { streamFn,seen } = scripted([
+      { calls:[{ type:"toolCall",id:"park-input",name:exposedName("ask_user"),arguments:{ questions:[{questionId:"q",header:"日期",question:"选哪天？",options:[{label:"周一"},{label:"周二"}]}] } }] },
+      { text:"第二个对话完成" }, { text:"原任务收到周一" }, {text:"追加要求已处理"},
+    ]);
+    runtimeOverrides.streamFn=streamFn;
+    try {
+      const first=await startRun({sessionId:firstKey,userId,message:"先问我日期"});
+      let questionId:string|undefined;
+      for (let i=0;i<200;i++) {
+        questionId=(await getPool().query("SELECT id FROM agent_question WHERE run_id=$1", [first.runId])).rows[0]?.id;
+        const resident=(await getPool().query("SELECT 1 FROM agent_admission WHERE run_id=$1 AND resource='context' AND state='active'", [first.runId])).rowCount;
+        if (questionId && !resident) break;
+        await new Promise((r)=>setTimeout(r,20));
+      }
+      expect(questionId).toBeDefined();
+      const second=await startRun({sessionId:secondKey,userId,message:"完成另一项工作"});
+      expect(second.status).toBe("queued");
+      expect((await collectUntilTerminal(secondKey)).some((l)=>l.type==="final" && l.text.includes("第二个对话完成"))).toBe(true);
+      await waitForIdle(secondKey);
+      expect((await getPool().query("SELECT status FROM agent_run WHERE id=$1", [first.runId])).rows[0].status).toBe("awaiting_answer");
+      expect(await steerRun(firstKey,"追加要求：安排上午")).toMatchObject({runId:first.runId});
+      await resolveQuestion(questionId!,{answers:{q:["周一"]}});
+      const resumed=await collectUntilTerminal(firstKey);
+      expect(resumed.some((l)=>l.type==="final" && l.text.includes("周一"))).toBe(true);
+      expect(resumed.some((l)=>l.type==="final" && l.text.includes("追加要求"))).toBe(true);
+      await waitForIdle(firstKey);
+      expect(seen).toHaveLength(4);
+      expect(JSON.stringify(seen[2].messages)).toContain("用户的回答");
+      expect(JSON.stringify(seen[3].messages)).toContain("追加要求：安排上午");
+    } finally {
+      await abortRun(firstKey); await abortRun(secondKey);
+      admissionLimits.context=oldLimit;
+    }
+  });
+
   it("模型调 ask_user → question 行（QuestionInfo 形态）→ 用户回答 → 模型看到答案；取消 → 错误结果", async () => {
     const { questionSession, resolveQuestion, listPendingQuestions } = await import("@/lib/agent/runtime/questions");
     const ask = (id: string): ToolCall => ({

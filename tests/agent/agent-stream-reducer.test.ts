@@ -13,6 +13,13 @@ const approval = {
 };
 
 describe("applyStreamLine", () => {
+  it("排队提示重放不重复，获得名额后移除并保留已有消息", () => {
+    const initial: Bubble[] = [{kind:"user",text:"继续任务"}];
+    const queued = applyStreamLine(initial,{type:"queued",active:true});
+    expect(applyStreamLine(queued,{type:"queued",active:true})).toEqual(queued);
+    expect(queued).toContainEqual({kind:"notice",text:"排队中，轮到后自动继续。"});
+    expect(applyStreamLine(queued,{type:"queued",active:false})).toEqual(initial);
+  });
   it("delta creates then updates a streaming bubble", () => {
     let b: Bubble[] = [{ kind: "user", text: "hi" }];
     b = applyStreamLine(b, { type: "delta", text: "你" });

@@ -1,3 +1,4 @@
+import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools } from "./admission";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { Type } from "typebox";
 import { CoreAgentHarness } from "../../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
@@ -170,10 +171,29 @@ async function execute(
   job: db.SubagentJob,
   ready: (handlers: { stop: () => Promise<void>; detach: () => void }) => void,
 ): Promise<void> {
+  const abort = new AbortController();
+  let detach = () => { abort.abort(); };
+  ready({ stop: async () => abort.abort(), detach: () => detach() });
+  const epoch = (await (await import("@/lib/pg")).getPool().query<{ execution_epoch: number }>("SELECT execution_epoch FROM agent_run WHERE id=$1", [job.id])).rows[0]?.execution_epoch ?? 0;
+  const ticket = await acquire(job.id, `context:${epoch+1}`, "context", abort.signal);
+  try {
+    abort.signal.throwIfAborted();
+    const started = await (await import("@/lib/pg")).getPool().query<{ execution_started_at: Date }>("UPDATE agent_run SET execution_epoch=execution_epoch+1,admission_class='subagent',execution_started_at=COALESCE(execution_started_at,now()) WHERE id=$1 RETURNING execution_started_at", [job.id]);
+    job.execution_started_at = started.rows[0].execution_started_at;
+    await runInAdmission(job.id, abort.signal, () => detach(), () => executeBody(job, (handlers) => { detach = handlers.detach; ready(handlers); }, abort));
+  } finally { await release(ticket); }
+}
+
+async function executeBody(
+  job: db.SubagentJob,
+  ready: (handlers: { stop: () => Promise<void>; detach: () => void }) => void,
+  abort: AbortController,
+): Promise<void> {
   const storage = await PgSessionStorage.load(job.session_id);
   if (!storage) return;
+  const epoch = (await (await import("@/lib/pg")).getPool().query<{ execution_epoch: number }>("SELECT execution_epoch FROM agent_run WHERE id=$1", [job.id])).rows[0].execution_epoch;
+  storage.bindRun(job.id,epoch);
   const session = new Session(storage);
-  const abort = new AbortController();
   let detached = false;
   let requested = job.context_request;
   let timedOut = false;
@@ -242,7 +262,7 @@ async function execute(
   const harness = new CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>({
     env: {} as ExecutionEnv,
     session,
-    tools,
+    tools: wrapTools(tools),
     activeToolNames: tools.map((t) => t.name),
     systemPrompt: SYSTEM,
     model: CHAT_MODEL,
@@ -257,7 +277,7 @@ async function execute(
     },
     runtime: {
       streamSimple:
-        subagentRuntimeOverrides.streamFn ?? llmRuntime().streamSimple,
+        admittedStream(subagentRuntimeOverrides.streamFn ?? llmRuntime().streamSimple),
       completeSimple: llmRuntime().completeSimple,
     },
   });
@@ -504,7 +524,9 @@ export async function waitSubagents(
       (r) => !["queued", "running", "compacting"].includes(r.status),
     );
   };
-  if (!(await settled()) && !signal.aborted) {
+  const scope = currentAdmissionScope();
+  const ready = scope ? await waitForInput(scope.runId, { kind: "subagent", ids, deadline: Date.now()+Math.min(timeoutS,60)*1000 }) : false;
+  if (!ready && !(await settled()) && !signal.aborted) {
     let finish!: () => void;
     const done = new Promise<void>((resolve) => {
       finish = resolve;
