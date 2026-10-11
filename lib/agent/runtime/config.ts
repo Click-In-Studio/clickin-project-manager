@@ -1,7 +1,7 @@
 // 自建运行时的模型与开关（#367 S2）。
 //
-// 模型事实（线上）：对话 deepseek-v4-flash；transcript compaction 摘要用 deepseek-v4-pro
-// （与记忆蒸馏同理：长上下文可靠度优先，低频可承受，§10-6 定谳）。
+// 模型事实（线上）：对话与 transcript compaction 使用同一个 DeepSeek 模型，
+// 让摘要请求复用相同前缀与 provider 缓存。
 //
 // ⚠ Model.cost 不再是装饰（#383）：限流的 credit 折算就从 provider 层算出的
 // usage.cost 来。加新模型必须同时登记单价，否则它的用量记 0 credit = 白嫖。
@@ -42,7 +42,6 @@ function deepseekModel(id: string, reasoning: boolean): Model {
 }
 
 export const CHAT_MODEL: Model = deepseekModel(process.env.AGENT_CHAT_MODEL ?? "deepseek-v4-flash", true);
-export const COMPACTION_MODEL: Model = deepseekModel(process.env.AGENT_COMPACTION_MODEL ?? "deepseek-v4-pro", true);
 
 export function deepseekApiKey(): string {
   const key = process.env.DEEPSEEK_API_KEY;

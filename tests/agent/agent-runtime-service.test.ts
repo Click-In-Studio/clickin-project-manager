@@ -24,7 +24,7 @@ import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attach
 const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
-type Step = { text: string; thinking?: string; wait?: Promise<void> } | { calls: ToolCall[] } | { hang: true };
+type Step = { text: string; thinking?: string; wait?: Promise<void> } | { calls: ToolCall[] } | { hang: true } | { error: string };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
   const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
@@ -41,6 +41,10 @@ function scripted(script: Step[]) {
       return stream;
     }
     queueMicrotask(async () => {
+      if ("error" in next) {
+        stream.push({ type: "error", reason: "error", error: { ...base(), content: [], stopReason: "error", errorMessage: next.error } });
+        return;
+      }
       if ("text" in next && next.wait) await next.wait;
       const final: AssistantMessage = "text" in next
         ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
@@ -67,10 +71,10 @@ function scripted(script: Step[]) {
   return { streamFn, seen };
 }
 
-async function collectUntilTerminal(sessionId: string, timeoutMs = 10_000): Promise<StreamLine[]> {
+async function collectUntilTerminal(sessionId: string, timeoutMs = 10_000, afterSeq = 0): Promise<StreamLine[]> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const rows = await readEventsSince(sessionId, 0);
+    const rows = await readEventsSince(sessionId, afterSeq);
     const lines = rows.map((r) => r.line);
     if (lines.some((l) => l.type === "final" || l.type === "aborted" || l.type === "error")) return lines;
     await new Promise((r) => setTimeout(r, 30));
@@ -470,32 +474,74 @@ describe("agent-runtime service", () => {
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
   });
 
-  it("分割回合压缩的历史和前缀分别准入，不能错误复用第一份摘要", async () => {
+  it("分割回合压缩的历史和前缀各自请求，并沿用原请求头", async () => {
     const complete=vi.spyOn(llmRuntime(),"completeSimple").mockImplementation(async(_model,ctx)=>({...base(),content:[{type:"text",text:ctx.systemPrompt!}],stopReason:"stop"}));
     let checks=0;
     runtimeOverrides.shouldCompactFn=()=>checks++===0;
     runtimeOverrides.compactFn=async(...args)=>{
-      const rt=args[8]!;
-      const history=await rt.completeSimple(args[1],{messages:[],systemPrompt:"历史摘要"});
-      const prefix=await rt.completeSimple(args[1],{messages:[],systemPrompt:"前缀摘要"});
+      const rt=args[9]!;
+      const history=await rt.completeSimple(args[2],{messages:[],systemPrompt:args[1].systemPrompt});
+      const prefix=await rt.completeSimple(args[2],{messages:[],systemPrompt:args[1].systemPrompt});
       return {ok:true,value:{summary:JSON.stringify([history.content,prefix.content]),firstKeptEntryId:args[0].firstKeptEntryId,tokensBefore:args[0].tokensBefore}};
     };
     runtimeOverrides.streamFn=scripted([{text:"执行完毕"}]).streamFn;
     const key=newKey();
     try {
+      const usageCursor = Number((await getPool().query("SELECT COALESCE(max(id),0) AS id FROM ai_usage")).rows[0].id);
       const started=await startRun({sessionId:key,userId,message:"旧上下文".repeat(60_000)});
       await collectUntilTerminal(key);await waitForIdle(key);
       expect(complete).toHaveBeenCalledTimes(2);
-      const results=(await getPool().query("SELECT result FROM agent_admission WHERE run_id=$1 AND operation_key LIKE 'compact:%' ORDER BY operation_key",[started.runId])).rows;
-      expect(results.map(row=>row.result.content[0].text)).toEqual(["历史摘要","前缀摘要"]);
+      expect(complete.mock.calls.every(([, context]) => context.systemPrompt?.includes("Click-In"))).toBe(true);
       const observations = (await getPool().query("SELECT data,ended_at FROM agent_observation WHERE run_id=$1 ORDER BY started_at", [started.runId])).rows;
       const requests = observations.filter(row => row.data.purpose === "compaction");
       expect(requests).toHaveLength(2);
       expect(requests.every(row => row.ended_at && row.data.stopReason === "stop")).toBe(true);
       expect(observations.some(row => row.data.triggered === true && row.data.status === "ok")).toBe(true);
-      expect(JSON.stringify(observations)).not.toContain("历史摘要");
-      expect(JSON.stringify(observations)).not.toContain("前缀摘要");
+      expect((await getPool().query(
+        "SELECT kind,model,tokens FROM ai_usage WHERE id>$1 AND user_id=$2 AND kind='chat_compaction'",
+        [usageCursor, userId],
+      )).rows).toEqual([{ kind: "chat_compaction", model: CHAT_MODEL.id, tokens: 20 }]);
+      expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [started.runId])).rows[0].task_credits)).toBeGreaterThan(0);
     }finally{complete.mockRestore();delete runtimeOverrides.compactFn;delete runtimeOverrides.shouldCompactFn;}
+  });
+
+  it("连续工具调用在下一次模型请求前压缩，并保留调用与结果配对", async () => {
+    let checks = 0;
+    runtimeOverrides.shouldCompactFn = () => checks++ === 1;
+    runtimeOverrides.compactFn = async (preparation) => ({
+      ok: true,
+      value: {
+        summary: "用户要求读取其参与的项目，工具调用已经完成。",
+        firstKeptEntryId: preparation.firstKeptEntryId,
+        tokensBefore: preparation.tokensBefore,
+      },
+    });
+    const readCall: ToolCall = {
+      type: "toolCall",
+      id: "c_compact_between_steps",
+      name: exposedName("my.productions"),
+      arguments: {},
+    };
+    const { streamFn, seen } = scripted([{ calls: [readCall] }, { text: "读取完成" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    try {
+      await startRun({ sessionId: key, userId, message: `请读取我的项目。${"历史说明".repeat(30_000)}` });
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(lines.at(-1)).toEqual({ type: "final", text: "读取完成" });
+      expect(seen).toHaveLength(2);
+      const second = JSON.stringify(seen[1].messages);
+      expect(second).toContain("c_compact_between_steps");
+      expect(second).toContain("toolResult");
+      expect((await getPool().query(
+        "SELECT count(*)::int AS n FROM agent_session_entry WHERE session_id=$1 AND type='compaction'",
+        [key],
+      )).rows[0].n).toBe(1);
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
   });
 
   it("压缩期间输入先持久化，压缩后作为 steer 消费，终态最后发出", async () => {
@@ -528,16 +574,19 @@ describe("agent-runtime service", () => {
       expect((await readEventsSince(key, 0)).map((row) => row.line.type)).not.toContain("final");
 
       expect(await steerRun(key, "压缩完成后继续处理这条")).toMatchObject({ runId: expect.any(String) });
-      expect((await getPool().query(`SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id = $1`, [key])).rows[0].n).toBe(1);
+      expect((await getPool().query(
+        `SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id = $1 AND message = $2`,
+        [key, "压缩完成后继续处理这条"],
+      )).rows[0].n).toBe(1);
       expect(await getHistory(key)).toEqual(expect.arrayContaining([
         expect.objectContaining({ role: "user", content: "压缩完成后继续处理这条" }),
       ]));
 
       finishCompact();
-      const lines = await collectUntilTerminal(key);
+      await collectUntilTerminal(key);
       await waitForIdle(key);
+      const lines = (await readEventsSince(key, 0)).map((row) => row.line);
       const types = lines.map((line) => line.type);
-      expect(types.indexOf("delta")).toBeLessThan(types.indexOf("compacting"));
       expect(types.indexOf("compacting")).toBeLessThan(types.lastIndexOf("final"));
       expect(lines.filter((line) => line.type === "compacting")).toEqual([
         { type: "compacting", active: true },
@@ -575,14 +624,80 @@ describe("agent-runtime service", () => {
     const key = newKey();
     try {
       const { runId } = await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
-      const lines = await collectUntilTerminal(key);
+      await collectUntilTerminal(key);
       await waitForIdle(key);
+      const lines = (await readEventsSince(key, 0)).map((row) => row.line);
       expect(lines.filter((line) => line.type === "compacting")).toEqual([
         { type: "compacting", active: true },
         { type: "compacting", active: false },
       ]);
       expect(lines.at(-1)).toEqual({ type: "final", text: "正文仍然有效" });
       expect((await getPool().query(`SELECT status FROM agent_run WHERE id = $1`, [runId])).rows[0].status).toBe("completed");
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
+  });
+
+  it("provider 明确报上下文超限时，只有持久压缩确实缩短后才重试一次", async () => {
+    runtimeOverrides.shouldCompactFn = () => false;
+    runtimeOverrides.compactFn = async (preparation) => ({
+      ok: true,
+      value: {
+        summary: "保留用户目标与关键进度。",
+        firstKeptEntryId: preparation.firstKeptEntryId,
+        tokensBefore: preparation.tokensBefore,
+      },
+    });
+    const { streamFn, seen } = scripted([
+      { text: "先保存这段历史" },
+      { error: "context_length_exceeded: maximum context length exceeded" },
+      { text: "压缩后恢复" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    try {
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const cursor = (await readEventsSince(key, 0)).at(-1)?.seq ?? 0;
+      const { runId } = await startRun({ sessionId: key, userId, message: "继续处理" });
+      const lines = await collectUntilTerminal(key, 10_000, cursor);
+      await waitForIdle(key);
+      expect(lines.at(-1)).toEqual({ type: "final", text: "压缩后恢复" });
+      expect(seen).toHaveLength(3);
+      expect(JSON.stringify(seen[2].messages).length).toBeLessThan(JSON.stringify(seen[1].messages).length);
+      expect((await getPool().query(
+        "SELECT count(*)::int AS n FROM agent_session_entry WHERE session_id=$1 AND type='compaction'",
+        [key],
+      )).rows[0].n).toBe(1);
+      expect((await getPool().query(
+        "SELECT count(*)::int AS n FROM agent_observation WHERE run_id=$1 AND data->>'purpose'='chat'",
+        [runId],
+      )).rows[0].n).toBe(2);
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
+  });
+
+  it("上下文超限后的压缩没有进展时不重放模型请求", async () => {
+    runtimeOverrides.shouldCompactFn = () => false;
+    runtimeOverrides.compactFn = async () => ({
+      ok: false,
+      error: new CompactionError("not_smaller", "摘要没有缩短上下文"),
+    });
+    const { streamFn, seen } = scripted([
+      { error: "context_length_exceeded: maximum context length exceeded" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    try {
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(seen).toHaveLength(1);
+      expect(lines.at(-1)?.type).toBe("error");
     } finally {
       delete runtimeOverrides.compactFn;
       delete runtimeOverrides.shouldCompactFn;

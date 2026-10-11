@@ -136,12 +136,12 @@ describe("新运行的数据库观测", () => {
     expect(migration).not.toMatch(/REFERENCES agent_memory_chunk/);
     const admission = readFileSync("lib/agent/runtime/admission.ts", "utf8");
     expect(admission).toContain("withObservationRun(runId");
-    expect(admission).toContain('observeModelRequest(model, context, "chat"');
+    expect(admission).toContain('observeModelRequest(model, requestContext, "chat"');
     for (const file of ["service", "subagents"]) {
       expect(readFileSync(`lib/agent/runtime/${file}.ts`, "utf8")).toContain("admittedStream(");
     }
-    const service = readFileSync("lib/agent/runtime/service.ts", "utf8");
-    expect(service).toContain("observeCompactionCheck(");
-    expect(service).toContain('observeModelRequest(args[0], args[1], "compaction"');
+    const compaction = readFileSync("lib/agent/runtime/request-compaction.ts", "utf8");
+    expect(compaction).toContain("observeCompactionCheck(");
+    expect(compaction).toContain('"compaction"');
   });
 });

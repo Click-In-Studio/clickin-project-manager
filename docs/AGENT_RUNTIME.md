@@ -35,7 +35,7 @@
 |---|---|---|
 | `AGENT_RUNNER_URL` | `http://127.0.0.1:3102` | 设了 → next 把 run 交给独立进程；不设 → next 进程内跑（测试/灰度首期） |
 | `AGENT_RUNNER_PORT` | 默认 `3102` | runner 监听端口（loopback） |
-| `AGENT_CHAT_MODEL` / `AGENT_COMPACTION_MODEL` | 默认 `deepseek-v4-flash` / `deepseek-v4-pro` | 对话 / transcript 压缩摘要 |
+| `AGENT_CHAT_MODEL` | 默认 `deepseek-v4-flash` | 对话与 transcript 压缩摘要使用同一模型，以复用请求前缀缓存 |
 | `DEEPSEEK_API_KEY` | | 与蒸馏共用（`.env.local`） |
 | `BRAVE_API_KEY` | | 联网搜索（`web.search`，与网关时代同一个 Brave key）；不配则该工具回复"未配置"，`web.fetch` 不受影响 |
 | `AGENT_WEB_FETCH_ALLOW_PRIVATE` | 未设 | `1` 时 `web.fetch` 放行内网地址——**只给测试**，线上绝不设 |

@@ -2,32 +2,38 @@ import { describe, it, expect } from "vitest";
 import { Type } from "typebox";
 import { createApiRegistry, createLlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
-import type { Model, ThinkingLevel } from "../../vendor/openclaw/packages/llm-core/src/types";
+import type { AssistantMessage, Model, ThinkingLevel } from "../../vendor/openclaw/packages/llm-core/src/types";
 import {
   CoreAgentHarness,
   InMemorySessionStorage,
   compact,
   prepareCompaction,
+  serializeConversation,
   type AgentMessage,
   type ExecutionEnv,
   type SessionTreeEntry,
 } from "../../vendor/openclaw/packages/agent-core/src/index";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
+import { convertToLlm } from "../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import type { RuntimeTool } from "@/lib/agent/runtime/resume";
 
 // #367 S1 出口判据①（真流式）与③（compaction 一次可读）——打真实 DeepSeek。
 // 没有 DEEPSEEK_API_KEY 时整文件跳过（CI 无 key）；有 key 时每次跑会花少量 token。
-// 线上事实：对话模型 deepseek-v4-flash；蒸馏/压缩用 deepseek-v4-pro（推理模型）。
+// 线上事实：对话与 transcript 压缩都使用 deepseek-v4-flash。
 
 const API_KEY = process.env.DEEPSEEK_API_KEY;
 const live = it.skipIf(!API_KEY);
 
 function deepseekModel(id: string, reasoning: boolean, maxTokens = 4096): Model {
+  const cost = id.includes("flash")
+    ? { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 }
+    : { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 };
   return {
     id, name: id, api: "openai-completions", provider: "deepseek",
     baseUrl: "https://api.deepseek.com/v1", reasoning, input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    cost,
     contextWindow: 128_000, maxTokens,
+    compat: { maxTokensField: "max_tokens" } as Model["compat"],
   };
 }
 const FLASH = deepseekModel("deepseek-v4-flash", false);
@@ -90,7 +96,8 @@ describe("判据①：@openclaw/ai 接 DeepSeek 真流式（经 vendor harness�
     // max_completion_tokens 字段，DeepSeek API 不认 → 这条只记录现象；下一条用
     // compat.maxTokensField="max_tokens" 覆盖后才真截断。S2 的 DeepSeek Model 定义
     // **必须**带这个 compat 覆盖，否则输出长度永远不受控。
-    const stream = llm.streamSimple(FLASH, {
+    const autoCompatModel = { ...FLASH, compat: undefined };
+    const stream = llm.streamSimple(autoCompatModel, {
       systemPrompt: "你是测试助手。",
       messages: [{ role: "user", content: [{ type: "text", text: "请写一篇 500 字的短文介绍舞台灯光设计。" }], timestamp: Date.now() }],
     }, { apiKey: API_KEY!, maxTokens: 16 });
@@ -131,7 +138,7 @@ describe("判据①：@openclaw/ai 接 DeepSeek 真流式（经 vendor harness�
   }, 120_000);
 });
 
-describe("判据③：compaction 触发一次，摘要可读（v4-pro 做摘要）", () => {
+describe("判据③：真实模型摘要策略对照", () => {
   function entry(i: number, message: AgentMessage): SessionTreeEntry {
     return { type: "message", id: `e${i}`, parentId: i === 0 ? null : `e${i - 1}`, timestamp: new Date().toISOString(), message };
   }
@@ -141,39 +148,95 @@ describe("判据③：compaction 触发一次，摘要可读（v4-pro 做摘要�
     return { role: "assistant", content: [{ type: "text", text }], api: FLASH.api, provider: FLASH.provider, model: FLASH.id, usage, stopReason: "stop", timestamp: Date.now() };
   }
 
-  live("长 transcript → prepareCompaction 切点 → compact 出结构化摘要并保留关键事实", async () => {
+  live("pro 独立序列化与 flash 原前缀方式对比成本、等待、缓存和恢复质量", async () => {
     const filler = "（这里是一大段无关紧要的排练闲聊，用来撑长度。）".repeat(40);
     const messages: AgentMessage[] = [
-      u("我们这部戏叫《潮汐》，灯光预算定为 8 万元，首演日期是 10 月 18 日。"),
-      a("记下了：《潮汐》，灯光预算 8 万元，首演 10 月 18 日。" + filler),
-      u("音响负责人是李明，他的需求是要三只无线话筒。" + filler),
-      a("好的，李明负责音响，需要三只无线话筒。" + filler),
-      u("另外舞美主色调定为深蓝。" + filler),
-      a("深蓝主色调已记录。" + filler),
-      u("最近这两句是新的：请帮我总结一下目前定下来的事项。"),
+      u("项目《潮汐》灯光预算暂记 8 万元，首演日期 10 月 18 日。引用位置：/wiki/lighting#block-42。"),
+      a("已记录。" + filler),
+      u("纠正：灯光预算改为 6.5 万元，8 万元作废。任何供应商订单都必须先由导演确认，不得自行发布。" + filler),
+      a("收到，以 6.5 万元为准，并保留导演确认边界。" + filler),
+      u("尚未完成：核对 S12 场灯位；下一步比较甲乙两家报价。舞美主色调仍是深蓝。摘要不能当成长期记忆或已批准事实。" + filler),
+      a("我会保留未完成项和下一步。" + filler),
+      u("下面继续讨论不影响上述约束的普通排练安排。" + filler),
+      a("好的，继续讨论普通安排。" + filler),
+      u("最近要求：继续整理，但不要把摘要当成长期记忆或已批准事实。"),
       a("正在整理。"),
     ];
     const entries = messages.map((m, i) => entry(i, m));
-    const session = new Session(new InMemorySessionStorage({ entries }));
-
-    // keepRecentTokens 压很小，逼切点落在中间，前面的历史被摘要
     const settings = { enabled: true, reserveTokens: 4000, keepRecentTokens: 300 };
     const prep = prepareCompaction(entries, settings);
     expect(prep.ok).toBe(true);
     if (!prep.ok || !prep.value) throw new Error("nothing to compact");
     expect(prep.value.messagesToSummarize.length).toBeGreaterThan(0);
 
-    const result = await compact(prep.value, PRO, API_KEY, undefined, "用中文写摘要", undefined, "low", undefined, llm);
+    const requestPrefix = {
+      systemPrompt: "你是 Click-In 制作助理。用户纠正优先；权限与批准状态必须准确保留。",
+      tools: [echoTool([])],
+    };
+
+    // 先发送一次共享前缀，随后真实读取新摘要请求的 cacheRead；是否命中由 provider 决定。
+    await llm.completeSimple(FLASH, {
+      ...requestPrefix,
+      messages: convertToLlm([...prep.value.messagesToSummarize, u("仅回复：收到")]),
+    }, { apiKey: API_KEY, maxTokens: 8 });
+
+    const legacyPrompt = `<conversation>\n${serializeConversation(convertToLlm(prep.value.messagesToSummarize))}\n</conversation>\n\n请用中文生成结构化上下文摘要，保留用户纠正、授权边界、未完成工作、关键约束、引用定位与下一步。`;
+    const legacyStarted = performance.now();
+    const legacy = await llm.completeSimple(PRO, {
+      systemPrompt: "你是上下文摘要助手。只输出摘要，不继续对话。",
+      messages: convertToLlm([u(legacyPrompt)]),
+    }, { apiKey: API_KEY, maxTokens: 1800, reasoning: "low" });
+    const legacyMs = performance.now() - legacyStarted;
+    const legacySummary = legacy.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("\n");
+
+    let currentResponse: AssistantMessage | undefined;
+    const currentStarted = performance.now();
+    const result = await compact(
+      prep.value,
+      requestPrefix,
+      FLASH,
+      API_KEY,
+      undefined,
+      "用中文写摘要",
+      undefined,
+      undefined,
+      undefined,
+      {
+        completeSimple: async (...args) => {
+          currentResponse = await llm.completeSimple(...args);
+          return currentResponse;
+        },
+      },
+    );
+    const currentMs = performance.now() - currentStarted;
     expect(result.ok).toBe(true);
     if (!result.ok) throw result.error;
     const summary = result.value.summary;
     expect(summary.length).toBeGreaterThan(50);
-    // 关键事实必须活下来（数字/人名/日期是压缩最容易丢的东西）
-    expect(summary).toMatch(/8\s*万|80,?000/);
-    expect(summary).toContain("李明");
-    expect(summary).toMatch(/10\s*月\s*18|10\/18|10-18/);
+    expect(summary).toMatch(/6\.5\s*万|65,?000/);
+    expect(summary).not.toMatch(/预算.{0,6}(?:为|是|定为)\s*8\s*万/);
+    expect(summary).toMatch(/导演.{0,12}(?:确认|批准)/);
+    expect(summary).toMatch(/S12/);
+    expect(summary).toMatch(/甲乙|两家|报价/);
+    expect(summary).toContain("/wiki/lighting#block-42");
+
+    const checks = (text: string) => ({
+      correctedBudget: /6\.5\s*万|65,?000/.test(text),
+      authorization: /导演.{0,12}(?:确认|批准)/.test(text),
+      unfinished: /S12/.test(text),
+      nextStep: /甲乙|两家|报价/.test(text),
+      citation: text.includes("/wiki/lighting#block-42"),
+      currentConstraint: /长期记忆|已批准事实/.test(text),
+    });
+    const evidence = {
+      legacy: { model: PRO.id, latencyMs: Math.round(legacyMs), usage: legacy.usage, quality: checks(legacySummary) },
+      current: { model: FLASH.id, latencyMs: Math.round(currentMs), usage: currentResponse?.usage, quality: checks(summary) },
+    };
+    expect(Object.values(evidence.current.quality).every(Boolean)).toBe(true);
+    console.log(`[compaction-comparison] ${JSON.stringify(evidence)}`);
 
     // 落库后 buildContext 以摘要开头，被压缩的旧历史不再回放
+    const session = new Session(new InMemorySessionStorage({ entries }));
     await session.appendCompaction(summary, result.value.firstKeptEntryId, result.value.tokensBefore, result.value.details);
     const ctx = await session.buildContext();
     const first = ctx.messages[0] as { role: string; summary?: string };

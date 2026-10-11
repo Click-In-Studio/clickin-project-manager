@@ -953,7 +953,8 @@ export class CoreAgentHarness<
     }
     this.phase = "compaction";
     try {
-      const model = this.model;
+      const turnState = await this.createTurnState();
+      const model = turnState.model;
       if (!model) {
         throw new AgentHarnessError("invalid_state", "No model set for compaction");
       }
@@ -985,6 +986,7 @@ export class CoreAgentHarness<
         ? { ok: true as const, value: provided }
         : await compact(
             preparation,
+            { systemPrompt: turnState.systemPrompt, tools: turnState.activeTools },
             model,
             auth.apiKey,
             auth.headers,

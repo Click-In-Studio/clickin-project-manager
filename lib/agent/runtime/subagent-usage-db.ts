@@ -6,7 +6,7 @@ import {
   quotaOwnerOf,
   chargeExtraCredits,
 } from "@/lib/agent/ai-quota";
-import { CHAT_MODEL, COMPACTION_MODEL } from "./config";
+import { CHAT_MODEL } from "./config";
 import { usdOfUsage } from "./billing";
 import type { SubagentJob } from "./subagent-db";
 import type { AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
@@ -60,7 +60,7 @@ export async function recordChildUsage(
             job.user_id,
             job.production_id,
             kind,
-            usage.compaction ? COMPACTION_MODEL.id : CHAT_MODEL.id,
+            CHAT_MODEL.id,
             tokens,
             billed,
             paid,
