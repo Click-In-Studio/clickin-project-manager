@@ -1,4 +1,5 @@
 import path from "node:path";
+import { mkdirSync } from "node:fs";
 import type { Pool } from "pg";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 import { newSessionId, newRunId, newScheduleId } from "@/lib/agent/runtime/ids";
@@ -7,6 +8,7 @@ import type { MigrationHookContext } from "../_support/global-setup";
 export const SNAPSHOT_PATH = path.resolve("node_modules/.cache/add-agent-admission-snapshot.json");
 export type Snapshot = { prodId: string; rows: Array<Record<string, unknown>> };
 export async function createPreMigrationData({ pool, testOwner }: MigrationHookContext): Promise<Snapshot> {
+  mkdirSync(path.dirname(SNAPSHOT_PATH), { recursive: true });
   const { prodId } = await makeProduction(testOwner);
   const schedule = newScheduleId();
   await pool.query("INSERT INTO agent_schedule(id,user_id,production_id,name,prompt,schedule) VALUES($1,$2,$3,'迁移任务','检查','{}')", [schedule, testOwner, prodId]);
