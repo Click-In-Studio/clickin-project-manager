@@ -691,11 +691,11 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
       expect(await steerRun(firstKey,"追加要求：安排上午")).toMatchObject({runId:first.runId});
       await resolveQuestion(questionId!,{answers:{q:["周一"]}});
       const resumed=await collectUntilTerminal(firstKey);
-      expect(resumed.some((l)=>l.type==="final" && l.text.includes("周一"))).toBe(true);
       expect(resumed.some((l)=>l.type==="final" && l.text.includes("追加要求"))).toBe(true);
       await waitForIdle(firstKey);
       expect(seen).toHaveLength(4);
       expect(JSON.stringify(seen[2].messages)).toContain("用户的回答");
+      expect(await getHistory(firstKey)).toContainEqual({role:"assistant",content:"原任务收到周一"});
       expect(JSON.stringify(seen[3].messages)).toContain("追加要求：安排上午");
     } finally {
       await abortRun(firstKey); await abortRun(secondKey);

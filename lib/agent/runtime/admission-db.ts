@@ -8,6 +8,7 @@ export async function requestAdmission(runId: string, key: string, resource: Adm
   const r = await getPool().query<AdmissionTicket>(
     `INSERT INTO agent_admission(id,run_id,operation_key,resource) VALUES($1,$2,$3,$4)
      ON CONFLICT(run_id,operation_key) DO UPDATE SET operation_key=EXCLUDED.operation_key,
+       ready_at=CASE WHEN agent_admission.resource<>'mmp' AND agent_admission.state='failed' THEN now() ELSE agent_admission.ready_at END,
        state=CASE WHEN agent_admission.resource<>'mmp' AND agent_admission.state='failed' THEN 'ready' ELSE agent_admission.state END RETURNING *`,
     [newRunId(), runId, key, resource],
   );

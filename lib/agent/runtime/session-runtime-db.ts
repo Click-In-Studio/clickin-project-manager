@@ -14,6 +14,7 @@ export async function sessionRuntimeSnapshot(
     parentStatus:
       row &&
       [
+        "queued",
         "running",
         "compacting",
         "awaiting_approval",

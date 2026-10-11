@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { getPool } from "@/lib/pg";
 import { makeProduction, cleanupProduction } from "../_support/factories";
 import { newSessionId, newRunId } from "@/lib/agent/runtime/ids";
-import { acquire, release, admissionLimits } from "@/lib/agent/runtime/admission";
+import { acquire, release, admissionLimits, runInAdmission, wrapTools, waitForInput } from "@/lib/agent/runtime/admission";
 import { requestAdmission, recoverAdmissions } from "@/lib/agent/runtime/admission-db";
 import type { AdmissionClass } from "@/lib/agent/runtime/admission-types";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
@@ -56,6 +56,12 @@ describe("所有来源共享资源准入", () => {
     abort.abort(); await rejection; await release(first);
     await until(async () => (await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1", [id])).rows[0]?.state==='failed');
   });
+  it("状态流快照保留 queued，刷新接回不会误判为已完成", async () => {
+    const id=await run();
+    const row=(await getPool().query("UPDATE agent_run SET status='queued' WHERE id=$1 RETURNING session_id",[id])).rows[0];
+    const {sessionRuntimeSnapshot}=await import("@/lib/agent/runtime/session-runtime-db");
+    expect(await sessionRuntimeSnapshot(row.session_id)).toEqual({parentRunId:id,parentStatus:"queued"});
+  });
   it("主任务等待子任务时，子任务继承优先级；并发领取不突破预算", async () => {
     const parent=await run(), child=await run("subagent"), ordinaryChild=await run("subagent");
     const sessionId=(await getPool().query("SELECT session_id FROM agent_run WHERE id=$1",[child])).rows[0].session_id;
@@ -92,6 +98,31 @@ describe("所有来源共享资源准入", () => {
     await expect(storage.appendEntry({ type:"message",id:entryId,parentId:null,timestamp:new Date().toISOString(),message:{role:"user",content:[{type:"text",text:"迟到输入"}],timestamp:Date.now()} })).rejects.toThrow("租约已失效");
     expect((await storage.getEntries()).some((e) => e.id===entryId)).toBe(false);
     expect((await getPool().query("SELECT 1 FROM agent_session_entry WHERE session_id=$1 AND entry_id=$2", [sessionId,entryId])).rowCount).toBe(0);
+  });
+  it("同回合有输入等待和在途工具时，先保留上下文，工具完成后才挂起", async () => {
+    const id=await run();
+    const sessionId=(await getPool().query("UPDATE agent_run SET owner=$2 WHERE id=$1 RETURNING session_id",[id,RUNNER_OWNER])).rows[0].session_id;
+    const {createOrReuseQuestion}=await import("@/lib/agent/runtime/questions");
+    const q=await createOrReuseQuestion({runId:id,sessionId,toolCallId:"mixed-input",questions:[{questionId:"q",header:"选择",question:"选哪个？",options:[{label:"甲"},{label:"乙"}]}]});
+    const abort=new AbortController();let parked=0,finishWork!:()=>void;
+    const inFlight=new Promise<void>(r=>{finishWork=r;});
+    const tools=wrapTools([
+      {mcpName:"input",name:"input",label:"input",description:"",parameters:{type:"object"},readOnly:true,execute:async()=>{
+        await waitForInput(id,{kind:"question",id:q.id});
+        await new Promise<void>(r=>{if(abort.signal.aborted)r();else abort.signal.addEventListener("abort",()=>r(),{once:true});});
+        return {content:[],details:undefined};
+      }},
+      {mcpName:"work",name:"work",label:"work",description:"",parameters:{type:"object"},readOnly:true,execute:async()=>{await inFlight;return {content:[{type:"text" as const,text:"已完成"}],details:undefined};}},
+    ]);
+    const executing=runInAdmission(id,abort.signal,()=>{parked++;abort.abort();},async()=>{
+      await Promise.all(tools.map((tool,i)=>tool.execute(`mixed-${i}`,{},abort.signal)));
+    });
+    try {
+      await until(async()=>(await getPool().query("SELECT input_wait FROM agent_run WHERE id=$1",[id])).rows[0].input_wait?.kind==="question");
+      expect(parked).toBe(0);
+      finishWork();await executing;expect(parked).toBe(1);
+      expect((await getPool().query("SELECT result FROM agent_tool_operation WHERE run_id=$1 AND tool_call_id='mixed-1'",[id])).rows[0].result.content).toEqual([{type:"text",text:"已完成"}]);
+    }finally{finishWork();abort.abort();await executing;await getPool().query("UPDATE agent_run SET input_wait=NULL WHERE id=$1",[id]);}
   });
   it("注册点：主、子、压缩、OCR、动态能力与预检均接入实际资源边界", () => {
     for (const file of ["service.ts","subagents.ts"]) {

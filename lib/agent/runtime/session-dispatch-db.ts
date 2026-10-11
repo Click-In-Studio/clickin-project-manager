@@ -91,9 +91,9 @@ export async function claimPendingSession(
             ).rows[0]?.id ?? null)
           : null;
     await client.query(
-      `INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at,model,budget_run_id)
-      VALUES($1,$2,'queued',$3,now(),$4,$5)`,
-      [runId, sessionId, owner, model, budget],
+      `INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at,model,budget_run_id,admission_class)
+      VALUES($1,$2,'queued',$3,now(),$4,$5,$6)`,
+      [runId, sessionId, owner, model, budget, first.kind === "user_message" ? "interactive" : "subagent"],
     );
     await client.query(
       "UPDATE agent_session_inbox SET claimed_run_id=$2 WHERE id=ANY($1::text[])",

@@ -96,7 +96,9 @@ export default function SubagentPanel({
       setChildren(data.subagents);
       if (data.parentRunId) {
         const status =
-          data.parentStatus === "compacting"
+          data.parentStatus === "queued"
+            ? "queued"
+            : data.parentStatus === "compacting"
             ? "compacting"
             : data.parentStatus
               ? "running"

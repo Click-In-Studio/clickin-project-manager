@@ -72,4 +72,10 @@ describe("子助理状态流接回主会话", () => {
     await act(async () => StatusStream.current.send("后台轮次3", null));
     expect(ready).toHaveBeenCalledOnce();
   });
+  it("排队中的主轮次仍接流，不当作已完成刷新历史", async () => {
+    const onParentRun=vi.fn(async()=>true);
+    await act(async()=>root.render(<SubagentPanel sessionKey="排队会话" onParentRun={onParentRun}/>));
+    await act(async()=>StatusStream.current.send("queued-run","queued"));
+    expect(onParentRun).toHaveBeenCalledWith("queued");
+  });
 });

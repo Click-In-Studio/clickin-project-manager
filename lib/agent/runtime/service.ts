@@ -40,7 +40,7 @@ import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
 import { approvalCard, permissionActivationCard } from "./cards";
-import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
+import { createApproval, awaitApproval, markApprovalExecuted, canResumeApprovalGate } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
 import { repairAndClassify, findPendingToolCalls } from "./resume";
 import { claimPendingSession, sessionsWithPendingInputs } from "./session-dispatch-db";
@@ -174,8 +174,8 @@ export async function startRun(
     );
     if (busy.rowCount) throw new SessionBusyError();
     await client.query(
-      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from)
-      VALUES($1,$2,'queued',$3,now(),$4,$5,$6,$7)`,
+      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from,admission_class)
+      VALUES($1,$2,'queued',$3,now(),$4,$5,$6,$7,$8)`,
       [
         runId,
         input.sessionId,
@@ -184,6 +184,7 @@ export async function startRun(
         CHAT_MODEL.id,
         input.scheduleId ?? null,
         paidFrom,
+        input.scheduleId ? "schedule" : "interactive",
       ],
     );
     inboxId = (await import("./ids")).newInboxId();
@@ -205,7 +206,6 @@ export async function startRun(
   } finally {
     client.release();
   }
-  await getPool().query("UPDATE agent_run SET admission_class=$2 WHERE id=$1", [runId, input.scheduleId ? "schedule" : "interactive"]);
   const queuedPublisher = new EventPublisher(input.sessionId,runId);
   queuedPublisher.publish({ type: "queued", active: true });
   await queuedPublisher.drain();
@@ -644,7 +644,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     } else {
       const decision = await repairAndClassify(session, toolByName, {
         signal: abort.signal,
-        canReexecuteWrite: (call) => approvalAllowsReexecute(sessionId, call.id),
+        canReexecuteWrite: (call) => canResumeApprovalGate(sessionId, call.id),
       });
       if (decision.kind === "continue") {
         // 审批待答/已批未执行的写工具：重新过确认门（复用同一张卡）后补结果，再续跑
@@ -1383,7 +1383,6 @@ export async function dispatchPendingSession(sessionId: string): Promise<void> {
   // 系统唤醒是原任务的续跑；不会因为子任务已经消耗额度而丢掉交付。
   const paidFrom = (await runPaidFrom(runId)) ?? await resolvePaidFrom(meta.userId, meta.productionId);
   await setRunPaidFrom(runId, paidFrom);
-  await getPool().query("UPDATE agent_run SET admission_class=$2 WHERE id=$1", [runId, first ? "interactive" : "subagent"]);
   await startExecution({
     sessionId, runId, userId: meta.userId, paidFrom,
     ...(first

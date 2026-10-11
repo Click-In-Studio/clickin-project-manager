@@ -138,7 +138,7 @@ export async function waitForInput(runId: string, wait: InputWait): Promise<bool
   });
   await scope.waitTail;
   // 同回合其他工具结束后也会再次检查；有在途工作时不卸载上下文。
-  if (scope.busy <= scope.waits.size) scope.park();
+  if (!scope.signal.aborted && scope.busy <= scope.waits.size) scope.park();
   return false;
 }
 export function wrapTools(tools: RuntimeToolDef[]): RuntimeToolDef[] {
@@ -170,7 +170,7 @@ export function wrapTools(tools: RuntimeToolDef[]): RuntimeToolDef[] {
         });
         await scope.waitTail;
       }
-      if (scope.wait && scope.busy <= scope.waits.size && !(await db.inputWaitReady(scope.wait))) scope.park();
+      if (scope.wait && scope.busy <= scope.waits.size && !scope.signal.aborted && !(await db.inputWaitReady(scope.wait)) && !scope.signal.aborted) scope.park();
     }
   } }));
 }
@@ -196,24 +196,26 @@ export function admittedStream(streamFn: StreamFn): StreamFn {
   return (model, context, options) => {
     const scope = scopeStorage.getStore();
     if (!scope) return streamFn(model, context, options);
+    const signal = options?.signal ? AbortSignal.any([scope.signal, options.signal]) : scope.signal;
     const out = createAssistantMessageEventStream();
     void (async () => {
       let ticket: AdmissionTicket | undefined;
       let result: AssistantMessage | undefined;
       try {
-        ticket = await acquire(scope.runId, `llm:${model.id}:${await db.continuationKey(scope.runId)}`, "llm", options?.signal ?? scope.signal);
+        ticket = await acquire(scope.runId, `llm:${model.id}:${await db.continuationKey(scope.runId)}`, "llm", signal);
         if (ticket.state === "done" && ticket.result) {
           result = ticket.result as AssistantMessage;
           out.push({ type: "done",reason: result.stopReason as "stop" | "length" | "toolUse",message: result });
           return;
         }
-        const stream = await streamFn(model, context, options);
+        signal.throwIfAborted();
+        const stream = await streamFn(model, context, {...options,signal});
         for await (const event of stream) {
           if (event.type === "done") result = event.message;
           out.push(event);
         }
       } catch (e) {
-        const aborted = (options?.signal ?? scope.signal).aborted;
+        const aborted = signal.aborted;
         out.push({ type: "error", reason: aborted ? "aborted" : "error", error: {
           role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id,
           timestamp: Date.now(), stopReason: aborted ? "aborted" : "error", errorMessage: String(e),

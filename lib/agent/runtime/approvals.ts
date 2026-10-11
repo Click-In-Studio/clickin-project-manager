@@ -79,7 +79,7 @@ export async function createApproval(
  * 权限激活已经完成、但原写确认尚未创建时也可恢复——激活幂等且原工具还没执行。
  * 原写确认已执行则副作用未知，不能再借激活记录复活。因此下面的
  * NOT EXISTS 刻意看全部写确认行，不加 expires_at 过滤。 */
-export async function approvalAllowsReexecute(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
+export async function canResumeApprovalGate(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
   const r = await pool.query(
     `SELECT 1 FROM agent_approval a
      WHERE a.session_id = $1 AND a.tool_call_id = $2
