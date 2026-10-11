@@ -1,6 +1,6 @@
-import { setToolObservationSources, addObservationTools, observeModelRequest, observeCompactionCheck } from "./observation";
-import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait } from "./admission";
-import { cancelAdmissions, inputWaitReady, recoverAdmissions, continuationKey, completedChatMessages } from "./admission-db";
+import { setToolObservationSources, addObservationTools } from "./observation";
+import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait, type PrepareAdmittedRequest } from "./admission";
+import { cancelAdmissions, inputWaitReady, recoverAdmissions, completedChatMessages } from "./admission-db";
 import type { InputWait } from "./admission-types";
 // 自建运行时的 run 服务（#367 S2）：把 vendor harness、PG 会话树、事件分发、
 // 审批门、注入链、记账串成一次 run。既可在 next 进程内跑（测试/灰度首期），也是
@@ -10,7 +10,8 @@ import type { InputWait } from "./admission-types";
 //   ensureSession → agent_run(running, owner, heartbeat) → 注入链 → harness
 //   → [hooks: context(召回临时插入) / tool_call(审批门) / tool_result(方言幂等)]
 //   → 事件经 StreamLine 适配器 → EventPublisher（agent_event + NOTIFY）
-//   → 收尾：记账 ai_usage、compaction 检查、episodic 上报、agent_run 终态
+//   → 每次模型请求前预算检查 / 必要时 compaction
+//   → 收尾：记账 ai_usage、episodic 上报、agent_run 终态
 //
 // 会话 id = 网关时代的 sessionKey 原样（clickin:chat:<userId>[:<productionId>]:<uuid>）
 // ——路由的所有权判定、前端持有的 key、localStorage 记忆全部不用改。
@@ -25,8 +26,8 @@ import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
 import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
 import { CoreAgentHarness } from "../../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
 import { Session } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/session";
-import { compact, estimateContextTokens, shouldCompact, DEFAULT_COMPACTION_SETTINGS } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
-import type { ExecutionEnv, PromptTemplate, Skill } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
+import { compact } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
+import type { ExecutionEnv } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AgentMessage } from "../../../vendor/openclaw/packages/agent-core/src/types";
 import type { ToolCall } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/types";
@@ -49,13 +50,12 @@ import { runPaidFrom, setRunPaidFrom } from "./session-runtime-db";
 import { newRunId } from "./ids";
 import {
   enqueueSessionInput,
-  finishCompactionAndListInputs,
   pendingInputsForSession,
   pendingInputsForRun,
   reconcileConsumedInputs,
 } from "./session-inbox";
 import {
-  CHAT_MODEL, COMPACTION_MODEL, deepseekApiKey, llmRuntime,
+  CHAT_MODEL, deepseekApiKey, llmRuntime,
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
@@ -71,6 +71,7 @@ import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
+import { compactRequestContext } from "./request-compaction";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -86,7 +87,6 @@ import { usdOfUsage } from "./billing";
 // 我们的工具不碰文件系统/shell；harness 只把 env 传给 systemPrompt 回调
 const NO_ENV = {} as ExecutionEnv;
 
-type Harness = CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>;
 type ActiveRun = {
   runId: string;
   abort: AbortController;
@@ -104,7 +104,7 @@ export const runtimeOverrides: {
   mmpClient?: MmpClient | null;
   /** 测试注入：不触网验证自动压缩的阶段与竞态。 */
   compactFn?: typeof compact;
-  shouldCompactFn?: typeof shouldCompact;
+  shouldCompactFn?: (estimatedInputTokens: number, threshold: number) => boolean;
 } = {};
 
 export class SessionBusyError extends Error {
@@ -423,7 +423,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   let tools = buildTools({ userId, productionId, run: runHandle });
   let toolByName = new Map(tools.map((t) => [t.name, t]));
   // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
-  // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
+  // compaction 单列：它是独立模型请求且不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
   const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,CHAT_MODEL),0);
@@ -512,6 +512,58 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       resident: tiers.hot, page: tiers.page, recall: recalled, recent: used,
       dependency: tiers.dependencies, dynamic: [...mmpSurface.tools.map(t => t.mcpName), ...attachmentLifecycle.toolNames],
     }).map(([source, names]) => [source, names.map(exposedName)])), tiers.mode);
+    const injectedNote = [priorCapNote, recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
+    const withInjectedNote = (messages: AgentMessage[]): AgentMessage[] => {
+      if (!injectedNote) return messages;
+      const idx = findLastUserIndex(messages);
+      if (idx < 0) return messages;
+      const injected: AgentMessage = {
+        role: "user",
+        content: [{ type: "text", text: injectedNote }],
+        timestamp: Date.now(),
+      };
+      return [...messages.slice(0, idx), injected, ...messages.slice(idx)];
+    };
+    const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal }) =>
+      compactRequestContext({
+        session,
+        context,
+        model,
+        apiKey: runtimeOverrides.apiKey ?? deepseekApiKey(),
+        signal,
+        trigger,
+        maxTokens: options?.maxTokens,
+        completeSimple: llmRuntime().completeSimple,
+        compactFn: runtimeOverrides.compactFn,
+        shouldCompact: runtimeOverrides.shouldCompactFn,
+        refreshContext: async (requestContext) => {
+          // 指令、长期记忆和项目资格是权威状态：每个 provider 请求边界现读。
+          // buildInjectContext 对未变化内容保持确定表达；临时 recall 仍只在消息尾部，
+          // 不会因刷新 system 而重复注入或进入持久 transcript。
+          const currentInject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
+          return { ...requestContext, systemPrompt: buildSystemPrompt(currentInject) };
+        },
+        rebuildMessages: withInjectedNote,
+        onCompacting: async (active) => {
+          const next = active ? "compacting" : "running";
+          const previous = active ? "running" : "compacting";
+          const changed = await pool.query(
+            `UPDATE agent_run SET status=$2 WHERE id=$1 AND execution_epoch=$3 AND owner=$4 AND status=$5`,
+            [runId, next, input.epoch, RUNNER_OWNER, previous],
+          );
+          if (!changed.rowCount && !abort.signal.aborted) throw new Error("run 压缩状态切换失败");
+          publisher.publish({ type: "compacting", active });
+        },
+        onUsage: async (cost) => {
+          usage.compactionUsd += cost.usd;
+          usage.compactionTokens += cost.tokens;
+          if (cost.usd && !(await (await import("./subagent-db")).addTaskCost(runId, cost.usd))) {
+            costCapAborted = true;
+            abort.abort();
+            await (await import("./subagents")).stopSubagent(sessionId, undefined, "任务成本硬顶触发");
+          }
+        },
+      });
 
     const harness = new CoreAgentHarness({
       env: NO_ENV,
@@ -534,8 +586,8 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         return { apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() };
       },
       runtime: runtimeOverrides.streamFn
-        ? { streamSimple: admittedStream(runtimeOverrides.streamFn), completeSimple: llmRuntime().completeSimple }
-        : { streamSimple: admittedStream(llmRuntime().streamSimple), completeSimple: llmRuntime().completeSimple },
+        ? { streamSimple: admittedStream(runtimeOverrides.streamFn, prepareRequest), completeSimple: llmRuntime().completeSimple }
+        : { streamSimple: admittedStream(llmRuntime().streamSimple, prepareRequest), completeSimple: llmRuntime().completeSimple },
     });
     abortHarness = async () => { await harness.abort(); };
     warmAttachmentsImpl = async (attachmentIds) => {
@@ -561,13 +613,9 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
 
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
-    const injectedNote = [priorCapNote, recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
     if (injectedNote) {
       harness.on("context", ({ messages }) => {
-        const idx = findLastUserIndex(messages);
-        if (idx < 0) return undefined;
-        const injected: AgentMessage = { role: "user", content: [{ type: "text", text: injectedNote }], timestamp: Date.now() };
-        return { messages: [...messages.slice(0, idx), injected, ...messages.slice(idx)] };
+        return { messages: withInjectedNote(messages) };
       });
     }
 
@@ -704,45 +752,11 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
 
     await reconcileConsumedInputs(sessionId);
 
-    // 自动压缩（agent-core 的 compact() 是手动的；触发由这里驱动，摘要用 pro）。
-    // 压缩期间的新输入先落 inbox；压缩结束后用压缩后的上下文在同一 run 继续。
+    // 新输入与子 Agent 事件仍在同一 run 内续跑；每次真正请求模型前由
+    // admittedStream 检查完整请求预算并在安全边界压缩。
     for (;;) {
-      const compaction = await maybeCompact(harness, session, abort.signal, async () => {
-        try {
-          const transitioned = await pool.query(
-            `UPDATE agent_run SET status = 'compacting' WHERE id = $1 AND status = 'running'`,
-            [runId],
-          );
-          if (transitioned.rowCount !== 1) throw new Error("run 未能进入 compacting 状态");
-          publisher.publish({ type: "compacting", active: true });
-        } catch (error) {
-          throw error;
-        }
-      });
-      usage.compactionUsd += compaction.usd;
-      usage.compactionTokens += compaction.tokens;
-      if (compaction.usd && !(await (await import("./subagent-db")).addTaskCost(runId,compaction.usd))) {
-        costCapAborted=true;abort.abort();await (await import("./subagents")).stopSubagent(sessionId,undefined,"任务成本硬顶触发");
-      }
       await reconcileConsumedInputs(sessionId);
-      let queued = await pendingInputsForRun(sessionId, runId);
-      const preparedById = new Map<string, string>();
-      if (compaction.triggered) {
-        // 预检可能耗时；期间新增的输入也必须纳入本批。只有在会话锁内确认
-        // “已预检集合 = 当前 inbox 集合”时才把状态切回 running。
-        for (;;) {
-          for (const row of queued) {
-            if (preparedById.has(row.id)) continue;
-            preparedById.set(row.id, await withAttachmentPreflight(
-              row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal,
-            ));
-          }
-          const finished = await finishCompactionAndListInputs(sessionId, runId, queued.map((row) => row.id));
-          queued = finished.rows;
-          if (finished.finished) break;
-        }
-        publisher.publish({ type: "compacting", active: false });
-      }
+      const queued = await pendingInputsForRun(sessionId, runId);
       if (abort.signal.aborted) {
         status = "aborted";
         break;
@@ -757,7 +771,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       for (const row of queued) {
         preparedQueued.push({
           id: row.id,
-          message: preparedById.get(row.id) ?? await withAttachmentPreflight(
+          message: await withAttachmentPreflight(
             row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal,
           ),
         });
@@ -910,7 +924,7 @@ async function recordUsage(
     await pool.query(
       `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
        VALUES ($1, $2, 'chat_compaction', $3, $4, $5, $6)`,
-      [userId, productionId, COMPACTION_MODEL.id, usage.compactionTokens, compactionCredits, paid],
+      [userId, productionId, CHAT_MODEL.id, usage.compactionTokens, compactionCredits, paid],
     );
   }
   const total = credits + compactionCredits;
@@ -1140,84 +1154,6 @@ async function permissionActivationGate(g: GateInput, rawKeys: string[]): Promis
 function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
-
-// ── 压缩 ─────────────────────────────────────────────────────────────────────
-
-/**
- * 自动压缩。返回本次压缩的花费（美元与 token），由调用方并进本轮账。
- *
- * 压缩不走 harness 的 message_end，所以它的用量**此前完全没记**——而它用的是
- * v4-pro（3 倍单价）、一次就吃掉整个 transcript。这里把 completeSimple 包一层
- * 取 usage，不必改 vendor（compact 的 runtime 参数是现成的注入点）。
- */
-export async function maybeCompact(
-  harness: Harness,
-  session: Session,
-  signal: AbortSignal,
-  onCompacting?: () => Promise<void>,
-  onUsage?: (cost: { usd: number; tokens: number }) => Promise<void>,
-): Promise<CompactionCost> {
-  const zero: CompactionCost = { usd: 0, tokens: 0, triggered: false };
-  if (signal.aborted) return zero;
-  const ctx = await session.buildContext();
-  const contextEstimate = estimateContextTokens(ctx.messages);
-  const { tokens } = contextEstimate;
-  const triggered = (runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS);
-  const compactionObservation = await observeCompactionCheck({ contextEstimate, contextWindow: CHAT_MODEL.contextWindow,
-    reserveTokens: DEFAULT_COMPACTION_SETTINGS.reserveTokens, keepRecentTokens: DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
-    threshold: CHAT_MODEL.contextWindow - DEFAULT_COMPACTION_SETTINGS.reserveTokens, triggered });
-  if (!triggered) { await compactionObservation.finish("skipped"); return zero; }
-  const cost: CompactionCost = { usd: 0, tokens: 0, triggered: true };
-  const rt = llmRuntime();
-  let compactionRequest = 0;
-  const tapped = {
-    completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
-      const { currentAdmissionScope } = await import("./admission");
-      const scope = currentAdmissionScope();
-      const queuedAt = performance.now();
-      const ticket = scope ? await acquire(scope.runId, `compact:${await continuationKey(scope.runId)}:${compactionRequest++}`, "llm", signal) : undefined;
-      let msg: Awaited<ReturnType<typeof rt.completeSimple>> | undefined;
-      let observation: Awaited<ReturnType<typeof observeModelRequest>> | undefined;
-      try {
-        if (ticket?.state === "done" && ticket.result) msg = ticket.result as typeof msg;
-        else {
-          observation = await observeModelRequest(args[0], args[1], "compaction", performance.now() - queuedAt, args[2]?.maxTokens);
-          msg = await rt.completeSimple(...args);
-        }
-      }
-      finally {
-        await observation?.finish(msg, msg?.stopReason ?? (signal.aborted ? "aborted" : "error"));
-        if (ticket) await release(ticket,msg ? "done" : "failed",msg);
-      }
-      if (!msg) throw new Error("压缩响应为空");
-      if (msg.role === "assistant" && msg.usage) {
-        cost.usd += usdOfUsage(msg.usage, COMPACTION_MODEL);
-        cost.tokens += msg.usage.input + msg.usage.output + msg.usage.cacheRead;
-        await onUsage?.({usd:usdOfUsage(msg.usage, COMPACTION_MODEL),tokens:msg.usage.input+msg.usage.output+msg.usage.cacheRead});
-      }
-      return msg;
-    },
-  };
-  const off = harness.on("session_before_compact", async ({ preparation, signal: s }) => {
-    const result = await (runtimeOverrides.compactFn ?? compact)(preparation, COMPACTION_MODEL, runtimeOverrides.apiKey ?? deepseekApiKey(), undefined, "用中文写摘要", s, "low", undefined, tapped);
-    if (!result.ok) throw result.error;
-    return { compaction: result.value };
-  });
-  let compactionStatus: "ok" | "error" = "ok";
-  try {
-    await onCompacting?.();
-    await harness.compact();
-  } catch (err) {
-    compactionStatus = "error";
-    console.error("[agent-runtime] compaction failed (continuing):", err);
-  } finally {
-    off();
-    await compactionObservation.finish(compactionStatus);
-  }
-  return cost;
-}
-
-type CompactionCost = { usd: number; tokens: number; triggered: boolean };
 
 // ── 历史与列表（前端契约同网关时代）────────────────────────────────────────────
 

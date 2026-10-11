@@ -82,4 +82,21 @@ describe("base prompt 与工具注册表同源", () => {
     }
     expect(text).not.toContain("没有向用户主动提问的工具");
   });
+
+  it("稳定 system 前缀按 base、指令、页面知识、记忆的固定顺序组装", () => {
+    const payload = {
+      instructions: "制作指令后接个人指令",
+      knowledge: "当前页面知识",
+      memory: "当前仍有效的记忆",
+    };
+    const first = buildSystemPrompt(payload);
+    const second = buildSystemPrompt(payload);
+    const instructions = first.lastIndexOf("<clickin-instructions>");
+    const knowledge = first.lastIndexOf("<clickin-knowledge>");
+    const memory = first.lastIndexOf("<clickin-memory>");
+    expect(second).toBe(first);
+    expect(first.indexOf("团队 agent 行为规范")).toBeLessThan(instructions);
+    expect(instructions).toBeLessThan(knowledge);
+    expect(knowledge).toBeLessThan(memory);
+  });
 });

@@ -1,5 +1,5 @@
 import { setToolObservationSources } from "./observation";
-import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools } from "./admission";
+import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools, type PrepareAdmittedRequest } from "./admission";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { Type } from "typebox";
 import { CoreAgentHarness } from "../../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
@@ -29,6 +29,7 @@ import { subscribeSessionEvents } from "./events";
 import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
+import { compactRequestContext } from "./request-compaction";
 
 const TIMEOUT_MS = 30 * 60_000;
 const TOOL_CAP = 100;
@@ -261,6 +262,37 @@ async function executeBody(
     },
   ];
   setToolObservationSources({ resident: tools.map(t => t.name) });
+  const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal }) => {
+    const serviceRuntime = (await import("./service")).runtimeOverrides;
+    return compactRequestContext({
+      session,
+      context,
+      model,
+      apiKey: serviceRuntime.apiKey ?? deepseekApiKey(),
+      signal,
+      trigger,
+      maxTokens: options?.maxTokens,
+      completeSimple: llmRuntime().completeSimple,
+      compactFn: serviceRuntime.compactFn,
+      shouldCompact: serviceRuntime.shouldCompactFn,
+      onCompacting: async (active) => {
+        await db.setChildRunStatus(job.id, active ? "compacting" : "running");
+        await db.signalSubagentState(job.parent_session_id);
+      },
+      onUsage: async (cost) => {
+        if (!(await recordChildUsage(job, `acu_${newRunId()}`, {
+          input: cost.tokens,
+          output: 0,
+          cacheRead: 0,
+          usd: cost.usd,
+          compaction: true,
+        }))) {
+          costExceeded = true;
+          abort.abort();
+        }
+      },
+    });
+  };
   const harness = new CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>({
     env: {} as ExecutionEnv,
     session,
@@ -279,7 +311,7 @@ async function executeBody(
     },
     runtime: {
       streamSimple:
-        admittedStream(subagentRuntimeOverrides.streamFn ?? llmRuntime().streamSimple),
+        admittedStream(subagentRuntimeOverrides.streamFn ?? llmRuntime().streamSimple, prepareRequest),
       completeSimple: llmRuntime().completeSimple,
     },
   });
@@ -402,34 +434,6 @@ async function executeBody(
       }
     }
     await costTail;
-    if (!abort.signal.aborted && !requested) {
-      await (
-        await import("./service")
-      ).maybeCompact(
-        harness,
-        session,
-        abort.signal,
-        async () => {
-          await db.setChildRunStatus(job.id, "compacting");
-          await db.signalSubagentState(job.parent_session_id);
-        },
-        async (cost) => {
-          if (
-            !(await recordChildUsage(job, `acu_${newRunId()}`, {
-              input: cost.tokens,
-              output: 0,
-              cacheRead: 0,
-              usd: cost.usd,
-              compaction: true,
-            }))
-          ) {
-            costExceeded = true;
-            abort.abort();
-          }
-        },
-      );
-      await db.setChildRunStatus(job.id, "running");
-    }
     const messages = (await session.buildContext()).messages;
     const last = messages.at(-1);
     if (last?.role === "assistant" && last.stopReason === "error")

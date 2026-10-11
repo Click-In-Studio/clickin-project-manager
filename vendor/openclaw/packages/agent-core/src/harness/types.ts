@@ -164,6 +164,9 @@ export class ExecutionError extends Error {
 export type CompactionErrorCode =
   | "aborted"
   | "summarization_failed"
+  | "truncated"
+  | "empty_summary"
+  | "not_smaller"
   | "invalid_session"
   | "unknown";
 

@@ -444,6 +444,7 @@ export function findCutPoint(
   };
 }
 
+// 分支摘要仍走独立请求；下面的 transcript 压缩保留普通请求前缀，以复用 provider KV cache。
 export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
@@ -481,7 +482,12 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
-const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+const BUSINESS_CONTENT_PRESERVATION = `Tool results are business source material, not disposable logs. Preserve exact reread locators
+(document ids, block ids, page/line anchors, table coordinates, URLs, and file paths), important
+facts from the middle of script/Wiki/table results, and newly read material that has not yet been
+processed. Record such material as unfinished work. Do not replace it with a generic head/tail sample.`;
+
+const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing checkpoint summary at the start of the conversation.
 
 Update the existing structured summary with new information. RULES:
 - PRESERVE all existing information from the previous summary
@@ -553,7 +559,9 @@ async function completeSummarization(
 
 /** Runs one summarization completion and maps abort/error stops to CompactionError. */
 async function runSummarizationCompletion(params: {
-  promptText: string;
+  messages: Context["messages"];
+  instruction: string;
+  requestPrefix: SummaryRequestPrefix;
   model: Model;
   maxTokens: number;
   apiKey: string | undefined;
@@ -564,17 +572,22 @@ async function runSummarizationCompletion(params: {
   runtime?: AgentCoreCompletionRuntimeDeps;
   errorLabel: string;
 }): Promise<Result<string, CompactionError>> {
-  const summarizationMessages = [
+  const summarizationMessages: Context["messages"] = [
+    ...params.messages,
     {
       role: "user" as const,
-      content: [{ type: "text" as const, text: params.promptText }],
+      content: [{ type: "text" as const, text: params.instruction }],
       timestamp: Date.now(),
     },
   ];
 
   const response = await completeSummarization(
     params.model,
-    { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+    {
+      systemPrompt: params.requestPrefix.systemPrompt,
+      tools: params.requestPrefix.tools,
+      messages: summarizationMessages,
+    },
     createSummarizationOptions(
       params.model,
       params.maxTokens,
@@ -599,18 +612,30 @@ async function runSummarizationCompletion(params: {
       ),
     );
   }
+  if (response.stopReason === "length") {
+    return err(new CompactionError("truncated", `${params.errorLabel} truncated at output limit`));
+  }
 
-  return ok(
-    response.content
+  const summary = response.content
       .filter((c): c is { type: "text"; text: string } => c.type === "text")
       .map((c) => c.text)
-      .join("\n"),
-  );
+      .join("\n");
+  if (!summary.trim()) {
+    return err(new CompactionError("empty_summary", `${params.errorLabel} produced no text`));
+  }
+  return ok(summary);
+}
+
+/** Stable request head reused by the summarization call for provider KV cache. */
+export interface SummaryRequestPrefix {
+  systemPrompt?: string;
+  tools?: Context["tools"];
 }
 
 /** Generate or update a conversation summary for compaction. */
 export async function generateSummary(
   currentMessages: AgentMessage[],
+  requestPrefix: SummaryRequestPrefix,
   model: Model,
   reserveTokens: number,
   apiKey: string | undefined,
@@ -627,19 +652,19 @@ export async function generateSummary(
     model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
   );
   let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+  basePrompt = `${basePrompt}\n\n${BUSINESS_CONTENT_PRESERVATION}`;
   if (customInstructions) {
     basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
   }
-  const llmMessages = convertToLlm(currentMessages);
-  const conversationText = serializeConversation(llmMessages);
-  let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-  if (previousSummary) {
-    promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-  }
-  promptText += basePrompt;
+  const previous = previousSummary
+    ? [asAgentMessage(createCompactionSummaryMessage(previousSummary, 0, new Date(0).toISOString()))]
+    : [];
+  const llmMessages = convertToLlm([...previous, ...currentMessages]);
 
   return await runSummarizationCompletion({
-    promptText,
+    messages: llmMessages,
+    instruction: basePrompt,
+    requestPrefix,
     model,
     maxTokens,
     apiKey,
@@ -703,6 +728,9 @@ export function prepareCompaction(
 
   const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
+  // 工具结果在各业务读工具中已经按可重读锚点做有界输出；这里不做通用头尾截断，
+  // 否则会无从判断剧本、Wiki 或表格中段是否已经处理。只选择要交给摘要模型的
+  // 完整历史前缀，并保留最近原文。
   const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
   const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
   if (!firstKeptEntry?.id) {
@@ -771,6 +799,7 @@ export { serializeConversation } from "./utils";
 /** Generate compaction summary data from prepared session history. */
 export async function compact(
   preparation: CompactionPreparation,
+  requestPrefix: SummaryRequestPrefix,
   model: Model,
   apiKey: string | undefined,
   headers?: Record<string, string>,
@@ -807,6 +836,7 @@ export async function compact(
       messagesToSummarize.length > 0
         ? await generateSummary(
             messagesToSummarize,
+            requestPrefix,
             model,
             settings.reserveTokens,
             apiKey,
@@ -824,6 +854,7 @@ export async function compact(
     }
     const turnPrefixResult = await generateTurnPrefixSummary(
       turnPrefixMessages,
+      requestPrefix,
       model,
       settings.reserveTokens,
       apiKey,
@@ -840,6 +871,7 @@ export async function compact(
   } else {
     const summaryResult = await generateSummary(
       messagesToSummarize,
+      requestPrefix,
       model,
       settings.reserveTokens,
       apiKey,
@@ -860,6 +892,22 @@ export async function compact(
   const { readFiles, modifiedFiles } = computeFileLists(fileOps);
   summary += formatFileOperations(readFiles, modifiedFiles);
 
+  const previousTokens = previousSummary
+    ? estimateTokens(asAgentMessage(createCompactionSummaryMessage(previousSummary, 0, new Date(0).toISOString())))
+    : 0;
+  const shadowedTokens = previousTokens
+    + [...messagesToSummarize, ...turnPrefixMessages]
+      .reduce((sum, message) => sum + estimateTokens(message), 0);
+  const summaryTokens = estimateTokens(
+    asAgentMessage(createCompactionSummaryMessage(summary, tokensBefore, new Date(0).toISOString())),
+  );
+  if (summaryTokens >= shadowedTokens) {
+    return err(new CompactionError(
+      "not_smaller",
+      `Compaction summary did not shrink context (${summaryTokens} >= ${shadowedTokens} estimated tokens)`,
+    ));
+  }
+
   return ok({
     summary,
     firstKeptEntryId,
@@ -869,6 +917,7 @@ export async function compact(
 }
 async function generateTurnPrefixSummary(
   messages: AgentMessage[],
+  requestPrefix: SummaryRequestPrefix,
   model: Model,
   reserveTokens: number,
   apiKey: string | undefined,
@@ -882,11 +931,10 @@ async function generateTurnPrefixSummary(
     Math.floor(0.5 * reserveTokens),
     model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
   );
-  const llmMessages = convertToLlm(messages);
-  const conversationText = serializeConversation(llmMessages);
-  const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
   return await runSummarizationCompletion({
-    promptText,
+    messages: convertToLlm(messages),
+    instruction: `${TURN_PREFIX_SUMMARIZATION_PROMPT}\n\n${BUSINESS_CONTENT_PRESERVATION}`,
+    requestPrefix,
     model,
     maxTokens,
     apiKey,

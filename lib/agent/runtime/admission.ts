@@ -1,12 +1,14 @@
 import { withObservationRun, observeModelRequest } from "./observation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
-import type { StreamFn, AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
+import { isContextOverflow } from "@openclaw/ai/internal/runtime";
+import type { StreamFn, AssistantMessage, Context, Model, SimpleStreamOptions } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { RuntimeToolDef } from "./tools";
 import { HEARTBEAT_INTERVAL_MS } from "./config";
 import * as db from "./admission-db";
 import type { AdmissionResource, AdmissionTicket, InputWait } from "./admission-types";
 import { subscribeDecisionEvents, subscribeSessionEvents } from "./events";
+import { estimateRequestBudget, MAX_CONTEXT_OVERFLOW_RETRIES } from "./context-budget";
 
 function budget(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -205,8 +207,16 @@ export async function watchInputWait(runId: string, wait: InputWait): Promise<vo
   subscriptions.set(runId,offs);
   wake(); arm();
 }
-/** 只包资源准入，事件片段仍由 Node 事件循环交错处理。 */
-export function admittedStream(streamFn: StreamFn): StreamFn {
+export type PrepareAdmittedRequest = (input: {
+  model: Model;
+  context: Context;
+  options: SimpleStreamOptions | undefined;
+  trigger: "pressure" | "context-overflow";
+  signal: AbortSignal;
+}) => Promise<Context>;
+
+/** 资源准入内完成请求前预算控制；超窗只有在上下文确实缩减后才有限重试。 */
+export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmittedRequest): StreamFn {
   return (model, context, options) => {
     const scope = scopeStorage.getStore();
     if (!scope) return streamFn(model, context, options);
@@ -226,16 +236,57 @@ export function admittedStream(streamFn: StreamFn): StreamFn {
           return;
         }
         signal.throwIfAborted();
-        observation = await observeModelRequest(model, context, "chat", performance.now() - queuedAt, options?.maxTokens);
-        const stream = await streamFn(model, context, {...options,signal});
-        for await (const event of stream) {
-          if (event.type === "done") { result = event.message; observedResult = event.message; }
-          if (event.type === "error") observedResult = event.error;
-          if (event.type === "done" || event.type === "error") {
-            await observation?.finish(observedResult, observedResult?.stopReason ?? "error");
-            observation = undefined;
+        let requestContext = prepareRequest
+          ? await prepareRequest({ model, context, options, trigger: "pressure", signal })
+          : context;
+        let overflowRetries = 0;
+        for (;;) {
+          signal.throwIfAborted();
+          observation = await observeModelRequest(model, requestContext, "chat", performance.now() - queuedAt, options?.maxTokens);
+          const stream = await streamFn(model, requestContext, {...options,signal});
+          let retry = false;
+          let emitted = false;
+          for await (const event of stream) {
+            if (event.type === "done") { result = event.message; observedResult = event.message; }
+            if (event.type === "error") observedResult = event.error;
+            if (event.type === "done" || event.type === "error") {
+              const contextOverflow = event.type === "error"
+                && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow);
+              await observation?.finish(
+                observedResult,
+                contextOverflow ? "context_overflow" : observedResult?.stopReason ?? "error",
+              );
+              observation = undefined;
+            }
+            if (
+              event.type === "error"
+              && !emitted
+              && prepareRequest
+              && overflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES
+              && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow)
+              && !signal.aborted
+            ) {
+              const before = estimateRequestBudget(model, requestContext, options).estimatedInputTokens;
+              const recovered = await prepareRequest({
+                model,
+                context: requestContext,
+                options,
+                trigger: "context-overflow",
+                signal,
+              });
+              const after = estimateRequestBudget(model, recovered, options).estimatedInputTokens;
+              if (!signal.aborted && after < before) {
+                requestContext = recovered;
+                overflowRetries++;
+                retry = true;
+                observedResult = undefined;
+                break;
+              }
+            }
+            out.push(event);
+            emitted = true;
           }
-          out.push(event);
+          if (!retry) break;
         }
       } catch (e) {
         const aborted = signal.aborted;

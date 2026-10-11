@@ -145,9 +145,11 @@ describe("所有来源共享资源准入", () => {
   });
   it("注册点：主、子、压缩、OCR、动态能力与预检均接入实际资源边界", () => {
     for (const file of ["service.ts","subagents.ts"]) {
-      const s=readFileSync(`lib/agent/runtime/${file}`,"utf8"); expect(s).toContain("admittedStream("); expect(s).toContain("runInAdmission(");
+      const s=readFileSync(`lib/agent/runtime/${file}`,"utf8"); expect(s).toContain("admittedStream("); expect(s).toContain("runInAdmission("); expect(s).toContain("compactRequestContext(");
     }
     for (const file of ["ocr.ts","capability-runner.ts","attachment-preflight.ts"]) expect(readFileSync(`lib/mmp/${file}`,"utf8")).toContain("admittedMmpRun(client,");
-    expect(readFileSync("lib/agent/runtime/service.ts","utf8")).toContain('"llm", signal');
+    const admission = readFileSync("lib/agent/runtime/admission.ts","utf8");
+    expect(admission).toContain('"llm", signal');
+    expect(admission).toContain("await prepareRequest(");
   });
 });
