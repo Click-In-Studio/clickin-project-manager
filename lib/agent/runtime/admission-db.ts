@@ -32,9 +32,9 @@ export async function claimAdmissions(resource: AdmissionResource, limit: number
           AND r.status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')
         ORDER BY GREATEST(
           ($6::jsonb->>r.admission_class)::int
-            + extract(epoch FROM(now()-a.ready_at))*1000/$3,
+            + CASE WHEN r.admission_class='interactive' THEN 0 ELSE extract(epoch FROM(now()-a.ready_at))*1000/$3 END,
           COALESCE((SELECT max(($6::jsonb->>p.admission_class)::int
-            + CASE WHEN pa.state='ready' THEN extract(epoch FROM (now()-pa.ready_at))*1000/$3 ELSE 0 END)
+            + CASE WHEN pa.state='ready' AND p.admission_class<>'interactive' THEN extract(epoch FROM (now()-pa.ready_at))*1000/$3 ELSE 0 END)
             FROM agent_run p JOIN agent_admission pa ON pa.run_id=p.id AND pa.resource='context'
             WHERE p.input_wait->'ids' ? r.session_id
               AND p.status IN ('running','awaiting_answer')),0))
@@ -95,6 +95,11 @@ export async function cancelAdmissions(runId: string): Promise<void> {
 }
 export async function admissionMetrics(): Promise<unknown[]> {
   return (await getPool().query("SELECT resource,state,count(*)::int count FROM agent_admission WHERE state IN ('ready','active','unknown') GROUP BY resource,state")).rows;
+}
+export async function unknownMmpAdmissions(): Promise<Array<AdmissionTicket & { run_status: string }>> {
+  return (await getPool().query<AdmissionTicket & { run_status: string }>(
+    "SELECT a.*,r.status AS run_status FROM agent_admission a JOIN agent_run r ON r.id=a.run_id WHERE a.resource='mmp' AND a.state='unknown' AND a.remote_id IS NOT NULL",
+  )).rows;
 }
 
 export async function previousInputWait(runId: string): Promise<InputWait | null> {

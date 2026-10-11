@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
@@ -13,7 +13,7 @@ import {
 } from "@/lib/agent/runtime/service";
 import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/events";
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
-import { CHAT_MODEL } from "@/lib/agent/runtime/config";
+import { CHAT_MODEL, llmRuntime } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 
@@ -468,6 +468,27 @@ describe("agent-runtime service", () => {
     const texts = seen.flatMap((s) => s.messages).map((m) => JSON.stringify(m));
     // steer 若赶上了第二次调用会出现在上下文；赶不上（run 已结束）则 steerRun 返回 null
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
+  });
+
+  it("分割回合压缩的历史和前缀分别准入，不能错误复用第一份摘要", async () => {
+    const complete=vi.spyOn(llmRuntime(),"completeSimple").mockImplementation(async(_model,ctx)=>({...base(),content:[{type:"text",text:ctx.systemPrompt!}],stopReason:"stop"}));
+    let checks=0;
+    runtimeOverrides.shouldCompactFn=()=>checks++===0;
+    runtimeOverrides.compactFn=async(...args)=>{
+      const rt=args[8]!;
+      const history=await rt.completeSimple(args[1],{messages:[],systemPrompt:"历史摘要"});
+      const prefix=await rt.completeSimple(args[1],{messages:[],systemPrompt:"前缀摘要"});
+      return {ok:true,value:{summary:JSON.stringify([history.content,prefix.content]),firstKeptEntryId:args[0].firstKeptEntryId,tokensBefore:args[0].tokensBefore}};
+    };
+    runtimeOverrides.streamFn=scripted([{text:"执行完毕"}]).streamFn;
+    const key=newKey();
+    try {
+      const started=await startRun({sessionId:key,userId,message:"旧上下文".repeat(60_000)});
+      await collectUntilTerminal(key);await waitForIdle(key);
+      expect(complete).toHaveBeenCalledTimes(2);
+      const results=(await getPool().query("SELECT result FROM agent_admission WHERE run_id=$1 AND operation_key LIKE 'compact:%' ORDER BY operation_key",[started.runId])).rows;
+      expect(results.map(row=>row.result.content[0].text)).toEqual(["历史摘要","前缀摘要"]);
+    }finally{complete.mockRestore();delete runtimeOverrides.compactFn;delete runtimeOverrides.shouldCompactFn;}
   });
 
   it("压缩期间输入先持久化，压缩后作为 steer 消费，终态最后发出", async () => {

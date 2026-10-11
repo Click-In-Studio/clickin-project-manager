@@ -1153,11 +1153,12 @@ export async function maybeCompact(
   if (!(runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
   const cost: CompactionCost = { usd: 0, tokens: 0, triggered: true };
   const rt = llmRuntime();
+  let compactionRequest = 0;
   const tapped = {
     completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
       const { currentAdmissionScope } = await import("./admission");
       const scope = currentAdmissionScope();
-      const ticket = scope ? await acquire(scope.runId, `compact:${await continuationKey(scope.runId)}`, "llm", signal) : undefined;
+      const ticket = scope ? await acquire(scope.runId, `compact:${await continuationKey(scope.runId)}:${compactionRequest++}`, "llm", signal) : undefined;
       let msg: Awaited<ReturnType<typeof rt.completeSimple>> | undefined;
       try { msg = ticket?.state === "done" && ticket.result ? ticket.result as typeof msg : await rt.completeSimple(...args); }
       finally { if (ticket) await release(ticket,msg ? "done" : "failed",msg); }

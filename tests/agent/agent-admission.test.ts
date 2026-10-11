@@ -124,6 +124,25 @@ describe("所有来源共享资源准入", () => {
       expect((await getPool().query("SELECT result FROM agent_tool_operation WHERE run_id=$1 AND tool_call_id='mixed-1'",[id])).rows[0].result.content).toEqual([{type:"text",text:"已完成"}]);
     }finally{finishWork();abort.abort();await executing;await getPool().query("UPDATE agent_run SET input_wait=NULL WHERE id=$1",[id]);}
   });
+  it("多个 Monitor 分别保留目标和原截止时间，不错误复用另一组等待", async () => {
+    const parent=await run(), children=[await run("subagent"),await run("subagent")];
+    const ids:string[]=[];
+    for(const child of children){
+      const id=(await getPool().query("SELECT session_id FROM agent_run WHERE id=$1",[child])).rows[0].session_id;
+      await getPool().query("INSERT INTO agent_subagent(id,task) VALUES($1,'Monitor 测试')",[id]);
+      await getPool().query("UPDATE agent_run SET subagent_id=$2 WHERE id=$1",[child,id]);ids.push(id);
+    }
+    const original=Date.now()+60_000,newDeadline=original+30_000;
+    await getPool().query("UPDATE agent_run SET input_wait=$2::jsonb WHERE id=$1",[parent,JSON.stringify({kind:"subagent",ids:[ids[0]],deadline:original})]);
+    try{
+      await runInAdmission(parent,new AbortController().signal,()=>{},async()=>{
+        await waitForInput(parent,{kind:"subagent",ids:[ids[0]],deadline:newDeadline});
+        await waitForInput(parent,{kind:"subagent",ids:[ids[1]],deadline:newDeadline});
+      });
+      const wait=(await getPool().query("SELECT input_wait FROM agent_run WHERE id=$1",[parent])).rows[0].input_wait;
+      expect(wait).toEqual({kind:"all",ids,waits:[{kind:"subagent",ids:[ids[0]],deadline:original},{kind:"subagent",ids:[ids[1]],deadline:newDeadline}]});
+    }finally{await getPool().query("UPDATE agent_run SET input_wait=NULL WHERE id=$1",[parent]);}
+  });
   it("注册点：主、子、压缩、OCR、动态能力与预检均接入实际资源边界", () => {
     for (const file of ["service.ts","subagents.ts"]) {
       const s=readFileSync(`lib/agent/runtime/${file}`,"utf8"); expect(s).toContain("admittedStream("); expect(s).toContain("runInAdmission(");

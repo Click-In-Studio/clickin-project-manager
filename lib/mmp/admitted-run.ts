@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { MmpError, type MmpClient } from "@mmp/client";
 import { acquire, currentAdmissionScope, release } from "@/lib/agent/runtime/admission";
-import { admissionRemoteId } from "@/lib/agent/runtime/admission-db";
-import { getPool } from "@/lib/pg";
+import { admissionRemoteId, unknownMmpAdmissions } from "@/lib/agent/runtime/admission-db";
 import { getMmpClient } from "./client";
 import type { AdmissionTicket } from "@/lib/agent/runtime/admission-types";
 
@@ -65,10 +64,10 @@ async function cancelRemote(client: MmpClient, ticket: AdmissionTicket, remoteId
 /** 不确定但已知身份的任务按原 job 查询；取消尚未完成时继续占用名额。 */
 export async function reconcileMmpAdmissions(client = getMmpClient()): Promise<void> {
   if (!client) return;
-  const tickets = (await getPool().query<AdmissionTicket>("SELECT * FROM agent_admission WHERE resource='mmp' AND state='unknown' AND remote_id IS NOT NULL")).rows;
+  const tickets = await unknownMmpAdmissions();
   for (const ticket of tickets) {
     try {
-      const result = await client.get(ticket.remote_id!,0);
+      const result = ticket.run_status === "aborted" ? await client.cancel(ticket.remote_id!,0) : await client.get(ticket.remote_id!,0);
       if (result.status === "done") await release(ticket,"done",result);
       else if (result.status === "cancelled") await release(ticket,"failed");
     } catch (e) {

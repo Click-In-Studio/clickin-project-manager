@@ -35,8 +35,18 @@ function arm(): void {
   if (timer) return;
   let lastHeartbeat = 0;
   let lastWaitScan = 0;
+  let lastRemoteScan = 0;
+  let reconcilingRemote = false;
   timer = scopeStorage.exit(() => setInterval(() => {
     void pump().catch((e) => console.error("[agent-admission] 调度失败", e));
+    if (!reconcilingRemote && Date.now()-lastRemoteScan >= 5_000 && [...pending.values()].some((p) => p.ticket.resource === "mmp")) {
+      lastRemoteScan = Date.now();
+      reconcilingRemote = true;
+      // 进程内执行模式也能回收已确认终态的远端名额；网络查询不阻塞其他资源准入。
+      void scopeStorage.exit(async () => (await import("@/lib/mmp/admitted-run")).reconcileMmpAdmissions())
+        .catch((e) => console.error("[agent-admission] 远端对账失败",e))
+        .finally(() => { reconcilingRemote = false; });
+    }
     if (Date.now() - lastHeartbeat >= HEARTBEAT_INTERVAL_MS) {
       lastHeartbeat = Date.now();
       void db.heartbeatAdmissions([...held]).catch((e) => console.error("[agent-admission] 心跳失败", e));
@@ -126,7 +136,10 @@ export async function waitForInput(runId: string, wait: InputWait): Promise<bool
   if (!scope) return false;
   const previous = await db.previousInputWait(runId);
   const oldWaits = previous?.kind === "all" ? previous.waits : previous ? [previous] : [];
-  if (wait.kind === "subagent") wait = oldWaits.find((w) => w.kind === "subagent") ?? wait;
+  if (wait.kind === "subagent") {
+    const ids = JSON.stringify([...wait.ids].sort());
+    wait = oldWaits.find((w) => w.kind === "subagent" && JSON.stringify([...w.ids].sort()) === ids) ?? wait;
+  }
   if (await db.inputWaitReady(wait)) { await db.setInputWait(runId, null); return true; }
   const key = wait.kind === "question" || wait.kind === "approval" ? wait.id : JSON.stringify(wait);
   scope.waits.set(key, wait);

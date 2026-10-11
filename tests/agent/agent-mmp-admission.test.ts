@@ -60,4 +60,16 @@ describe("MMP 持久操作与取消", () => {
     expect(ticket).toEqual({state:"unknown",remote_id:null});
     await getPool().query("DELETE FROM agent_admission WHERE run_id=$1", [id]);
   });
+  it("失联任务已知 job_id 时，主任务停止后的对账继续请求远端取消并等待确认", async () => {
+    const id=await run(),f=fake(),signal=new AbortController().signal;
+    f.get.mockRejectedValueOnce(new MmpError("network","轮询失联",{jobId:"remote-test"}));
+    await expect(runInAdmission(id,signal,()=>{},()=>admittedMmpRun(f.client,job,{},"file-4"))).rejects.toBeDefined();
+    await getPool().query("UPDATE agent_run SET status='aborted' WHERE id=$1",[id]);
+    f.cancel.mockImplementationOnce(async()=>({job_id:"remote-test",status:"running"}));
+    await reconcileMmpAdmissions(f.client);
+    expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1",[id])).rows[0].state).toBe("unknown");
+    await reconcileMmpAdmissions(f.client);
+    expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1",[id])).rows[0].state).toBe("failed");
+    expect(f.cancel).toHaveBeenCalledTimes(2);expect(f.get).toHaveBeenCalledTimes(1);
+  });
 });
