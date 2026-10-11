@@ -2,7 +2,7 @@
 kind: improved
 title: 新对话不再自动带入其他会话的近期问答
 page: ai/assistant/chat
-pr: 946
+pr: 954
 order: 1
 ---
 
