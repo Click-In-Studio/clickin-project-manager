@@ -1296,6 +1296,7 @@ CON|agent_mutation|agent_mutation_user_id_fkey|FOREIGN KEY (user_id) REFERENCES 
 CON|agent_observation|agent_observation_kind_check|CHECK ((kind = ANY (ARRAY['model_request'::text, 'tool_retrieval'::text, 'memory_retrieval'::text, 'compaction_check'::text])))
 CON|agent_observation|agent_observation_pkey|PRIMARY KEY (id)
 CON|agent_observation|agent_observation_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
+CON|agent_observation|agent_observation_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
 CON|agent_question|agent_question_pkey|PRIMARY KEY (id)
 CON|agent_question|agent_question_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_question|agent_question_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE

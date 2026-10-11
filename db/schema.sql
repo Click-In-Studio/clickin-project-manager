@@ -3968,7 +3968,7 @@ CREATE INDEX agent_memory_chunk_history_idx ON agent_memory_chunk(scope_id, hist
 CREATE TABLE IF NOT EXISTS agent_observation (
   id TEXT PRIMARY KEY,
   run_id TEXT REFERENCES agent_run(id) ON DELETE CASCADE,
-  user_id UUID,
+  user_id UUID REFERENCES app_user(id) ON DELETE CASCADE,
   kind TEXT NOT NULL CHECK (kind IN ('model_request','tool_retrieval','memory_retrieval','compaction_check')),
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at TIMESTAMPTZ,
