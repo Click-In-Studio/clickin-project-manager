@@ -1,3 +1,4 @@
+import { readMemoryAuditEntries, listMemoryEntryIds } from "@/lib/agent/memory/memory-db";
 // AI 写操作的 diff 审计（db/add-agent-mutation.sql）。
 //
 // 原则（2026-08-30 定谳）：
@@ -81,12 +82,10 @@ interface ScopeReader {
 const READERS: Record<string, ScopeReader> = {
   memory: {
     read: async (ids, { userId }) => {
-      const rows = await getPool().query<{ id: string; body: string; source: string; user_edited: boolean }>(
-        "SELECT e.id,e.body,e.source,e.user_edited FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1 AND e.id=ANY($2::text[])", [userId, ids]);
-      return new Map(rows.rows.map(e => [e.id, { label: "个人记忆", body: e.body, source: e.source, userEdited: e.user_edited }]));
+      const rows = await readMemoryAuditEntries(userId, ids);
+      return new Map(rows.map(e => [e.id, { label: "个人记忆", body: e.body, source: e.source, userEdited: e.user_edited }]));
     },
-    listIds: async ({ userId }) => (await getPool().query<{ id: string }>(
-      "SELECT e.id FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1", [userId])).rows.map(e => e.id),
+    listIds: async ({ userId }) => listMemoryEntryIds(userId),
   },
   wiki: {
     read: async (ids, { productionId }) => {

@@ -210,3 +210,13 @@ export async function listDreamScopes(): Promise<Array<{ userId: string; product
      UNION SELECT DISTINCT scope_id,NULL::text FROM agent_memory_chunk WHERE scope_type='user' AND source='episodic' AND scope_known`)).rows;
   return rows.map(r => ({ userId: r.user_id, productionId: r.production_id }));
 }
+
+// 写审计只读取当前用户的目标条目，正文由审计层折算为字数，不保存事实来源声明。
+export async function readMemoryAuditEntries(userId: string, ids: string[]): Promise<Array<{ id: string; body: string; source: string; user_edited: boolean }>> {
+  return (await getPool().query<{ id: string; body: string; source: string; user_edited: boolean }>(
+    "SELECT e.id,e.body,e.source,e.user_edited FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1 AND e.id=ANY($2::text[])", [userId, ids])).rows;
+}
+export async function listMemoryEntryIds(userId: string): Promise<string[]> {
+  return (await getPool().query<{ id: string }>(
+    "SELECT e.id FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1", [userId])).rows.map(e => e.id);
+}

@@ -2,7 +2,7 @@
 kind: new
 title: 可以按条目管理自己的长期记忆了
 page: ai/assistant/chat
-pr: 947
+pr: 953
 order: 1
 ---
 
