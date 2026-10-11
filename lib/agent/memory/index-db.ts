@@ -33,8 +33,7 @@ export function tokensText(text: string): string {
   return bigramTokens(text).join(" ");
 }
 
-/** episodic run 记录 → 索引文本（全文，不同于注入面的 200 字符截断——
- * 检索语料截太狠等于没有语料；上报侧插件已有 2000 字符/侧的采集上限）。 */
+/** episodic run 记录 → 索引文本，保留收到的问答全文供主动检索与梦境整理。 */
 export function episodicText(rec: RunRecord): string | null {
   const user = (rec.lastUser ?? "").trim();
   const assistant = (rec.lastAssistant ?? "").trim();

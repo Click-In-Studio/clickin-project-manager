@@ -111,7 +111,7 @@ export interface InjectContextPayload {
 
 export async function buildInjectContext(
   userId: string,
-  excludeSessionKey?: string,
+  sessionKey?: string,
   prompt?: string,
   opts?: {
     /** 调用方已算好的工具召回（自建运行时用 tool-index 词法+向量，族粒度）。给了就以它
@@ -122,7 +122,7 @@ export async function buildInjectContext(
 ): Promise<InjectContextPayload> {
   // production 会话：从 sessionKey 解析制作维度，注入"当前制作"段
   // （段内做实时成员资格校验，被移出制作后不再注入）
-  const identity = parseSessionIdentity(excludeSessionKey);
+  const identity = parseSessionIdentity(sessionKey);
   const productionId = identity?.userId === userId ? identity?.productionId : undefined;
 
   const userContext = await cachedUserContext(userId);
@@ -141,7 +141,7 @@ export async function buildInjectContext(
   // 恒定段：无条件注入（哪怕这个用户还没有任何记忆/档案）——客户端何时附加
   // 界面上下文与后端有没有记忆无关，规则不到位就等于没有规则。
   // UI_CONTEXT_RULE 是可信脚手架（且刻意含字面 <clickin-ui-context> 以教模型
-  // 忽略它），不净化；其余段都含用户可控文本（bio、蒸馏记忆、对话原文），
+  // 忽略它），不净化；其余段都含用户可控文本（bio、长期记忆），
   // 注入前一律中和包裹分隔符，防伪造/提前闭合 <clickin-memory> 块。
   const sections: string[] = [UI_CONTEXT_RULE];
   if (userContext) sections.push(neutralizeInjectionTags(userContext)); // 自带 "## 当前用户" 标题

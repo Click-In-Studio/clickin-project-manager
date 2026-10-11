@@ -47,14 +47,20 @@ describe("作用域与常驻注入", () => {
     await create("这个项目 Magnum 枪声保持低音量", prodId);
     await create("另一个项目要求枪声高音量", otherProd);
     await archive("曾经调研过Magnum", otherProd);
+    await archive("本项目另一会话的旧方案", prodId);
+    await commitDream(await readDreamSnapshot(userId, prodId, 24000), ["长期保留的排练偏好"]);
     const current = await buildInjectContext(userId, `clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`, "Magnum");
     expect(current.memory).toContain("先给结论");
     expect(current.memory).toContain("保持低音量");
     expect(current.memory).not.toContain("高音量");
     expect(current.memory).not.toContain("曾经调研");
+    expect(current.memory).not.toContain("本项目另一会话的旧方案");
+    expect(current.memory).not.toContain("近期对话");
+    expect(current.memory).toContain("长期保留的排练偏好");
+    expect((await searchMemory(userId, "本项目另一会话的旧方案", prodId)).hits.some(h => h.text.includes("本项目另一会话的旧方案"))).toBe(true);
     expect(current.recall ?? "").not.toContain("曾经调研");
     expect((await buildInjectContext(userId)).memory).not.toContain("保持低音量");
-    expect((await readDreamSnapshot(userId, null, 24000)).inputs).toHaveLength(1);
+    expect((await readDreamSnapshot(userId, null, 24000)).inputs).toHaveLength(2);
   });
   it("小批次只消费已读取历史，余下历史不丢失", async () => {
     await archive("第一批".repeat(20)); await archive("第二批".repeat(20));

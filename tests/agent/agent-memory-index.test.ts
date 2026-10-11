@@ -54,7 +54,7 @@ describe("bigramTokens", () => {
 });
 
 describe("episodicText", () => {
-  it("全文入索引（不做注入面的 200 字符截断）", () => {
+  it("收到的问答全文入索引", () => {
     const long = "长".repeat(500);
     const t = episodicText({ ts: "2026-08-20T10:00:00Z", lastUser: long, lastAssistant: "回" });
     expect(t).toContain(long);
