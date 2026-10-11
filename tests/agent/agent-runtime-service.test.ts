@@ -671,10 +671,10 @@ describe("agent-runtime service", () => {
         "SELECT count(*)::int AS n FROM agent_session_entry WHERE session_id=$1 AND type='compaction'",
         [key],
       )).rows[0].n).toBe(1);
-      expect((await getPool().query(
-        "SELECT count(*)::int AS n FROM agent_observation WHERE run_id=$1 AND data->>'purpose'='chat'",
+      expect((await getPool().query<{ status: string }>(
+        "SELECT data->>'status' AS status FROM agent_observation WHERE run_id=$1 AND data->>'purpose'='chat' ORDER BY started_at",
         [runId],
-      )).rows[0].n).toBe(2);
+      )).rows.map((row) => row.status)).toEqual(["context_overflow", "stop"]);
     } finally {
       delete runtimeOverrides.compactFn;
       delete runtimeOverrides.shouldCompactFn;

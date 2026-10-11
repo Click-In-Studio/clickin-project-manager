@@ -6,7 +6,7 @@ import {
   DEFAULT_COMPACTION_SETTINGS,
   type CompactionPreparation,
 } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
-import { estimateRequestBudget, isContextWindowExceeded } from "@/lib/agent/runtime/context-budget";
+import { estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
 
 const MODEL: Model = {
   id: "budget-test",
@@ -51,13 +51,6 @@ describe("模型请求上下文预算", () => {
     expect(withTransient.outputReserveTokens).toBe(300);
     expect(withTransient.pressureThreshold).toBe(600);
     expect(withTransient.pressured).toBe(true);
-  });
-
-  it("只识别 provider 明确报告的上下文超限", () => {
-    expect(isContextWindowExceeded("context_length_exceeded: maximum context length exceeded")).toBe(true);
-    expect(isContextWindowExceeded("prompt is too large")).toBe(true);
-    expect(isContextWindowExceeded("rate limit exceeded")).toBe(false);
-    expect(isContextWindowExceeded("network timeout")).toBe(false);
   });
 });
 

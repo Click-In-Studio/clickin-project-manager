@@ -71,9 +71,3 @@ export function estimateRequestBudget(
     pressured: estimatedInputTokens >= pressureThreshold,
   };
 }
-
-/** 只把 provider 明确报告的上下文超限当作可恢复错误。 */
-export function isContextWindowExceeded(errorMessage: string | undefined): boolean {
-  if (!errorMessage) return false;
-  return /context[_ -]?(?:length|window)[_ -]?(?:exceeded|overflow)|maximum context length|context length.*(?:exceed|too (?:large|long))|prompt.*too (?:large|long)/i.test(errorMessage);
-}

@@ -1,13 +1,14 @@
 import { withObservationRun, observeModelRequest } from "./observation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
+import { isContextOverflow } from "@openclaw/ai/internal/runtime";
 import type { StreamFn, AssistantMessage, Context, Model, SimpleStreamOptions } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { RuntimeToolDef } from "./tools";
 import { HEARTBEAT_INTERVAL_MS } from "./config";
 import * as db from "./admission-db";
 import type { AdmissionResource, AdmissionTicket, InputWait } from "./admission-types";
 import { subscribeDecisionEvents, subscribeSessionEvents } from "./events";
-import { estimateRequestBudget, isContextWindowExceeded, MAX_CONTEXT_OVERFLOW_RETRIES } from "./context-budget";
+import { estimateRequestBudget, MAX_CONTEXT_OVERFLOW_RETRIES } from "./context-budget";
 
 function budget(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -249,7 +250,12 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
             if (event.type === "done") { result = event.message; observedResult = event.message; }
             if (event.type === "error") observedResult = event.error;
             if (event.type === "done" || event.type === "error") {
-              await observation?.finish(observedResult, observedResult?.stopReason ?? "error");
+              const contextOverflow = event.type === "error"
+                && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow);
+              await observation?.finish(
+                observedResult,
+                contextOverflow ? "context_overflow" : observedResult?.stopReason ?? "error",
+              );
               observation = undefined;
             }
             if (
@@ -257,7 +263,7 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
               && !emitted
               && prepareRequest
               && overflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES
-              && isContextWindowExceeded(event.error.errorMessage)
+              && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow)
               && !signal.aborted
             ) {
               const before = estimateRequestBudget(model, requestContext, options).estimatedInputTokens;
