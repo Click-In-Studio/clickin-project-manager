@@ -3591,7 +3591,11 @@ CREATE TABLE IF NOT EXISTS agent_run (
   cache_read_tokens INTEGER     NOT NULL DEFAULT 0,
   error             TEXT        NULL,
   started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ended_at          TIMESTAMPTZ NULL
+  ended_at          TIMESTAMPTZ NULL,
+  admission_class   TEXT NOT NULL DEFAULT 'interactive'
+                      CHECK (admission_class IN ('interactive','subagent','schedule')),
+  execution_epoch   INTEGER NOT NULL DEFAULT 0,
+  input_wait        JSONB
 );
 
 CREATE INDEX IF NOT EXISTS agent_run_session_idx
@@ -3902,16 +3906,6 @@ CREATE TABLE agent_subagent_usage (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE
 );
-
-ALTER TABLE agent_run
-  ADD COLUMN admission_class TEXT NOT NULL DEFAULT 'interactive'
-    CHECK (admission_class IN ('interactive','subagent','schedule')),
-  ADD COLUMN execution_epoch INTEGER NOT NULL DEFAULT 0,
-  ADD COLUMN input_wait JSONB;
-
-UPDATE agent_run SET admission_class=CASE
-  WHEN subagent_id IS NOT NULL THEN 'subagent'
-  WHEN schedule_id IS NOT NULL THEN 'schedule' ELSE 'interactive' END;
 
 CREATE TABLE agent_admission (
   id TEXT PRIMARY KEY,
