@@ -934,6 +934,10 @@
     gap: 12px;
   }
 
+  .sidebarNav > button > span {
+    display: none;
+  }
+
   .sidebarNav > button {
     min-height: 38px;
     padding: 7px 6px;

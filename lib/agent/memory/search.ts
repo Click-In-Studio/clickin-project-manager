@@ -3,8 +3,8 @@
 // 排序公式照抄 OpenClaw builtin 引擎（权重/阈值为 dist 实测值；关键词分是
 // 我们的 bigram 命中占比而非 BM25，0..1 归一语义一致）：
 //   最终得分 = (0.7·向量余弦 + 0.3·关键词) × 新近度衰减 × importance 乘子
-// - 新近度：episodic 30 天半衰期（按 observed_at）；curated 常青不衰减
-// - importance：写入时标注（M2 起产出），NULL=中性 1.0；映射 0.75+0.05n
+// - 新近度：episodic 30 天半衰期（按 observed_at）；当前长期条目不衰减
+// - importance：旧索引的可空元数据，新归档不接受模型标注，NULL=中性 1.0；映射 0.75+0.05n
 //   （1→0.8 … 10→1.25，我们自选的温和乘子，OpenClaw 未公开其映射）
 // - minScore 0.35、top 6
 //
@@ -18,6 +18,7 @@ import { getPool } from "@/lib/pg";
 import { creditsFromEmbeddingTokens } from "@/lib/account/plan";
 import { EmbeddingUnavailableError, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent/memory/embedding";
 import { bigramTokens, ensureIndexIdentity } from "./index-db";
+import { readMemoryScope, requireMemoryAccess, VISIBLE_HISTORY } from "./memory-db";
 
 export const VECTOR_WEIGHT = 0.7;
 export const TEXT_WEIGHT = 0.3;
@@ -42,7 +43,7 @@ export class MemoryUnavailableError extends Error {
 
 export type MemoryHit = {
   id: string;
-  source: "curated" | "episodic";
+  source: "dream" | "active" | "episodic";
   text: string;
   score: number;
   observedAt: Date;
@@ -50,7 +51,7 @@ export type MemoryHit = {
 
 type LaneRow = {
   id: string;
-  source: "curated" | "episodic";
+  source: "episodic";
   text: string;
   observed_at: Date;
   importance: number | null;
@@ -72,7 +73,8 @@ export type MemorySearchResult = {
   note: string | null;
 };
 
-export async function searchMemory(userId: string, query: string): Promise<MemorySearchResult> {
+export async function searchMemory(userId: string, query: string, productionId: string | null = null): Promise<MemorySearchResult> {
+  await requireMemoryAccess(userId, productionId);
   const pool = getPool();
   const mode = embeddingMode();
   let note: string | null = null;
@@ -103,52 +105,15 @@ export async function searchMemory(userId: string, query: string): Promise<Memor
     }
   }
 
-  // ── 候选集 = 双车道 top-N 的并集，之后对并集统一算**双车道真分**——
-  // 只进了关键词 top-N 的行余弦分不能按 0 算，否则会被 minScore 误杀。
-  // 关键词车道：查询与语料同一套 bigram 切词（见 index-db.ts bigramTokens，
-  // pg_trgm 对连续中文近乎失效），得分=查询 token 的命中占比（0..1）。
-  // token 字符集是 CJK/[a-z0-9] 构造保证，无 LIKE 元字符，可安全拼接。
   const qtokens = [...new Set(bigramTokens(query))];
-  const tokenScoreSql = qtokens.length
-    ? `(SELECT avg((c.text_tokens LIKE '%' || tt.tok || '%')::int)
-        FROM unnest($TOK::text[]) AS tt(tok))`
-    : "0";
-
+  const tokenScoreSql = `(SELECT avg((c.text_tokens LIKE '%' || tt.tok || '%')::int) FROM unnest($4::text[]) AS tt(tok))`;
   type ScoredRow = LaneRow & { vscore: number; tscore: number };
-  let rows: ScoredRow[];
-  if (queryVec) {
-    const params: unknown[] = [queryVec, userId];
-    let tokExpr = "0";
-    if (qtokens.length) {
-      params.push(qtokens);
-      tokExpr = tokenScoreSql.replace("$TOK", `$${params.length}`);
-    }
-    ({ rows } = await pool.query<ScoredRow>(
-      `WITH scored AS (
-         SELECT c.id, c.source, c.text, c.observed_at, c.importance,
-                CASE WHEN c.embedding IS NULL THEN 0
-                     ELSE 1 - (c.embedding <=> $1::vector) END AS vscore,
-                ${tokExpr} AS tscore
-         FROM agent_memory_chunk c
-         WHERE c.scope_type = 'user' AND c.scope_id = $2
-       )
-       SELECT * FROM scored
-       ORDER BY GREATEST(vscore, tscore) DESC
-       LIMIT ${LANE_CANDIDATES}`,
-      params,
-    ));
-  } else {
-    if (qtokens.length === 0) return { hits: [], note };
-    const tokExpr = tokenScoreSql.replace("$TOK", "$2");
-    ({ rows } = await pool.query<ScoredRow>(
-      `SELECT c.id, c.source, c.text, c.observed_at, c.importance,
-              0 AS vscore, ${tokExpr} AS tscore
-       FROM agent_memory_chunk c
-       WHERE c.scope_type = 'user' AND c.scope_id = $1
-       ORDER BY tscore DESC LIMIT ${LANE_CANDIDATES}`,
-      [userId, qtokens],
-    ));
-  }
+  const { rows } = await pool.query<ScoredRow>(
+    `SELECT c.id,c.source,c.text,c.observed_at,c.importance,
+      CASE WHEN c.embedding IS NULL OR $3::vector IS NULL THEN 0 ELSE 1-(c.embedding<=>$3::vector) END AS vscore,
+      COALESCE(${tokenScoreSql},0) AS tscore FROM agent_memory_chunk c WHERE ${VISIBLE_HISTORY}
+      ORDER BY GREATEST(CASE WHEN c.embedding IS NULL OR $3::vector IS NULL THEN 0 ELSE 1-(c.embedding<=>$3::vector) END,COALESCE(${tokenScoreSql},0)) DESC LIMIT ${LANE_CANDIDATES}`,
+    [userId, productionId, queryVec, qtokens]);
 
   // 单车道缺席时另一路独跑（该路权重升为 1.0，OpenClaw 同语义）
   const vWeight = queryVec ? VECTOR_WEIGHT : 0;
@@ -162,14 +127,22 @@ export async function searchMemory(userId: string, query: string): Promise<Memor
     if (score < MIN_SCORE) continue;
     hits.push({ id: row.id, source: row.source, text: row.text, score, observedAt: new Date(row.observed_at) });
   }
-  hits.sort((a, b) => b.score - a.score);
+  // 常驻条目量小，直接按关键词检索正文；不再建立长期记忆的第二份索引副本。
+  const scopes = [await readMemoryScope(userId, null)];
+  if (productionId) scopes.push(await readMemoryScope(userId, productionId));
+  for (const scope of scopes) for (const e of scope.entries) {
+    const words = new Set(bigramTokens(e.body));
+    const score = qtokens.length ? qtokens.filter(t => words.has(t)).length / qtokens.length : 0;
+    if (score >= MIN_SCORE) hits.push({ id: e.id, source: e.source, text: `${e.userEdited ? "[用户编辑]" : "[AI 记录，未经用户确认]"} ${e.body}`, score, observedAt: new Date(e.updatedAt) });
+  }
+  hits.sort((a,b) => b.score-a.score);
   const top = hits.slice(0, MAX_RESULTS);
 
   // 召回记账（Phase B 晋升门的信号源；失败不反噬检索）
   if (top.length > 0) {
     const queryHash = createHash("sha256").update(query).digest("hex").slice(0, 32);
     Promise.all(
-      top.map((h) =>
+      top.filter(h => h.source === "episodic").map((h) =>
         pool.query("INSERT INTO agent_memory_recall_log (chunk_id, user_id, query_hash) VALUES ($1, $2, $3)", [
           h.id, userId, queryHash,
         ]),
@@ -188,7 +161,7 @@ export function formatSearchResult(result: MemorySearchResult, query: string): s
   } else {
     lines.push(`与「${query}」相关的记忆（按相关度排序）：`);
     for (const h of result.hits) {
-      const kind = h.source === "curated" ? "长期记忆" : "对话记录";
+      const kind = h.source === "episodic" ? "对话记录" : h.source === "dream" ? "自动整理记忆" : "主动记录记忆";
       const when = h.observedAt.toISOString().slice(0, 10);
       const text = h.text.length > SNIPPET_MAX_CHARS ? `${h.text.slice(0, SNIPPET_MAX_CHARS)}…` : h.text;
       lines.push(`\n【${kind} · ${when} · 相关度 ${h.score.toFixed(2)}】\n${text}`);

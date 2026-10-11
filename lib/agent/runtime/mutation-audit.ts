@@ -79,6 +79,15 @@ interface ScopeReader {
 }
 
 const READERS: Record<string, ScopeReader> = {
+  memory: {
+    read: async (ids, { userId }) => {
+      const rows = await getPool().query<{ id: string; body: string; source: string; user_edited: boolean }>(
+        "SELECT e.id,e.body,e.source,e.user_edited FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1 AND e.id=ANY($2::text[])", [userId, ids]);
+      return new Map(rows.rows.map(e => [e.id, { label: "个人记忆", body: e.body, source: e.source, userEdited: e.user_edited }]));
+    },
+    listIds: async ({ userId }) => (await getPool().query<{ id: string }>(
+      "SELECT e.id FROM agent_memory_entry e JOIN agent_memory_scope s ON s.id=e.scope_id WHERE s.user_id=$1", [userId])).rows.map(e => e.id),
+  },
   wiki: {
     read: async (ids, { productionId }) => {
       const out = new Map<string, Snapshot>();
@@ -462,6 +471,7 @@ async function insertRow(
 // ── 渲染 ──────────────────────────────────────────────────────────────────────
 
 const SCOPE_LABELS: Record<string, string> = {
+  memory: "个人记忆",
   wiki: "文档", scene: "场次", character: "角色", schedule: "定时任务",
   "instructions.personal": "个人 AI 指令", "instructions.production": "制作 AI 指令",
 };

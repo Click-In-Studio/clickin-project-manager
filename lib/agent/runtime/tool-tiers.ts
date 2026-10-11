@@ -86,6 +86,7 @@ const WARM_BY_PAGE: Record<string, string[]> = {
 
 /** 依赖闭包：激活某工具时必须连带激活的上游 id 供给工具。 */
 const CLOSURE: Record<string, string[]> = {
+  "my.memory_write": ["my.memory_read"],
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
