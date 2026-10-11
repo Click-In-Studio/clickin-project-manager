@@ -1,6 +1,9 @@
 import type { Context, Model, SimpleStreamOptions } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { AgentMessage } from "../../../vendor/openclaw/packages/agent-core/src/types";
-import { estimateContextTokens } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
+import {
+  estimateContextTokens,
+  type CompactionSettings,
+} from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 
 export const CONTEXT_PRESSURE_RATIO = 0.8;
 export const MAX_CONTEXT_OVERFLOW_RETRIES = 1;
@@ -30,6 +33,38 @@ export interface RequestBudget {
   effectiveContextWindow: number;
   pressureThreshold: number;
   pressured: boolean;
+}
+
+/** 从本次实际模型窗口与输出预算派生摘要输出和近期原文保留量。 */
+export function compactionSettingsFor(
+  model: Model,
+  options?: Pick<SimpleStreamOptions, "maxTokens">,
+  forced = false,
+): CompactionSettings {
+  const effectiveContextWindow = model.contextTokens ?? model.contextWindow;
+  const requestedOutput = options?.maxTokens ?? model.maxTokens;
+  const reserveTokens = Math.min(
+    Math.max(1, requestedOutput),
+    Math.max(1, effectiveContextWindow - 1),
+  );
+  const pressureThreshold = Math.min(
+    Math.floor(effectiveContextWindow * CONTEXT_PRESSURE_RATIO),
+    Math.max(1, effectiveContextWindow - reserveTokens),
+  );
+  const pressureHeadroom = Math.max(
+    1,
+    effectiveContextWindow - Math.floor(effectiveContextWindow * CONTEXT_PRESSURE_RATIO),
+  );
+  return {
+    enabled: true,
+    reserveTokens,
+    keepRecentTokens: forced
+      ? 0
+      : Math.min(
+          Math.max(reserveTokens, pressureHeadroom),
+          Math.max(0, pressureThreshold - reserveTokens),
+        ),
+  };
 }
 
 /**

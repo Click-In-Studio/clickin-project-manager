@@ -423,7 +423,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   let tools = buildTools({ userId, productionId, run: runHandle });
   let toolByName = new Map(tools.map((t) => [t.name, t]));
   // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
-  // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
+  // compaction 单列：它是独立模型请求且不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
   const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,CHAT_MODEL),0);
@@ -536,6 +536,13 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         completeSimple: llmRuntime().completeSimple,
         compactFn: runtimeOverrides.compactFn,
         shouldCompact: runtimeOverrides.shouldCompactFn,
+        refreshContext: async (requestContext) => {
+          // 指令、长期记忆和项目资格是权威状态：每个 provider 请求边界现读。
+          // buildInjectContext 对未变化内容保持确定表达；临时 recall 仍只在消息尾部，
+          // 不会因刷新 system 而重复注入或进入持久 transcript。
+          const currentInject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
+          return { ...requestContext, systemPrompt: buildSystemPrompt(currentInject) };
+        },
         rebuildMessages: withInjectedNote,
         onCompacting: async (active) => {
           const next = active ? "compacting" : "running";

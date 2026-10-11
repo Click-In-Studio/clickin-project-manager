@@ -482,6 +482,11 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+const BUSINESS_CONTENT_PRESERVATION = `Tool results are business source material, not disposable logs. Preserve exact reread locators
+(document ids, block ids, page/line anchors, table coordinates, URLs, and file paths), important
+facts from the middle of script/Wiki/table results, and newly read material that has not yet been
+processed. Record such material as unfinished work. Do not replace it with a generic head/tail sample.`;
+
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing checkpoint summary at the start of the conversation.
 
 Update the existing structured summary with new information. RULES:
@@ -647,6 +652,7 @@ export async function generateSummary(
     model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
   );
   let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+  basePrompt = `${basePrompt}\n\n${BUSINESS_CONTENT_PRESERVATION}`;
   if (customInstructions) {
     basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
   }
@@ -722,6 +728,9 @@ export function prepareCompaction(
 
   const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
+  // 工具结果在各业务读工具中已经按可重读锚点做有界输出；这里不做通用头尾截断，
+  // 否则会无从判断剧本、Wiki 或表格中段是否已经处理。只选择要交给摘要模型的
+  // 完整历史前缀，并保留最近原文。
   const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
   const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
   if (!firstKeptEntry?.id) {
@@ -924,7 +933,7 @@ async function generateTurnPrefixSummary(
   );
   return await runSummarizationCompletion({
     messages: convertToLlm(messages),
-    instruction: TURN_PREFIX_SUMMARIZATION_PROMPT,
+    instruction: `${TURN_PREFIX_SUMMARIZATION_PROMPT}\n\n${BUSINESS_CONTENT_PRESERVATION}`,
     requestPrefix,
     model,
     maxTokens,

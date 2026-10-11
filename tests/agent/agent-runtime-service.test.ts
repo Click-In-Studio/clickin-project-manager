@@ -16,6 +16,7 @@ import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals"
 import { CHAT_MODEL, llmRuntime } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
+import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
 
 // #367 S2：run 服务端到端（真 DB、假模型、真 harness、真工具函数）。
 // 覆盖：事件落表+NOTIFY、历史投影、会话列表、审批门（deny 带理由 / allow）、
@@ -24,7 +25,12 @@ import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attach
 const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
-type Step = { text: string; thinking?: string; wait?: Promise<void> } | { calls: ToolCall[] } | { hang: true } | { error: string };
+type Step = (
+  { text: string; thinking?: string; wait?: Promise<void> }
+  | { calls: ToolCall[] }
+  | { hang: true }
+  | { error: string }
+) & { before?: () => void | Promise<void> };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
   const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
@@ -41,6 +47,7 @@ function scripted(script: Step[]) {
       return stream;
     }
     queueMicrotask(async () => {
+      await next.before?.();
       if ("error" in next) {
         stream.push({ type: "error", reason: "error", error: { ...base(), content: [], stopReason: "error", errorMessage: next.error } });
         return;
@@ -304,6 +311,9 @@ describe("agent-runtime service", () => {
     expect(third.role).toBe("toolResult");
     expect(third.isError).toBe(true);
     expect(third.content[0]?.text).toContain("用户拒绝理由：先别改");
+    expect(new Set(seen.map((request) => request.systemPrompt)).size).toBe(1);
+    expect(seen[1].tools).toEqual(seen[0].tools);
+    expect(seen[2].tools).toEqual(seen[0].tools);
     const instr = await getPool().query(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows).toHaveLength(0);
     expect(lines.some((l) => l.type === "mutation")).toBe(false); // 被拒的写工具没有变更信号
@@ -311,7 +321,7 @@ describe("agent-runtime service", () => {
 
   it("审批 allow → 写工具真执行（个人指令被写入），approval-resolved 行到前端", async () => {
     const writeCall: ToolCall = { type: "toolCall", id: "c_w2", name: exposedName("my.update_instructions"), arguments: { content: "回复末尾加一个🎭" } };
-    const { streamFn } = scripted([{ calls: [writeCall] }, { text: "已更新" }]);
+    const { streamFn, seen } = scripted([{ calls: [writeCall] }, { text: "已更新" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey(false); // 个人会话
     await startRun({ sessionId: key, userId, message: "改我的个人指令" });
@@ -339,10 +349,127 @@ describe("agent-runtime service", () => {
     expect(audit.rows[0].run_id).not.toBeNull();
     const instr = await getPool().query<{ content: string }>(`SELECT content FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     expect(instr.rows[0]?.content).toBe("回复末尾加一个🎭");
+    expect(seen[1].systemPrompt).toContain("回复末尾加一个🎭");
     await getPool().query(`DELETE FROM agent_instructions WHERE scope_type = 'user' AND scope_id = $1`, [userId]);
     const approval = await getPool().query<{ status: string; executed_at: Date | null }>(`SELECT status, executed_at FROM agent_approval WHERE id = $1`, [approvalId]);
     expect(approval.rows[0].status).toBe("allowed");
     expect(approval.rows[0].executed_at).not.toBeNull();
+  });
+
+  it("每次模型请求刷新权威前缀：当前指令、记忆删除和项目资格立即生效，工具顺序保持稳定", async () => {
+    const directive = `本轮旧指令-${shortId()}`;
+    const deletedMemory = `本轮删除记忆-${shortId()}`;
+    const projectMemory = `失去资格后不可见-${shortId()}`;
+    await getPool().query(
+      `INSERT INTO agent_instructions(scope_type,scope_id,content,updated_by)
+       VALUES('user',$1::text,$2,$1::uuid)
+       ON CONFLICT(scope_type,scope_id) DO UPDATE SET content=EXCLUDED.content,updated_by=EXCLUDED.updated_by,updated_at=now()`,
+      [pendingUserId, directive],
+    );
+    const generalId = await mutateMemoryEntry(pendingUserId, null, { action: "create", body: deletedMemory, actor: "user" });
+    const projectId = await mutateMemoryEntry(pendingUserId, prodId, { action: "create", body: projectMemory, actor: "user" });
+    const general = (await readMemoryScope(pendingUserId, null)).entries.find((entry) => entry.id === generalId)!;
+    const readCall: ToolCall = { type: "toolCall", id: "c_refresh_authority", name: exposedName("production.info"), arguments: {} };
+    const { streamFn, seen } = scripted([
+      {
+        calls: [readCall],
+        before: async () => {
+          await mutateMemoryEntry(pendingUserId, null, { action: "delete", id: generalId, revision: general.revision, actor: "user" });
+          await getPool().query(`DELETE FROM agent_instructions WHERE scope_type='user' AND scope_id=$1`, [pendingUserId]);
+          await getPool().query(
+            `UPDATE production_member SET status='exited',status_source='self' WHERE production_id=$1 AND user_id=$2`,
+            [prodId, pendingUserId],
+          );
+        },
+      },
+      { text: "已按当前状态继续" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(pendingUserId, prodId);
+    sessions.push(key);
+    try {
+      await startRun({ sessionId: key, userId: pendingUserId, message: "我参与哪些制作" });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(seen).toHaveLength(2);
+      expect(seen[0].systemPrompt).toContain(directive);
+      expect(seen[0].systemPrompt).toContain(deletedMemory);
+      expect(seen[0].systemPrompt).toContain(projectMemory);
+      expect(seen[1].systemPrompt).not.toContain(directive);
+      expect(seen[1].systemPrompt).not.toContain(deletedMemory);
+      expect(seen[1].systemPrompt).not.toContain(projectMemory);
+      expect(seen[1].tools).toEqual(seen[0].tools);
+      const secondMessages = JSON.stringify(seen[1].messages);
+      expect(secondMessages).toContain("权限被拒绝：你不是该制作的成员");
+      expect((secondMessages.match(/<clickin-recall>/g) ?? [])).toHaveLength(1);
+    } finally {
+      await getPool().query(
+        `UPDATE production_member SET status='active',status_source=NULL WHERE production_id=$1 AND user_id=$2`,
+        [prodId, pendingUserId],
+      );
+      const project = (await readMemoryScope(pendingUserId, prodId)).entries.find((entry) => entry.id === projectId);
+      if (project) await mutateMemoryEntry(pendingUserId, prodId, { action: "delete", id: project.id, revision: project.revision, actor: "user" });
+      await getPool().query(`DELETE FROM agent_instructions WHERE scope_type='user' AND scope_id=$1`, [pendingUserId]);
+    }
+  });
+
+  it("写工具完成后的模型请求超窗只重放模型请求，不重复业务写入", async () => {
+    const content = `只写一次-${shortId()}`;
+    const writeCall: ToolCall = {
+      type: "toolCall",
+      id: "c_write_before_overflow",
+      name: exposedName("my.update_instructions"),
+      arguments: { content },
+    };
+    runtimeOverrides.shouldCompactFn = () => false;
+    runtimeOverrides.compactFn = async (preparation) => ({
+      ok: true,
+      value: {
+        summary: "用户已确认并完成一次个人指令更新。",
+        firstKeptEntryId: preparation.firstKeptEntryId,
+        tokensBefore: preparation.tokensBefore,
+      },
+    });
+    const { streamFn, seen } = scripted([
+      { calls: [writeCall] },
+      { error: "context_length_exceeded: maximum context length exceeded" },
+      { text: "已完成且没有重复写入" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey(false);
+    try {
+      const { runId } = await startRun({
+        sessionId: key,
+        userId,
+        message: `把这条个人指令写入一次。背景材料：${"旧上下文".repeat(30_000)}`,
+      });
+      let approvalId: string | undefined;
+      for (let i = 0; i < 200 && !approvalId; i++) {
+        const line = (await readEventsSince(key, 0)).map((row) => row.line)
+          .find((item) => item.type === "approval") as Extract<StreamLine, { type: "approval" }> | undefined;
+        approvalId = line?.approval?.id;
+        if (!approvalId) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(approvalId).toBeTruthy();
+      await resolveApproval(approvalId!, "allow-once", userId);
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(lines.at(-1)).toEqual({ type: "final", text: "已完成且没有重复写入" });
+      expect(seen).toHaveLength(3);
+      expect(lines.filter((line) => line.type === "tool-end" && line.id === writeCall.id)).toHaveLength(1);
+      expect((await getPool().query(
+        `SELECT count(*)::int AS n FROM agent_mutation WHERE run_id=$1 AND tool_call_id=$2`,
+        [runId, writeCall.id],
+      )).rows[0].n).toBe(1);
+      expect((await getPool().query<{ content: string }>(
+        `SELECT content FROM agent_instructions WHERE scope_type='user' AND scope_id=$1`,
+        [userId],
+      )).rows[0]?.content).toBe(content);
+    } finally {
+      await getPool().query(`DELETE FROM agent_instructions WHERE scope_type='user' AND scope_id=$1`, [userId]);
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
   });
 
   it("写工具命中 🔓：inline 激活 → 权限 mutation → 原写确认 → 执行", async () => {
@@ -639,6 +766,43 @@ describe("agent-runtime service", () => {
     }
   });
 
+  it("压缩进行中取消：不提交摘要，清掉 compacting 并以 aborted 收口", async () => {
+    let compactStarted!: () => void;
+    const started = new Promise<void>((resolve) => { compactStarted = resolve; });
+    runtimeOverrides.shouldCompactFn = () => true;
+    runtimeOverrides.compactFn = async (...args) => {
+      compactStarted();
+      const signal = args[6];
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { ok: false, error: new CompactionError("aborted", "用户停止") };
+    };
+    runtimeOverrides.streamFn = scripted([{ text: "不应发送" }]).streamFn;
+    const key = newKey();
+    try {
+      const { runId } = await startRun({ sessionId: key, userId, message: `等待压缩${"内容".repeat(90_000)}` });
+      await started;
+      expect(await abortRun(key)).toBe(true);
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(lines.at(-1)?.type).toBe("aborted");
+      expect(lines.filter((line) => line.type === "compacting")).toEqual([
+        { type: "compacting", active: true },
+        { type: "compacting", active: false },
+      ]);
+      expect((await getPool().query(
+        `SELECT count(*)::int AS n FROM agent_session_entry WHERE session_id=$1 AND type='compaction'`,
+        [key],
+      )).rows[0].n).toBe(0);
+      expect((await getPool().query(`SELECT status FROM agent_run WHERE id=$1`, [runId])).rows[0].status).toBe("aborted");
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
+  });
+
   it("provider 明确报上下文超限时，只有持久压缩确实缩短后才重试一次", async () => {
     runtimeOverrides.shouldCompactFn = () => false;
     runtimeOverrides.compactFn = async (preparation) => ({
@@ -697,6 +861,39 @@ describe("agent-runtime service", () => {
       const lines = await collectUntilTerminal(key);
       await waitForIdle(key);
       expect(seen).toHaveLength(1);
+      expect(lines.at(-1)?.type).toBe("error");
+    } finally {
+      delete runtimeOverrides.compactFn;
+      delete runtimeOverrides.shouldCompactFn;
+    }
+  });
+
+  it("上下文超限恢复达到一次上限后明确失败，不继续循环", async () => {
+    runtimeOverrides.shouldCompactFn = () => false;
+    runtimeOverrides.compactFn = async (preparation) => ({
+      ok: true,
+      value: {
+        summary: "已经缩短一次的上下文。",
+        firstKeptEntryId: preparation.firstKeptEntryId,
+        tokensBefore: preparation.tokensBefore,
+      },
+    });
+    const { streamFn, seen } = scripted([
+      { text: "先保存历史" },
+      { error: "context_length_exceeded: maximum context length exceeded" },
+      { error: "context_length_exceeded: maximum context length exceeded" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    try {
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const cursor = (await readEventsSince(key, 0)).at(-1)?.seq ?? 0;
+      await startRun({ sessionId: key, userId, message: "继续" });
+      const lines = await collectUntilTerminal(key, 10_000, cursor);
+      await waitForIdle(key);
+      expect(seen).toHaveLength(3);
       expect(lines.at(-1)?.type).toBe("error");
     } finally {
       delete runtimeOverrides.compactFn;

@@ -6,7 +6,7 @@ import {
   DEFAULT_COMPACTION_SETTINGS,
   type CompactionPreparation,
 } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
-import { estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
+import { compactionSettingsFor, estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
 
 const MODEL: Model = {
   id: "budget-test",
@@ -51,6 +51,20 @@ describe("模型请求上下文预算", () => {
     expect(withTransient.outputReserveTokens).toBe(300);
     expect(withTransient.pressureThreshold).toBe(600);
     expect(withTransient.pressured).toBe(true);
+  });
+
+  it("摘要余量和近期原文按有效窗口与本次输出预算派生，不沿用 Harness 默认值", () => {
+    expect(compactionSettingsFor(MODEL, { maxTokens: 300 })).toEqual({
+      enabled: true,
+      reserveTokens: 300,
+      keepRecentTokens: 300,
+    });
+    expect(compactionSettingsFor(MODEL, { maxTokens: 300 }, true)).toEqual({
+      enabled: true,
+      reserveTokens: 300,
+      keepRecentTokens: 0,
+    });
+    expect(compactionSettingsFor({ ...MODEL, contextTokens: 2_000 }, { maxTokens: 300 }).keepRecentTokens).toBe(400);
   });
 });
 
@@ -106,5 +120,52 @@ describe("压缩结果护栏", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(code);
+  });
+
+  it("剧本、Wiki 与表格工具结果完整进入摘要请求，中段和重读定位不做通用截断", async () => {
+    const toolCallId = "call-read-business-content";
+    const messages: AgentMessage[] = [
+      {
+        ...completion("", "toolUse"),
+        content: [{ type: "toolCall", id: toolCallId, name: "production.wiki_read", arguments: { wikiId: "wiki-1" } }],
+      },
+      {
+        role: "toolResult",
+        toolCallId,
+        toolName: "production.wiki_read",
+        content: [{ type: "text", text: [
+          "开头说明",
+          "[b:block-middle] 剧本中段关键调度",
+          "wiki:/__cm__/wiki/wiki-1#block-42",
+          "表格中段：第37行预算=65000",
+          "续读定位：p12.8 / ¶41",
+          "结尾说明",
+        ].join("\n") }],
+        isError: false,
+        timestamp: 1,
+      },
+    ];
+    let sent: Context | undefined;
+    const result = await compact(
+      { ...preparation(), messagesToSummarize: messages },
+      { systemPrompt: "原系统指令", tools: [] },
+      MODEL,
+      "test-key",
+      undefined,
+      undefined,
+      undefined,
+      "low",
+      undefined,
+      { completeSimple: async (_model, context) => {
+        sent = context;
+        return completion("保留中段事实与重读定位。", "stop");
+      } },
+    );
+    expect(result.ok).toBe(true);
+    const request = JSON.stringify(sent?.messages);
+    expect(request).toContain("[b:block-middle]");
+    expect(request).toContain("第37行预算=65000");
+    expect(request).toContain("p12.8 / ¶41");
+    expect(request).toContain("newly read material");
   });
 });

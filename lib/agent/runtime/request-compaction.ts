@@ -5,12 +5,11 @@ import { convertToLlm } from "../../../vendor/openclaw/packages/agent-core/src/h
 import { Session } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import {
   compact,
-  DEFAULT_COMPACTION_SETTINGS,
   prepareCompaction,
   type CompactionSettings,
 } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import { observeCompactionCheck, observeModelRequest } from "./observation";
-import { estimateRequestBudget } from "./context-budget";
+import { compactionSettingsFor, estimateRequestBudget } from "./context-budget";
 import { usdOfUsage } from "./billing";
 
 export interface RequestCompactionUsage {
@@ -29,6 +28,7 @@ export interface RequestCompactionOptions {
   completeSimple: AgentCoreCompletionRuntimeDeps["completeSimple"];
   compactFn?: typeof compact;
   shouldCompact?: (estimatedInputTokens: number, threshold: number) => boolean;
+  refreshContext?: (context: Context) => Promise<Context>;
   rebuildMessages?: (messages: AgentMessage[]) => AgentMessage[];
   onCompacting?: (active: boolean) => Promise<void>;
   onUsage?: (usage: RequestCompactionUsage) => Promise<void>;
@@ -38,7 +38,11 @@ const PRESSURE_ATTEMPTS = 2;
 
 /** 在真实 provider 请求前压缩持久 transcript，并返回同一请求头下的新消息面。 */
 export async function compactRequestContext(options: RequestCompactionOptions): Promise<Context> {
-  const initialBudget = estimateRequestBudget(options.model, options.context, { maxTokens: options.maxTokens });
+  options.signal.throwIfAborted();
+  let current = options.refreshContext
+    ? await options.refreshContext(options.context)
+    : options.context;
+  const initialBudget = estimateRequestBudget(options.model, current, { maxTokens: options.maxTokens });
   const forced = options.trigger === "context-overflow";
   const triggered = forced || (options.shouldCompact
     ? options.shouldCompact(initialBudget.estimatedInputTokens, initialBudget.pressureThreshold)
@@ -50,10 +54,10 @@ export async function compactRequestContext(options: RequestCompactionOptions): 
   });
   if (!triggered || options.signal.aborted) {
     await check.finish("skipped");
-    return options.context;
+    return current;
   }
 
-  let current = options.context;
+  const original = current;
   let committed = false;
   let compacting = false;
   let status: "ok" | "error" = "ok";
@@ -63,9 +67,11 @@ export async function compactRequestContext(options: RequestCompactionOptions): 
     const attempts = forced ? 1 : PRESSURE_ATTEMPTS;
     for (let attempt = 0; attempt < attempts; attempt++) {
       options.signal.throwIfAborted();
-      const settings: CompactionSettings = forced
-        ? { ...DEFAULT_COMPACTION_SETTINGS, keepRecentTokens: 0 }
-        : DEFAULT_COMPACTION_SETTINGS;
+      const settings: CompactionSettings = compactionSettingsFor(
+        options.model,
+        { maxTokens: options.maxTokens },
+        forced,
+      );
       const preparation = prepareCompaction(await options.session.getBranch(), settings);
       if (!preparation.ok) throw preparation.error;
       if (!preparation.value) break;
@@ -125,13 +131,14 @@ export async function compactRequestContext(options: RequestCompactionOptions): 
         ...current,
         messages: convertToLlm(options.rebuildMessages?.(rebuilt) ?? rebuilt),
       };
+      if (options.refreshContext) current = await options.refreshContext(current);
       const budget = estimateRequestBudget(options.model, current, { maxTokens: options.maxTokens });
       if (forced || !budget.pressured) break;
     }
   } catch (error) {
     status = "error";
     if (!options.signal.aborted) console.error("[agent-runtime] 请求前 compaction 失败（沿用可用上下文）:", error);
-    if (!committed) current = options.context;
+    if (!committed) current = original;
   } finally {
     try {
       if (compacting) await options.onCompacting?.(false);
