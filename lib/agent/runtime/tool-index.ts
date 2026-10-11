@@ -1,3 +1,4 @@
+import { observeRetrieval } from "./observation";
 // 工具索引（#367）：主动召回与 find_tools 兜底共用的一份检索面。
 //
 // 两条车道取 max（与 lib/agent/memory/trigger.ts 同款判据）：
@@ -115,8 +116,8 @@ function lexicalScore(phrase: string, promptTokens: Set<string>): number {
 }
 
 /** 查询侧向量（失败 → null，词法单路）。userId 用于 ai_usage 记账。 */
-async function queryVector(prompt: string, userId: string | null): Promise<number[] | null> {
-  if (embeddingMode() === "none") return null;
+async function queryVector(prompt: string, userId: string | null, metrics: RetrievalMetrics): Promise<number[] | null> {
+  if (embeddingMode() === "none") { metrics.vectorReason = "not_configured"; return null; }
   try {
     const q = await embedQuery(prompt);
     if (q.totalTokens > 0 && userId) {
@@ -127,25 +128,38 @@ async function queryVector(prompt: string, userId: string | null): Promise<numbe
     }
     return q.embedding;
   } catch (err) {
+    metrics.vectorReason = "query_embedding_failed";
     console.error("[tool-index] query embedding failed, lexical only:", err);
     return null;
   }
 }
+
+type RetrievalMetrics = { vectorReason?: string; stages?: Record<string, number>; candidateCount?: number; scores?: Array<{ name: string; family: string; score: number; lexical: number; vector: number | null }> };
 
 /** 全量打分（不截断、不设阈值），供召回与搜索各自裁剪。 */
 export async function scoreTools(prompt: string, opts: {
   hasProduction: boolean;
   userId?: string | null;
   extraCatalog?: readonly ToolCatalogEntry[];
+  metrics?: RetrievalMetrics;
 }): Promise<ToolHit[]> {
+  const metrics = opts.metrics ?? {};
+  const stages: Record<string, number> = {};
+  metrics.stages = stages;
+  async function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const started = performance.now();
+    try { return await fn(); } finally { stages[name] = performance.now() - started; }
+  }
   const extra = opts.extraCatalog ?? [];
   const [staticDocs, extraDocs, qvec] = await Promise.all([
-    ensureDocs(),
-    extra.length ? loadDocsFor(extra) : Promise.resolve([]),
-    queryVector(prompt, opts.userId ?? null),
+    timed("staticIndex", ensureDocs),
+    timed("dynamicIndex", () => extra.length ? loadDocsFor(extra) : Promise.resolve([])),
+    timed("queryEmbedding", () => queryVector(prompt, opts.userId ?? null, metrics)),
   ]);
   const catalog = [...TOOL_CATALOG, ...extra];
   const allDocs = [...staticDocs, ...extraDocs];
+  if (qvec && allDocs.some(d => !d.vec)) metrics.vectorReason = "document_vectors_missing";
+  const scoringStarted = performance.now();
   const promptTokens = new Set(bigramTokens(prompt));
   const hits: ToolHit[] = [];
   for (const entry of catalog) {
@@ -166,14 +180,19 @@ export async function scoreTools(prompt: string, opts: {
   if (process.env.AGENT_TOOL_RECALL_DEBUG === "1") {
     console.log(`[tool-index] "${prompt.slice(0, 40)}" → ${hits.slice(0, 5).map((h) => `${h.name}=${h.score.toFixed(2)}(l${h.lexical.toFixed(2)}/v${h.vector === null ? "-" : h.vector.toFixed(2)})`).join(" ")}`);
   }
+  stages.scoring = performance.now() - scoringStarted;
+  metrics.stages = stages;
+  metrics.candidateCount = hits.length;
+  metrics.scores = hits.map(({ name, family, score, lexical, vector }) => ({ name, family, score, lexical, vector }));
   return hits;
 }
 
 /** 主动召回（族粒度）：族内任一工具 词法 ≥ 0.72 或 向量 ≥ 阈值 → 整族入面；按族分取前 N 族。 */
-export async function recallFamilies(prompt: string, opts: {
+async function recallFamiliesImpl(prompt: string, opts: {
   hasProduction: boolean;
   userId?: string | null;
   extraCatalog?: readonly ToolCatalogEntry[];
+  metrics?: RetrievalMetrics;
 }): Promise<FamilyHit[]> {
   if (!prompt.trim()) return [];
   const hits = await scoreTools(prompt, opts);
@@ -195,12 +214,43 @@ export async function recallFamilies(prompt: string, opts: {
 }
 
 /** find_tools 兜底：不设阈值，按分取前 N（模型自己判断哪个对）。 */
-export async function searchTools(query: string, opts: {
+async function searchToolsImpl(query: string, opts: {
   hasProduction: boolean;
   userId?: string | null;
   limit?: number;
   extraCatalog?: readonly ToolCatalogEntry[];
+  metrics?: RetrievalMetrics;
 }): Promise<ToolHit[]> {
   const hits = await scoreTools(query, opts);
   return hits.filter((h) => h.score > 0).slice(0, opts.limit ?? 5);
+}
+
+/** 自动与显式入口分别记录；评分只保存工具标识和分数，不保存查询或说明文本。 */
+export async function recallFamilies(prompt: string, opts: Parameters<typeof recallFamiliesImpl>[1]): Promise<FamilyHit[]> {
+  const observation = await observeRetrieval("tool_retrieval", "automatic", opts.userId ?? null);
+  const metrics: RetrievalMetrics = {};
+  try {
+    const result = await recallFamiliesImpl(prompt, { ...opts, metrics });
+    await observation.finish({ ...metrics, status: "ok", reason: !prompt.trim() ? "empty_query" : metrics.vectorReason ?? null,
+      returnedCount: result.length, returnedToolCount: result.reduce((n, f) => n + f.tools.length, 0),
+      returnedFamilies: result.map(f => f.family), lexicalThreshold: TOOL_RECALL_THRESHOLD,
+      vectorThreshold: TOOL_VECTOR_THRESHOLD, limit: TOOL_RECALL_MAX_FAMILIES });
+    return result;
+  } catch (err) {
+    await observation.finish({ ...metrics, status: "error", reason: "retrieval_failed" });
+    throw err;
+  }
+}
+export async function searchTools(query: string, opts: Parameters<typeof searchToolsImpl>[1]): Promise<ToolHit[]> {
+  const observation = await observeRetrieval("tool_retrieval", "explicit", opts.userId ?? null);
+  const metrics: RetrievalMetrics = {};
+  try {
+    const result = await searchToolsImpl(query, { ...opts, metrics });
+    await observation.finish({ ...metrics, status: "ok", reason: metrics.vectorReason ?? null,
+      returnedCount: result.length, returnedTools: result.map(t => t.name), limit: opts.limit ?? 5 });
+    return result;
+  } catch (err) {
+    await observation.finish({ ...metrics, status: "error", reason: "retrieval_failed" });
+    throw err;
+  }
 }

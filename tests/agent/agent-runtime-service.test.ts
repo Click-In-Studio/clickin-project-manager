@@ -488,6 +488,13 @@ describe("agent-runtime service", () => {
       expect(complete).toHaveBeenCalledTimes(2);
       const results=(await getPool().query("SELECT result FROM agent_admission WHERE run_id=$1 AND operation_key LIKE 'compact:%' ORDER BY operation_key",[started.runId])).rows;
       expect(results.map(row=>row.result.content[0].text)).toEqual(["历史摘要","前缀摘要"]);
+      const observations = (await getPool().query("SELECT data,ended_at FROM agent_observation WHERE run_id=$1 ORDER BY started_at", [started.runId])).rows;
+      const requests = observations.filter(row => row.data.purpose === "compaction");
+      expect(requests).toHaveLength(2);
+      expect(requests.every(row => row.ended_at && row.data.stopReason === "stop")).toBe(true);
+      expect(observations.some(row => row.data.triggered === true && row.data.status === "ok")).toBe(true);
+      expect(JSON.stringify(observations)).not.toContain("历史摘要");
+      expect(JSON.stringify(observations)).not.toContain("前缀摘要");
     }finally{complete.mockRestore();delete runtimeOverrides.compactFn;delete runtimeOverrides.shouldCompactFn;}
   });
 

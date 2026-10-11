@@ -146,8 +146,11 @@ export interface TierInput {
 }
 
 export interface TierResult {
+  mode: "tiered" | "disabled" | "fallback";
   active: string[];
   hot: string[];
+  page: string[];
+  dependencies: string[];
   warm: string[];
   recalled: string[];
 }
@@ -155,7 +158,7 @@ export interface TierResult {
 export function tieredToolNames(input: TierInput): TierResult {
   const available = new Set(input.available);
   if (process.env.AGENT_TOOL_TIERS === "off") {
-    return { active: [...available], hot: [...available], warm: [], recalled: [] };
+    return { mode: "disabled", active: [...available], hot: [...available], warm: [], recalled: [], page: [], dependencies: [] };
   }
   try {
     const hot = (input.hasProduction ? HOT_PRODUCTION : HOT_PERSONAL).filter((n) => available.has(n));
@@ -167,6 +170,7 @@ export function tieredToolNames(input: TierInput): TierResult {
       ?? (input.prompt ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name) : [])
     ).filter((n) => available.has(n));
     for (const n of input.used ?? []) if (available.has(n)) recalled.push(n);
+    const seeds = new Set([...hot, ...warm, ...recalled]);
     const active = new Set<string>([...hot, ...warm, ...recalled]);
     // 闭包：迭代到不动点（闭包里的工具也可能有自己的闭包）
     let grew = true;
@@ -183,9 +187,13 @@ export function tieredToolNames(input: TierInput): TierResult {
     }
     // 个人会话里 production 工具本来就不可用，去掉免得模型撞 NO_PRODUCTION
     const list = [...active].filter((n) => input.hasProduction || !n.startsWith("production."));
-    return { active: list, hot, warm, recalled };
+    return {
+      mode: "tiered", active: list, hot, warm, recalled,
+      page: (input.pageKey ? WARM_BY_PAGE[input.pageKey] ?? [] : []).filter(n => list.includes(n)),
+      dependencies: list.filter(n => !seeds.has(n)),
+    };
   } catch (err) {
     console.error("[agent-runtime] tool tiering failed, falling back to all tools:", err);
-    return { active: [...available], hot: [...available], warm: [], recalled: [] };
+    return { mode: "fallback", active: [...available], hot: [...available], warm: [], recalled: [], page: [], dependencies: [] };
   }
 }
