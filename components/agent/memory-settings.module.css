@@ -1,0 +1,11 @@
+.panel { border: 1px solid var(--line); border-radius: 12px; padding: 20px; min-width: 0; }
+.panel p { color: var(--muted); margin: 8px 0 16px; }
+.scope, .add { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+.list { list-style: none; padding: 0; margin: 0; }
+.entry { border-top: 1px solid var(--line); padding: 16px 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-bottom: 8px; color: var(--muted); }
+.panel textarea { box-sizing: border-box; width: 100%; max-width: 100%; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--background); color: inherit; font: inherit; }
+.actions { display: flex; gap: 12px; margin-top: 8px; }
+.panel button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.panel button:disabled { cursor: default; opacity: .5; }
+.explanation { font-size: 13px; }

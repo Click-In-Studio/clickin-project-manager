@@ -99,7 +99,7 @@ CD（`.github/workflows/deploy.yml`）已经把 runner 纳入发布，**代码�
 
 **唯一的人工动作：服务器 `shared/.env.local` 有 `AGENT_RUNNER_URL=http://127.0.0.1:3102`**（已配；CD reload 带 `--update-env`）。
 
-其余 runner 需要的 env（`DEEPSEEK_API_KEY`、`EMBEDDING_*`、`PG*`、`AGENT_MEMORY_PATH`）与 next 共用同一份 `.env.local`，线上已有。
+其余 runner 需要的 env（`DEEPSEEK_API_KEY`、`EMBEDDING_*`、`PG*`）与 next 共用同一份 `.env.local`，线上已有。
 OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，网关时代的会话历史不迁移（§10 决断）。
 
 **上线后核对**：`pm2 ls` 里 `agent-runner` online；`curl -s --noproxy '*' http://127.0.0.1:3102/health` 返回 `{"ok":true,…}`；发一条会调工具的消息看 SSE 帧序（下方冒烟清单）。
@@ -207,3 +207,13 @@ runner 是独立进程，**任何"进程内内存注册表"在它里面都是空
 3. 对话进行中 `pm2 reload agent-runner`：会话无感（不丢字、不重发、审批等待态存活）。
 4. `kill -9` 一次 runner：下一进程 30s 内接管并续跑。
 5. 50 轮长会话不爆窗（compaction 摘要可在 `agent_session_entry` 里看到 `type = 'compaction'`）。
+
+## 个人长期记忆
+
+记忆由 `agent_memory_scope` / `agent_memory_entry` 管理，分个人通用和个人项目，条目来源为 dream 自动整理或 active 主动记录。用户编辑只由账号设置的真实用户请求标记，模型不能申报确认或事实来源。dream 接受严格的正文数组，输入批次数量由服务端记录，不承诺逐条来源证据。项目背景只用于理解语境，不作为用户决定的证明。
+
+通用 dream 消费该用户当前有资格访问的跨项目会话历史，项目 dream 只消费对应项目历史；当前有效条目作为基线。主动条目和用户编辑条目不被 dream 替换。注入只包含个人通用与当前有资格项目的条目，当前指令和业务事实优先，不按 prompt 自动召回记忆或默认注入近期历史。`my.memory_search` 显式检索时仍检查项目资格与历史边界。
+
+用户修改/删除推进作用域历史截断和 revision，保留其他当前条目。旧批次提交、旧 run 晚完成归档、旧会话主动写入均受边界约束；通用 dream 另在作用域行记录服务端整理批次涉及的项目集合；若用户修改/删除该项目记忆或失去其中任一项目资格，整组未编辑的通用自动摘要退出，主动和用户编辑条目保留。集合只说明批次输入边界，不宣称单条来源。截断之前建立的会话整体退出该范围的记忆归档与写入，避免恢复旧会话后透过摘要回流；新会话的新 run 可以形成新记忆。原始聊天消息仍属于会话历史，记忆管理不清除当前会话上下文。项目删除通过 FK 清理个人项目范围。
+
+上线迁移会移除无法拆分的旧 curated 摘要索引，保留旧 episodic 索引但标为未知作用域。旧 `MEMORY.md` 不导入通用记忆。若需恢复旧归档的检索，在原服务端设置 `AGENT_MEMORY_PATH` 后运行 `npx tsx scripts/memory-index-backfill.ts`：只导入可验证用户及作用域的 `runs.jsonl`，不突破已经设置的截断边界。`--rebuild` 只重建向量，不清空条目、历史消费游标或删除边界；无法验证的旧归档保持不可用。

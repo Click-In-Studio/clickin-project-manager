@@ -1,272 +1,173 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { faker } from "@faker-js/faker";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vitest";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
-
-// 记忆后端所有权 PR 的三层测试：
-//   1. store：追加/尾读/蒸馏增量消费的字节偏移语义
-//   2. 上报与组装取件：appendRunRecord → buildInjectContext（MCP 端点已退役）
-//   3. 蒸馏：mock LLM，验证输入组装（旧摘要+新增量）与落盘+offset 提交
-
-// mock LLM（distill 经 @/lib/agent/llm-chat 调用）。只替换 chat，保留真的
-// LlmBudgetError——distill 用 instanceof 分流"预算不够"与其他失败，
-// 换成假类会让分流逻辑在测试里恒假、测了个寂寞。
-const chatMock = vi.fn(async (..._args: unknown[]) => "## 偏好与习惯\n- mock 蒸馏产物");
-vi.mock("@/lib/agent/llm-chat", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/agent/llm-chat")>()),
-  chat: (...args: unknown[]) => chatMock(...args),
+import { Pool } from "pg";
+import { getPool, poolConfigFromEnv } from "@/lib/pg";
+import { appendRunRecord } from "@/lib/agent/memory/store";
+import { readMemoryScope, mutateMemoryEntry, readDreamSnapshot, commitDream, MemoryAccessError, MemoryConflictError } from "@/lib/agent/memory/memory-db";
+import { buildInjectContext } from "@/lib/agent/memory/inject";
+import { distillUser, parseDreamOutput } from "@/lib/agent/memory/distill";
+import { searchMemory } from "@/lib/agent/memory/search";
+const chatMock = vi.fn(async (..._args: unknown[]) => '["简短说明"]');
+vi.mock("@/lib/agent/llm-chat", async original => ({
+  ...(await original<typeof import("@/lib/agent/llm-chat")>()), chat: (...args: unknown[]) => chatMock(...args),
 }));
-
 let userId: string;
-let userName: string;
+let owner: string;
 let prodId: string;
-
+let otherProd: string;
+const now = () => new Date().toISOString();
 beforeAll(async () => {
-  userName = `测试记忆${shortId()}`;
-  userId = (await upsertFeishuUser(`test-open-${shortId()}`, userName, null, false)).userId;
-  ({ prodId } = await makeProduction(userId));
+  userId = (await upsertFeishuUser(`memory-${shortId()}`, "记忆用户", null, false)).userId;
+  owner = (await upsertFeishuUser(`memory-owner-${shortId()}`, "项目owner", null, false)).userId;
+  ({ prodId } = await makeProduction(owner));
+  ({ prodId: otherProd } = await makeProduction(userId));
   await addProductionMember(prodId, userId);
-  void faker;
 });
-
+beforeEach(async () => {
+  await getPool().query("DELETE FROM agent_memory_scope WHERE user_id=$1", [userId]);
+  await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id=$1", [userId]);
+  chatMock.mockReset().mockResolvedValue('["简短说明"]');
+  process.env.EMBEDDING_PROVIDER = "none";
+});
 afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
-  // 蒸馏/上报现在会同步写检索索引（agent_memory_chunk），清掉本测试用户的行
-  const { getPool } = await import("@/lib/pg");
-  await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
+  await cleanupProduction(otherProd).catch(() => {});
+  await getPool().query("DELETE FROM agent_memory_scope WHERE user_id=$1", [userId]);
+  await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id=$1", [userId]);
+  delete process.env.EMBEDDING_PROVIDER;
 });
+const create = (body: string, pid: string | null = null, actor: "user" | "agent" = "user") => mutateMemoryEntry(userId, pid, { action: "create", body, actor });
+const archive = (text: string, pid: string | null = null, ts = now()) => appendRunRecord(userId, { ts, productionId: pid, lastUser: text, lastAssistant: "收到" });
 
-describe("store：字节偏移增量语义", () => {
-  it("append → readRunsSinceLastDistill → commit → 再读为空", async () => {
-    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent/memory/store");
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "第一条", lastAssistant: "回复一" });
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "第二条", lastAssistant: "回复二" });
-
-    const first = readRunsSinceLastDistill(userId, 100_000);
-    expect(first.entries).toHaveLength(2);
-    commitDistill(userId, first.nextOffset);
-
-    const second = readRunsSinceLastDistill(userId, 100_000);
-    expect(second.entries).toHaveLength(0);
-
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "第三条", lastAssistant: "回复三" });
-    const third = readRunsSinceLastDistill(userId, 100_000);
-    expect(third.entries).toHaveLength(1);
-    expect(third.entries[0].lastUser).toBe("第三条");
+describe("作用域与常驻注入", () => {
+  it("个人通用和当前项目分别注入；别的项目和近期做法不默认进入", async () => {
+    await create("先给结论");
+    await create("这个项目 Magnum 枪声保持低音量", prodId);
+    await create("另一个项目要求枪声高音量", otherProd);
+    await archive("曾经调研过Magnum", otherProd);
+    const current = await buildInjectContext(userId, `clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`, "Magnum");
+    expect(current.memory).toContain("先给结论");
+    expect(current.memory).toContain("保持低音量");
+    expect(current.memory).not.toContain("高音量");
+    expect(current.memory).not.toContain("曾经调研");
+    expect(current.recall ?? "").not.toContain("曾经调研");
+    expect((await buildInjectContext(userId)).memory).not.toContain("保持低音量");
+    expect((await readDreamSnapshot(userId, null, 24000)).inputs).toHaveLength(1);
   });
-
-  it("非法 userId 拒绝进入路径拼接", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    expect(() => appendRunRecord("../evil", { ts: new Date().toISOString() })).toThrow();
-  });
-
-  it("截断批次：nextOffset 停在最后已消费行，剩余数据下次继续（#205 critical 回归）", async () => {
-    const { appendRunRecord, readRunsSinceLastDistill, commitDistill } = await import("@/lib/agent/memory/store");
-    // 独立用户目录，避免与其他用例的 offset 状态耦合
-    const uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee01";
-    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次甲".repeat(20), lastAssistant: "x" });
-    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次乙".repeat(20), lastAssistant: "x" });
-    appendRunRecord(uid, { ts: new Date().toISOString(), lastUser: "批次丙".repeat(20), lastAssistant: "x" });
-
-    // maxChars 只够装下第一条 → 截断
-    const first = readRunsSinceLastDistill(uid, 10);
-    expect(first.entries).toHaveLength(1);
-    expect(first.entries[0].lastUser).toContain("批次甲");
-    commitDistill(uid, first.nextOffset);
-
-    // 旧 bug：这里会拿到空（offset 已跳到文件尾，乙/丙永久丢失）
-    const second = readRunsSinceLastDistill(uid, 10);
-    expect(second.entries).toHaveLength(1);
-    expect(second.entries[0].lastUser).toContain("批次乙");
-    commitDistill(uid, second.nextOffset);
-
-    const third = readRunsSinceLastDistill(uid, 100_000);
-    expect(third.entries).toHaveLength(1);
-    expect(third.entries[0].lastUser).toContain("批次丙");
-    commitDistill(uid, third.nextOffset);
-
-    expect(readRunsSinceLastDistill(uid, 100_000).entries).toHaveLength(0);
+  it("小批次只消费已读取历史，余下历史不丢失", async () => {
+    await archive("第一批".repeat(20)); await archive("第二批".repeat(20));
+    const first = await readDreamSnapshot(userId, null, 1);
+    expect(first.inputs).toHaveLength(1);
+    await commitDream(first, ["旧摘要"]);
+    const second = await readDreamSnapshot(userId, null, 1);
+    expect(second.inputs[0].text).toContain("第二批");
+    await commitDream(second, ["新摘要"]);
+    expect((await readDreamSnapshot(userId, null, 1000)).inputs).toHaveLength(0);
   });
 });
-
-describe("上报与组装取件（MCP 端点已退役，直接调 lib）", () => {
-  it("appendRunRecord 落盘 → buildInjectContext 的 memory 含用户档案与近期对话", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    appendRunRecord(userId, { ts: new Date().toISOString(), sessionKey: "agent:team:x", lastUser: "端点上报测试", lastAssistant: "收到" });
-    const data = await buildInjectContext(userId);
-    expect(data.memory).toBeTruthy();
-    expect(data.memory!).toContain("## 当前用户");
-    expect(data.memory!).toContain(userName);
-    expect(data.memory!).toContain("端点上报测试"); // 近期对话段
+describe("按条目编辑删除与旧来源隔离", () => {
+  it("删除后旧批次拒绝提交，其他条目保留，旧归档再次回填也不可复活", async () => {
+    const ts = now();
+    await archive("旧枪声方案", prodId, ts);
+    const snapshot = await readDreamSnapshot(userId, prodId, 24000);
+    await commitDream(snapshot, ["旧枪声方案", "保留的职责"]);
+    await archive("整理正在进行", prodId);
+    const inFlight = await readDreamSnapshot(userId, prodId, 24000);
+    await commitDream(await readDreamSnapshot(userId, null, 24000), ["从这个项目产生的通用自动摘要"]);
+    await create("用户保留的通用要求");
+    const scope = await readMemoryScope(userId, prodId);
+    const old = scope.entries.find(e => e.body === "旧枪声方案")!;
+    await mutateMemoryEntry(userId, prodId, { action: "delete", id: old.id, revision: old.revision, actor: "user" });
+    expect(await commitDream(inFlight, ["旧枪声方案"])).toBe(false);
+    expect((await readMemoryScope(userId, null)).entries.map(e => e.body)).toEqual(["用户保留的通用要求"]);
+    await archive("旧枪声方案", prodId, ts);
+    expect((await readDreamSnapshot(userId, prodId, 24000)).inputs).toHaveLength(0);
+    expect((await searchMemory(userId, "旧枪声方案", prodId)).hits).toHaveLength(0);
+    expect((await readMemoryScope(userId, prodId)).entries.map(e => e.body)).toEqual(["保留的职责"]);
+    await archive("新对话要求新的枪声方案", prodId, new Date(Date.now() + 1000).toISOString());
+    expect((await readDreamSnapshot(userId, prodId, 24000)).inputs).toHaveLength(1);
   });
-
-  it("带 prompt 的组装：命中触发词 → recall 字段；无关 prompt → recall 为 null", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const { writeMemory } = await import("@/lib/agent/memory/store");
-    const { indexCurated } = await import("@/lib/agent/memory/index-db");
-    const md = "- 灯光 cue 表改动要先过舞监确认 <!-- trigger: 灯光cue --> <!-- importance: 8 -->";
-    writeMemory(userId, md);
-    await indexCurated("user", userId, md);
+  it("用户更正和主动条目不会被 dream 或 AI 更新覆盖；旧会话不能新增", async () => {
+    await archive("需要整理");
+    await commitDream(await readDreamSnapshot(userId, null, 24000), ["原偏好"]);
+    const old = (await readMemoryScope(userId, null)).entries[0];
+    await mutateMemoryEntry(userId, null, { action: "update", id: old.id, revision: old.revision, body: "用户更正", actor: "user" });
+    const edited = (await readMemoryScope(userId, null)).entries[0];
+    await expect(mutateMemoryEntry(userId, null, { action: "update", id: old.id, revision: edited.revision, body: "模型推断", actor: "agent" })).rejects.toThrow();
+    await expect(create("旧会话的新副本", null, "agent")).rejects.toThrow(/旧会话/);
+    await create("主动保护");
+    await archive("新的整理材料", null, new Date(Date.now()+1000).toISOString());
+    await commitDream(await readDreamSnapshot(userId, null, 24000), ["另一个偏好"]);
+    expect((await readMemoryScope(userId, null)).entries.map(e => e.body)).toEqual(expect.arrayContaining(["用户更正", "主动保护", "另一个偏好"]));
+    await expect(mutateMemoryEntry(userId, null, { action: "update", id: old.id, revision: old.revision, body: "陈旧编辑", actor: "user" })).rejects.toThrow(/已变化/);
+  });
+  it("两个并发编辑只有一份成功，旧 revision 不会覆盖新内容", async () => {
+    const original = getPool();
+    const narrow = new Pool({ ...poolConfigFromEnv(), max: 2, connectionTimeoutMillis: 200 });
+    const poolGlobal = global as typeof globalThis & { __pgPool?: Pool };
+    // 换真实连接池，不替换查询；CI 默认池也必须覆盖两条连接的饥饿分支。
+    poolGlobal.__pgPool = narrow;
     try {
-      const hit = await buildInjectContext(userId, undefined, "灯光cue表今天要改一版");
-      expect(hit.memory).toContain("## 长期记忆摘要");
-      expect(hit.memory).not.toContain("<!--"); // 注释剥离
-      expect(hit.recall).toContain("灯光 cue 表改动要先过舞监确认");
-
-      const miss = await buildInjectContext(userId, undefined, "今天天气如何");
-      expect(miss.recall).toBeNull();
+      const id = await create("并发编辑前", prodId);
+      const results = await Promise.allSettled(["编辑甲", "编辑乙"].map(body => mutateMemoryEntry(userId, prodId, { action: "update", id, revision: 0, body, actor: "user" })));
+      expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.filter(r => r.status === "rejected");
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(MemoryConflictError);
+      expect((await readMemoryScope(userId, prodId)).entries[0].revision).toBe(1);
     } finally {
-      const { getPool } = await import("@/lib/pg");
-      await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id = $1", [userId]).catch(() => {});
+      poolGlobal.__pgPool = original;
+      await narrow.end();
     }
   });
-
-  // 界面上下文的载荷随每条用户消息走，规则常驻这里（静态、可缓存）。规则
-  // 若因"这个用户还没有任何记忆/档案"而整段不注入，就等于没有规则——所以
-  // buildInjectContext 恒返回非 null（原先"什么都没有就返回 null"的早退已撤）。
-  it("零记忆零档案的用户也拿得到界面上下文规则", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const blank = "00000000-1111-2222-3333-444444444444";
-    const data = await buildInjectContext(blank);
-    expect(data.memory).toBeTruthy();
-    expect(data.memory!).toContain("## 界面上下文说明");
-    expect(data.memory!).toContain("clickin-ui-context");
-    expect(data.memory!).not.toContain("## 长期记忆摘要"); // 确实没有别的段可注
+  it("一般范围删除也阻止旧项目历史检索；仅项目删除不清其他项目", async () => {
+    await archive("其他项目历史", otherProd);
+    const id = await create("待删除", prodId);
+    await mutateMemoryEntry(userId, prodId, { action: "delete", id, revision: 0, actor: "user" });
+    expect((await searchMemory(userId, "其他项目历史")).hits).toHaveLength(1);
+    const global = await create("通用待删除");
+    await mutateMemoryEntry(userId, null, { action: "delete", id: global, revision: 0, actor: "user" });
+    expect((await searchMemory(userId, "其他项目历史")).hits).toHaveLength(0);
   });
-
-  it("MEMORY.md 内部二级标题注入时降级为三级（不与包裹标题同级）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const { writeMemory } = await import("@/lib/agent/memory/store");
-    writeMemory(userId, "## 偏好与习惯\n- 喜欢先听结论\n# 顶级标题\n- x");
-    const data = await buildInjectContext(userId);
-    expect(data.memory).toContain("## 长期记忆摘要\n### 偏好与习惯");
-    expect(data.memory).toContain("### 顶级标题");
-    expect(data.memory).not.toMatch(/\n## 偏好与习惯/);
-  });
-
-  it("excludeSessionKey 过滤当前会话自身条目", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const data = await buildInjectContext(userId, "agent:team:x");
-    expect(data.memory ?? "").not.toContain("端点上报测试");
-  });
-
-  it("production 会话注入「当前制作」段（成员）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const sessionKey = `agent:team:clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`;
-    const data = await buildInjectContext(userId, sessionKey);
-    expect(data.memory).toContain("## 当前制作");
-    expect(data.memory).toContain("我的角色");
-  });
-
-  it("非成员的 production 会话不注入制作段（实时资格校验）", async () => {
-    const { buildInjectContext } = await import("@/lib/agent/memory/inject");
-    const { makeProduction: mk } = await import("../_support/factories");
-    const { prodId: otherProd } = await mk(); // 无 owner、无成员
+  it("整理期间成员被移出，不能再提交、读取、注入或搜索项目记忆", async () => {
+    await create("项目内部约束", prodId); await archive("项目历史", prodId);
+    const snapshot = await readDreamSnapshot(userId, prodId, 24000);
+    await commitDream(await readDreamSnapshot(userId, null, 24000), ["跨项目明确的通用习惯"]);
+    await create("用户明确编辑的通用要求");
+    await getPool().query("UPDATE production_member SET status='exited',status_source='self' WHERE production_id=$1 AND user_id=$2", [prodId, userId]);
     try {
-      const sessionKey = `clickin:chat:${userId}:${otherProd}:11111111-2222-3333-4444-555555555555`;
-      const data = await buildInjectContext(userId, sessionKey);
-      expect(data.memory ?? "").not.toContain("## 当前制作");
-    } finally {
-      const { cleanupProduction: cp } = await import("../_support/factories");
-      await cp(otherProd).catch(() => {});
-    }
+      await expect(commitDream(snapshot, ["项目历史"])).rejects.toBeInstanceOf(MemoryAccessError);
+      await expect(readMemoryScope(userId, prodId)).rejects.toBeInstanceOf(MemoryAccessError);
+      const general = await readMemoryScope(userId, null);
+      expect(general.entries.map(e => e.body)).toEqual(["用户明确编辑的通用要求"]);
+      expect((await searchMemory(userId, "项目历史")).hits).toHaveLength(0);
+      const injected = await buildInjectContext(userId, `clickin:chat:${userId}:${prodId}:11111111-2222-3333-4444-555555555555`);
+      expect(injected.memory).not.toContain("项目内部约束");
+    } finally { await getPool().query("UPDATE production_member SET status='active',status_source=NULL WHERE production_id=$1 AND user_id=$2", [prodId, userId]); }
   });
 });
-
-describe("蒸馏管线（mock LLM）", () => {
-  it("消费增量 → LLM 输入含旧摘要与新对话 → 写 MEMORY.md + 提交 offset", async () => {
-    const { writeMemory, readMemory } = await import("@/lib/agent/memory/store");
-    const { distillUser } = await import("@/lib/agent/memory/distill");
-    writeMemory(userId, "- 旧记忆条目：喜欢先听结论");
-
-    const result = await distillUser(userId);
-    expect(result.status).toBe("distilled");
-    expect(result.shrunk).toBe(false);  // 首档就成功，没降过
-
-    // LLM 输入组装验证
-    const callArgs = chatMock.mock.calls.at(-1)! as unknown[];
-    const messages = callArgs[0] as Array<{ role: string; content: string }>;
-    const userMsg = messages.find((m) => m.role === "user")!.content;
-    expect(userMsg).toContain("旧记忆条目：喜欢先听结论");
-    expect(userMsg).toContain("端点上报测试");
-
-    // 落盘 + offset 提交
-    expect(readMemory(userId, 4000)).toContain("mock 蒸馏产物");
-    const again = await distillUser(userId);
-    expect(again.status).toBe("no-new-data");
+describe("整理与幻觉控制", () => {
+  it("不接受模型自报来源、用户确认或分数", () => {
+    expect(() => parseDreamOutput('[{"body":"偏好","source":"某句话","userEdited":true}]')).toThrow();
+    expect(() => parseDreamOutput('[" "]')).toThrow();
   });
-
-  // 2026-08-17 线上：推理模型把 max_tokens 当 CoT+正文总预算，蒸馏每次都撞
-  // finish_reason=length。若只在输出侧加预算（有模型上限），注定超预算的那批
-  // 会天天以同样方式失败、offset 永不推进 —— 该用户记忆永久停更。所以撞预算
-  // 时要缩**输入**。
-  it("预算不够 → 降档缩小输入重试，成功后照常提交 offset", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    const { distillUser } = await import("@/lib/agent/memory/distill");
-    const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "降档批", lastAssistant: "y" });
-
-    // 首档（24000）超预算，降到 12000 成功
-    chatMock.mockRejectedValueOnce(new LlmBudgetError("empty (finish_reason=length)", false));
-    const result = await distillUser(userId);
-    expect(result.status).toBe("distilled");
-    expect(result.inputChars).toBe(12_000);
-    // shrunk 由 distill 模块判定（档位表在那边），路由只数这个布尔
-    expect(result.shrunk).toBe(true);
-    expect(chatMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-
-    // offset 已推进：同批数据不会被再吃一次
-    const again = await distillUser(userId);
-    expect(again.status).toBe("no-new-data");
+  it("输入和基线组成整理批次；服务端只记录批次数量，不制造事实证据", async () => {
+    await create("主动要求", null, "agent"); await archive("新的偏好");
+    expect((await distillUser(userId)).status).toBe("distilled");
+    const entries = (await readMemoryScope(userId, null)).entries;
+    expect(entries.find(e => e.source === "dream")).toMatchObject({ userEdited: false, inputCount: 1 });
+    expect(entries.find(e => e.source === "active")?.body).toBe("主动要求");
+    expect(JSON.stringify(chatMock.mock.calls.at(-1))).toContain("主动要求");
+    expect((await distillUser(userId)).status).toBe("no-new-data");
   });
-
-  it("每档都超预算 → 跳过该条并推进 offset，不把后续蒸馏永久堵死", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    const { distillUser } = await import("@/lib/agent/memory/distill");
-    const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "毒丸批", lastAssistant: "z" });
-
-    chatMock.mockRejectedValue(new LlmBudgetError("empty (finish_reason=length)", false));
-    const stuck = await distillUser(userId);
-    expect(stuck.status).toBe("skipped");
-    expect(stuck.error).toMatch(/finish_reason=length/);
-
-    // 关键：偏移推进了，下一轮不会再撞同一条
-    chatMock.mockReset();
-    chatMock.mockResolvedValue("## 偏好与习惯\n- mock 蒸馏产物");
-    const next = await distillUser(userId);
-    expect(next.status).toBe("no-new-data");
-  });
-
-  it("非预算失败不缩输入、不跳过：只打一次且不提交 offset", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    const { distillUser } = await import("@/lib/agent/memory/distill");
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "网络抖动批", lastAssistant: "w" });
-
-    chatMock.mockReset();
-    chatMock.mockRejectedValue(new Error("provider down"));
-    const failed = await distillUser(userId);
-    expect(failed.status).toBe("error");
-    expect(chatMock.mock.calls).toHaveLength(1);  // 不该逐档重试
-
-    chatMock.mockReset();
-    chatMock.mockResolvedValue("## 偏好与习惯\n- mock 蒸馏产物");
-    const retried = await distillUser(userId);
-    expect(retried.status).toBe("distilled");  // 同批数据未丢
-  });
-
-  it("LLM 失败 → error 状态且不提交 offset（下次重试同批数据）", async () => {
-    const { appendRunRecord } = await import("@/lib/agent/memory/store");
-    const { distillUser } = await import("@/lib/agent/memory/distill");
-    appendRunRecord(userId, { ts: new Date().toISOString(), lastUser: "失败重试批", lastAssistant: "x" });
-
+  it("非预算失败不消费，预算溢出逐级缩小批次", async () => {
+    await archive("重试材料");
     chatMock.mockRejectedValueOnce(new Error("provider down"));
-    const failed = await distillUser(userId);
-    expect(failed.status).toBe("error");
-
-    const retried = await distillUser(userId); // mock 恢复默认成功
-    expect(retried.status).toBe("distilled"); // 同批数据未丢
+    expect((await distillUser(userId)).status).toBe("error");
+    const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
+    chatMock.mockRejectedValueOnce(new LlmBudgetError("length", false));
+    expect(await distillUser(userId)).toMatchObject({ status: "distilled", inputChars: 12000, shrunk: true });
   });
 });

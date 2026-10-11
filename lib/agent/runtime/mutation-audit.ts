@@ -1,3 +1,4 @@
+import { readMemoryAuditEntries, listMemoryEntryIds } from "@/lib/agent/memory/memory-db";
 // AI 写操作的 diff 审计（db/add-agent-mutation.sql）。
 //
 // 原则（2026-08-30 定谳）：
@@ -79,6 +80,13 @@ interface ScopeReader {
 }
 
 const READERS: Record<string, ScopeReader> = {
+  memory: {
+    read: async (ids, { userId }) => {
+      const rows = await readMemoryAuditEntries(userId, ids);
+      return new Map(rows.map(e => [e.id, { label: "个人记忆", body: e.body, source: e.source, userEdited: e.user_edited }]));
+    },
+    listIds: async ({ userId }) => listMemoryEntryIds(userId),
+  },
   wiki: {
     read: async (ids, { productionId }) => {
       const out = new Map<string, Snapshot>();
@@ -462,6 +470,7 @@ async function insertRow(
 // ── 渲染 ──────────────────────────────────────────────────────────────────────
 
 const SCOPE_LABELS: Record<string, string> = {
+  memory: "个人记忆",
   wiki: "文档", scene: "场次", character: "角色", schedule: "定时任务",
   "instructions.personal": "个人 AI 指令", "instructions.production": "制作 AI 指令",
 };

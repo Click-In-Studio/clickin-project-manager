@@ -16,6 +16,8 @@ export const TOOL_LABELS: Record<string, string> = {
   "my-events": "查询我关注的活动",
   "my-milestones": "查询临近里程碑",
   "my-productions": "查询我参与的制作",
+  "my-memory_read": "查看我的长期记忆",
+  "my-memory_write": "记录协作记忆",
   "my-memory_search": "检索我的记忆",
   "my-attachment_read": "读取会话附件",
   "my-attachment_release": "释放临时附件",

@@ -51,12 +51,15 @@ COL|agent_memory_chunk|author_user_id|uuid|uuid|YES|
 COL|agent_memory_chunk|content_hash|text|text|NO|
 COL|agent_memory_chunk|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_memory_chunk|embedding|USER-DEFINED|vector|YES|
+COL|agent_memory_chunk|history_seq|bigint|int8|NO|
 COL|agent_memory_chunk|id|uuid|uuid|NO|gen_random_uuid()
 COL|agent_memory_chunk|importance|smallint|int2|YES|
 COL|agent_memory_chunk|model|text|text|YES|
 COL|agent_memory_chunk|observed_at|timestamp with time zone|timestamptz|NO|
 COL|agent_memory_chunk|origin_class|text|text|NO|
+COL|agent_memory_chunk|production_id|text|text|YES|
 COL|agent_memory_chunk|scope_id|text|text|NO|
+COL|agent_memory_chunk|scope_known|boolean|bool|NO|false
 COL|agent_memory_chunk|scope_type|text|text|NO|
 COL|agent_memory_chunk|session_kind|text|text|NO|
 COL|agent_memory_chunk|source|text|text|NO|
@@ -68,6 +71,14 @@ COL|agent_memory_embedding_cache|content_hash|text|text|NO|
 COL|agent_memory_embedding_cache|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_memory_embedding_cache|embedding|USER-DEFINED|vector|NO|
 COL|agent_memory_embedding_cache|model|text|text|NO|
+COL|agent_memory_entry|body|text|text|NO|
+COL|agent_memory_entry|id|text|text|NO|
+COL|agent_memory_entry|input_count|integer|int4|NO|0
+COL|agent_memory_entry|revision|bigint|int8|NO|0
+COL|agent_memory_entry|scope_id|text|text|NO|
+COL|agent_memory_entry|source|text|text|NO|
+COL|agent_memory_entry|updated_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_memory_entry|user_edited|boolean|bool|NO|false
 COL|agent_memory_index_meta|dim|integer|int4|NO|
 COL|agent_memory_index_meta|id|smallint|int2|NO|1
 COL|agent_memory_index_meta|model|text|text|NO|
@@ -77,6 +88,14 @@ COL|agent_memory_recall_log|created_at|timestamp with time zone|timestamptz|NO|n
 COL|agent_memory_recall_log|id|bigint|int8|NO|
 COL|agent_memory_recall_log|query_hash|text|text|NO|
 COL|agent_memory_recall_log|user_id|uuid|uuid|NO|
+COL|agent_memory_scope|consumed_seq|bigint|int8|NO|0
+COL|agent_memory_scope|dream_project_ids|ARRAY|_text|NO|'{}'::text[]
+COL|agent_memory_scope|history_cutoff|timestamp with time zone|timestamptz|YES|
+COL|agent_memory_scope|id|text|text|NO|
+COL|agent_memory_scope|production_id|text|text|YES|
+COL|agent_memory_scope|revision|bigint|int8|NO|0
+COL|agent_memory_scope|scope_key|text|text|NO|
+COL|agent_memory_scope|user_id|uuid|uuid|NO|
 COL|agent_mutation|action|text|text|NO|
 COL|agent_mutation|after|jsonb|jsonb|YES|
 COL|agent_mutation|before|jsonb|jsonb|YES|
@@ -1240,15 +1259,25 @@ CON|agent_instructions|agent_instructions_updated_by_fkey|FOREIGN KEY (updated_b
 CON|agent_memory_chunk|agent_memory_chunk_importance_check|CHECK (((importance IS NULL) OR ((importance >= 1) AND (importance <= 10))))
 CON|agent_memory_chunk|agent_memory_chunk_origin_class_check|CHECK ((origin_class = ANY (ARRAY['owner'::text, 'agent'::text, 'untrusted'::text, 'system'::text])))
 CON|agent_memory_chunk|agent_memory_chunk_pkey|PRIMARY KEY (id)
+CON|agent_memory_chunk|agent_memory_chunk_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|agent_memory_chunk|agent_memory_chunk_scope_type_check|CHECK ((scope_type = ANY (ARRAY['user'::text, 'production'::text])))
 CON|agent_memory_chunk|agent_memory_chunk_scope_type_scope_id_source_content_hash_key|UNIQUE (scope_type, scope_id, source, content_hash)
 CON|agent_memory_chunk|agent_memory_chunk_session_kind_check|CHECK ((session_kind = ANY (ARRAY['interactive'::text, 'cron'::text, 'heartbeat'::text, 'subagent'::text, 'unknown'::text])))
 CON|agent_memory_chunk|agent_memory_chunk_source_check|CHECK ((source = ANY (ARRAY['curated'::text, 'episodic'::text])))
 CON|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|PRIMARY KEY (model, content_hash)
+CON|agent_memory_entry|agent_memory_entry_body_check|CHECK (((length(body) >= 1) AND (length(body) <= 1000)))
+CON|agent_memory_entry|agent_memory_entry_input_count_check|CHECK ((input_count >= 0))
+CON|agent_memory_entry|agent_memory_entry_pkey|PRIMARY KEY (id)
+CON|agent_memory_entry|agent_memory_entry_scope_id_fkey|FOREIGN KEY (scope_id) REFERENCES agent_memory_scope(id) ON DELETE CASCADE
+CON|agent_memory_entry|agent_memory_entry_source_check|CHECK ((source = ANY (ARRAY['dream'::text, 'active'::text])))
 CON|agent_memory_index_meta|agent_memory_index_meta_id_check|CHECK ((id = 1))
 CON|agent_memory_index_meta|agent_memory_index_meta_pkey|PRIMARY KEY (id)
 CON|agent_memory_recall_log|agent_memory_recall_log_chunk_id_fkey|FOREIGN KEY (chunk_id) REFERENCES agent_memory_chunk(id) ON DELETE CASCADE
 CON|agent_memory_recall_log|agent_memory_recall_log_pkey|PRIMARY KEY (id)
+CON|agent_memory_scope|agent_memory_scope_pkey|PRIMARY KEY (id)
+CON|agent_memory_scope|agent_memory_scope_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
+CON|agent_memory_scope|agent_memory_scope_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_memory_scope|agent_memory_scope_user_id_scope_key_key|UNIQUE (user_id, scope_key)
 CON|agent_mutation|agent_mutation_action_check|CHECK ((action = ANY (ARRAY['created'::text, 'updated'::text, 'deleted'::text])))
 CON|agent_mutation|agent_mutation_pkey|PRIMARY KEY (id)
 CON|agent_mutation|agent_mutation_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
@@ -1888,13 +1917,18 @@ IDX|agent_attachment_object|agent_attachment_object_user_quota_idx|CREATE INDEX 
 IDX|agent_event|agent_event_pkey|CREATE UNIQUE INDEX agent_event_pkey ON public.agent_event USING btree (session_id, seq)
 IDX|agent_instructions|agent_instructions_pkey|CREATE UNIQUE INDEX agent_instructions_pkey ON public.agent_instructions USING btree (scope_type, scope_id)
 IDX|agent_memory_chunk|agent_memory_chunk_embedding_idx|CREATE INDEX agent_memory_chunk_embedding_idx ON public.agent_memory_chunk USING hnsw (embedding vector_cosine_ops)
+IDX|agent_memory_chunk|agent_memory_chunk_history_idx|CREATE INDEX agent_memory_chunk_history_idx ON public.agent_memory_chunk USING btree (scope_id, history_seq) WHERE ((source = 'episodic'::text) AND scope_known)
 IDX|agent_memory_chunk|agent_memory_chunk_pkey|CREATE UNIQUE INDEX agent_memory_chunk_pkey ON public.agent_memory_chunk USING btree (id)
 IDX|agent_memory_chunk|agent_memory_chunk_scope_idx|CREATE INDEX agent_memory_chunk_scope_idx ON public.agent_memory_chunk USING btree (scope_type, scope_id, source)
 IDX|agent_memory_chunk|agent_memory_chunk_scope_type_scope_id_source_content_hash_key|CREATE UNIQUE INDEX agent_memory_chunk_scope_type_scope_id_source_content_hash_key ON public.agent_memory_chunk USING btree (scope_type, scope_id, source, content_hash)
 IDX|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|CREATE UNIQUE INDEX agent_memory_embedding_cache_pkey ON public.agent_memory_embedding_cache USING btree (model, content_hash)
+IDX|agent_memory_entry|agent_memory_entry_pkey|CREATE UNIQUE INDEX agent_memory_entry_pkey ON public.agent_memory_entry USING btree (id)
+IDX|agent_memory_entry|agent_memory_entry_scope_idx|CREATE INDEX agent_memory_entry_scope_idx ON public.agent_memory_entry USING btree (scope_id)
 IDX|agent_memory_index_meta|agent_memory_index_meta_pkey|CREATE UNIQUE INDEX agent_memory_index_meta_pkey ON public.agent_memory_index_meta USING btree (id)
 IDX|agent_memory_recall_log|agent_memory_recall_log_chunk_idx|CREATE INDEX agent_memory_recall_log_chunk_idx ON public.agent_memory_recall_log USING btree (chunk_id, created_at)
 IDX|agent_memory_recall_log|agent_memory_recall_log_pkey|CREATE UNIQUE INDEX agent_memory_recall_log_pkey ON public.agent_memory_recall_log USING btree (id)
+IDX|agent_memory_scope|agent_memory_scope_pkey|CREATE UNIQUE INDEX agent_memory_scope_pkey ON public.agent_memory_scope USING btree (id)
+IDX|agent_memory_scope|agent_memory_scope_user_id_scope_key_key|CREATE UNIQUE INDEX agent_memory_scope_user_id_scope_key_key ON public.agent_memory_scope USING btree (user_id, scope_key)
 IDX|agent_mutation|agent_mutation_pkey|CREATE UNIQUE INDEX agent_mutation_pkey ON public.agent_mutation USING btree (id)
 IDX|agent_mutation|agent_mutation_production_idx|CREATE INDEX agent_mutation_production_idx ON public.agent_mutation USING btree (production_id, created_at DESC) WHERE (production_id IS NOT NULL)
 IDX|agent_mutation|agent_mutation_run_idx|CREATE INDEX agent_mutation_run_idx ON public.agent_mutation USING btree (run_id) WHERE (run_id IS NOT NULL)
@@ -2252,6 +2286,7 @@ IDX|wiki|wiki_mentions_idx|CREATE INDEX wiki_mentions_idx ON public.wiki USING g
 IDX|wiki|wiki_pkey|CREATE UNIQUE INDEX wiki_pkey ON public.wiki USING btree (id)
 IDX|wiki|wiki_production_idx|CREATE INDEX wiki_production_idx ON public.wiki USING btree (production_id)
 IDX|wiki|wiki_title_trgm_idx|CREATE INDEX wiki_title_trgm_idx ON public.wiki USING gin (title gin_trgm_ops)
+SEQ|agent_memory_chunk_history_seq_seq
 SEQ|agent_memory_recall_log_id_seq
 SEQ|ai_usage_id_seq
 SEQ|plan_code_redemption_id_seq

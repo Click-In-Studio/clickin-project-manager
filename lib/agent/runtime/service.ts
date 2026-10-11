@@ -814,7 +814,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     if (schedule) await finishScheduledRun({ scheduleId: schedule.id, runId, sessionId, status, error, lastAssistant, report: scheduleReport });
     // episodic 上报（与插件 agent_end 同款字段）
     try {
-      appendRunRecord(userId, {
+      await appendRunRecord(userId, {
         ts: new Date().toISOString(), sessionKey: sessionId, runId, productionId,
         success: status === "completed", error, durationMs: null,
         lastUser: lastUser ? stripUiContext(lastUser).slice(0, 2000) : null, lastAssistant,

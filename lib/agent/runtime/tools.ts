@@ -1,3 +1,4 @@
+import { MEMORY_DEFS } from "./memory-tools";
 import { SUBAGENT_DEFS } from "./subagent-tools";
 import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 // 进程内工具注册表（#367 S2）：**skills 的唯一事实源**（MCP 服务器已退役）。
@@ -149,6 +150,7 @@ const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_se
 /** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
 export const DEFS: ToolDefinition[] = [
   ...SUBAGENT_DEFS,
+  ...MEMORY_DEFS,
   // ── my.* ────────────────────────────────────────────────────────────────
   myTool("my.call_times", "查询当前用户自己的近期Call（时间、事件、地点、所属制作）（EN: my call times schedule）。",
     async (uid) => (await import("@/lib/agent/tools/my-tools")).myCallTimes(uid)),
@@ -162,14 +164,14 @@ export const DEFS: ToolDefinition[] = [
     async (uid) => (await import("@/lib/agent/tools/my-tools")).myProductions(uid)),
   {
     mcpName: "my.memory_search",
-    description: `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——注入的记忆摘要只覆盖精粹与最近几天，更早的内容必须靠本工具检索。${MY_SCOPE_NOTE}`,
+    description: `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——只检索当前仍有资格访问且未被历史截断排除的材料。项目会话限定当前项目；个人会话可主动查可访问项目的历史。`,
     parameters: Type.Object({ query: Type.String({ minLength: 1, description: "检索词（自然语言即可，支持语义匹配；也可用人名/项目名/关键词精确检索）" }) }),
     readOnly: true,
     execute: async (ctx, args) => {
       const { searchMemory, formatSearchResult, MemoryUnavailableError } = await import("@/lib/agent/memory/search");
       try {
         const query = String(args.query);
-        return formatSearchResult(await searchMemory(ctx.userId, query), query);
+        return formatSearchResult(await searchMemory(ctx.userId, query, ctx.productionId), query);
       } catch (err) {
         if (err instanceof MemoryUnavailableError) return err.message;
         throw err;

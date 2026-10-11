@@ -9,6 +9,7 @@ import styles from "./account.module.css";
 import type { NotifPref } from "@/lib/notify/notification-prefs";
 import { ACCOUNT_RETURN_KEY, WORKSPACE_HOME, normalizeAccountReturnHref } from "@/lib/account/account-return";
 import { userAvatarSrc } from "@/lib/asset/avatar-url";
+import MemorySettings from "@/components/agent/MemorySettings";
 import AiUsageCard from "@/components/agent/AiUsageCard";
 import PlatformTopMenu from "@/components/shell/PlatformTopMenu";
 
@@ -54,7 +55,7 @@ type Props = {
   initialPlan: { tier: string; label: string } | null;
 };
 
-type Page = "profile" | "security" | "preferences";
+type Page = "profile" | "security" | "preferences" | "memories";
 
 const PLATFORM_LABEL: Record<string, string> = {
   feishu: "飞书",
@@ -64,6 +65,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 const PAGE_META: Record<Page, { title: string; description: string }> = {
   profile: { title: "个人信息", description: "管理你的基础资料，以及在项目协作中向其他成员展示的信息。" },
   security: { title: "账号安全中心", description: "管理登录账号的邮箱、飞书等身份，以及账号安全设置。" },
+  memories: { title: "我的长期记忆", description: "管理 AI 记住的通用偏好和项目协作要求。" },
   preferences: { title: "功能与设置", description: "调整消息提醒方式，控制各类通知的开关。" },
 };
 
@@ -125,7 +127,7 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
   }, [fromParam]);
 
   const [page, setPage] = useState<Page>(
-    tabParam === "security" || tabParam === "preferences" ? tabParam : "profile"
+    tabParam === "security" || tabParam === "preferences" || tabParam === "memories" ? tabParam : "profile"
   );
 
   // Profile state
@@ -498,10 +500,13 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
                 onClick={() => setPage(id)}
               >
                 <span>{id === "profile" ? "人" : "盾"}</span>
-                {PAGE_META[id].title}
+                {id === "security" ? "账号安全" : PAGE_META[id].title}
               </button>
             ))}
             <p>偏好与隐私</p>
+            <button type="button" className={page === "memories" ? styles.navActive : ""} onClick={() => setPage("memories")}>
+              <span>忆</span>长期记忆
+            </button>
             <button
               type="button"
               className={page === "preferences" ? styles.navActive : ""}
@@ -516,6 +521,8 @@ export default function AccountClient({ userId, initialProfile, initialIdentitie
         <main className={styles.main}>
           <PlatformTopMenu title={PAGE_META[page].title} />
           <p className={styles.pageDescription}>{PAGE_META[page].description}</p>
+
+          {page === "memories" && <MemorySettings />}
 
           {/* ── 个人信息 ── */}
           {page === "profile" && (
