@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vites
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
-import { getPool } from "@/lib/pg";
+import { Pool } from "pg";
+import { getPool, poolConfigFromEnv } from "@/lib/pg";
 import { appendRunRecord } from "@/lib/agent/memory/store";
-import { readMemoryScope, mutateMemoryEntry, readDreamSnapshot, commitDream, MemoryAccessError } from "@/lib/agent/memory/memory-db";
+import { readMemoryScope, mutateMemoryEntry, readDreamSnapshot, commitDream, MemoryAccessError, MemoryConflictError } from "@/lib/agent/memory/memory-db";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { distillUser, parseDreamOutput } from "@/lib/agent/memory/distill";
 import { searchMemory } from "@/lib/agent/memory/search";
@@ -103,11 +104,23 @@ describe("按条目编辑删除与旧来源隔离", () => {
     await expect(mutateMemoryEntry(userId, null, { action: "update", id: old.id, revision: old.revision, body: "陈旧编辑", actor: "user" })).rejects.toThrow(/已变化/);
   });
   it("两个并发编辑只有一份成功，旧 revision 不会覆盖新内容", async () => {
-    const id = await create("并发编辑前");
-    const results = await Promise.allSettled(["编辑甲", "编辑乙"].map(body => mutateMemoryEntry(userId, null, { action: "update", id, revision: 0, body, actor: "user" })));
-    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
-    expect((await readMemoryScope(userId, null)).entries[0].revision).toBe(1);
+    const original = getPool();
+    const narrow = new Pool({ ...poolConfigFromEnv(), max: 2, connectionTimeoutMillis: 200 });
+    const poolGlobal = global as typeof globalThis & { __pgPool?: Pool };
+    // 换真实连接池，不替换查询；CI 默认池也必须覆盖两条连接的饥饿分支。
+    poolGlobal.__pgPool = narrow;
+    try {
+      const id = await create("并发编辑前", prodId);
+      const results = await Promise.allSettled(["编辑甲", "编辑乙"].map(body => mutateMemoryEntry(userId, prodId, { action: "update", id, revision: 0, body, actor: "user" })));
+      expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.filter(r => r.status === "rejected");
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(MemoryConflictError);
+      expect((await readMemoryScope(userId, prodId)).entries[0].revision).toBe(1);
+    } finally {
+      poolGlobal.__pgPool = original;
+      await narrow.end();
+    }
   });
   it("一般范围删除也阻止旧项目历史检索；仅项目删除不清其他项目", async () => {
     await archive("其他项目历史", otherProd);
