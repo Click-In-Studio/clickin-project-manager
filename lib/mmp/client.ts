@@ -6,6 +6,7 @@
 // 未配置（缺 MMP_BASE_URL）= 服务不存在，调用方按「不可用」诚实标注，不是报错。
 
 import { MmpClient } from "@mmp/client";
+import { currentAdmissionScope } from "@/lib/agent/runtime/admission";
 
 let cached: { key: string; client: MmpClient } | null = null;
 
@@ -18,7 +19,9 @@ export function getMmpClient(): MmpClient | null {
   const baseUrl = process.env.MMP_BASE_URL;
   if (!baseUrl) return null;
   const apiKey = process.env.MMP_API_KEY;
-  const key = `${baseUrl}\n${apiKey ?? ""}`;
-  if (cached?.key !== key) cached = { key, client: new MmpClient({ baseUrl, apiKey }) };
+  // Agent 的提交歧义由持久操作记录处理，不能在 SDK 内盲重试 POST。
+  const retries = currentAdmissionScope() ? 0 : 2;
+  const key = `${baseUrl}\n${apiKey ?? ""}\n${retries}`;
+  if (cached?.key !== key) cached = { key, client: new MmpClient({ baseUrl, apiKey, retries }) };
   return cached.client;
 }

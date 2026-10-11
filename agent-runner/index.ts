@@ -47,6 +47,7 @@ async function main() {
       if (req.method === "GET" && req.url === "/health") {
         return send(res, 200, {
           ok: true, owner: RUNNER_OWNER, active: service.__internal.active.size, draining,
+          admission: await (await import("../lib/agent/runtime/admission-db")).admissionMetrics(),
           attachmentGc: await attachmentGcMetrics(),
         });
       }
@@ -95,6 +96,7 @@ async function main() {
   const scan = async () => {
     try {
       const n = await service.resumeOrphans();
+      await (await import("../lib/mmp/admitted-run")).reconcileMmpAdmissions();
       await (await import("../lib/agent/runtime/subagents")).recoverSubagents();
       await service.resumePendingInputs();
       if (n > 0) console.log(`[agent-runner] resumed ${n} orphan run(s)`);

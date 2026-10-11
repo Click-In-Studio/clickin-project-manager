@@ -31,7 +31,7 @@ export async function createOrReuseQuestion(
 ): Promise<QuestionInfo & { reused: boolean }> {
   const existing = await pool.query<{ id: string; payload: QuestionItem[]; expires_at: Date }>(
     `SELECT id, payload, expires_at FROM agent_question
-     WHERE session_id = $1 AND tool_call_id = $2 AND status = 'pending' AND expires_at > now()`,
+     WHERE session_id = $1 AND tool_call_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [input.sessionId, input.toolCallId],
   );
   if (existing.rows[0]) return { ...toInfo(existing.rows[0]), reused: true };

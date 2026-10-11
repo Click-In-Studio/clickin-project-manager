@@ -1,3 +1,4 @@
+import { admittedMmpRun } from "./admitted-run";
 // 会话附件与资产文件共用的 MMP 自动预检入口。
 //
 // MMP 2.0 自己用 purpose + Content-Type 选择唯一能力，并由任务端生成可直接交给
@@ -91,9 +92,10 @@ export async function preflightAttachment(
 
     const source = media.get(presignedGet(input.r2Key, 15 * 60), undefined, input.mimeType);
     const handle = mmpMediaHandle(input.attachmentId, source);
-    const done = await client.run(
+    const done = await admittedMmpRun(client,
       { type: capability.id, media: handle, priority: "interactive" },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
+      input.attachmentId,
     );
     rememberMmpMediaId(input.attachmentId, done.media_id);
     if (!done.agent_context?.text) throw new Error(`${capability.id} 完成但没有 agent_context`);

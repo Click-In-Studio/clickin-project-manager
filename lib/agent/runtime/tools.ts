@@ -69,6 +69,7 @@ export interface ToolMutation {
 
 /** 注册表条目：RuntimeTool + MCP 原始名（tool-catalog / 显示名 / 卡片文案按它索引）。 */
 export interface RuntimeToolDef extends RuntimeTool {
+  executionResource?: "local_tool";
   mcpName: string;
   /** 写工具声明：成功执行后产生了什么变更（读工具不声明） */
   mutates?: (args: Record<string, unknown>) => ToolMutation | null;
@@ -96,6 +97,7 @@ export function bareName(exposed: string): string {
 }
 
 export type ToolDefinition = {
+  executionResource?: "local_tool";
   mcpName: string;
   description: string;
   parameters: TSchema;
@@ -587,6 +589,7 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.script_propose_rewrite",
+    executionResource: "local_tool",
     description:
       "以剧本方言整段改写一个章节/场次/排练标记段的正文，需要人工在聊天栏确认（EN: rewrite script section dialogue batch）。" +
       "先用 production.script_read_section 读出该段（输出即方言形态），在其文本上改写后**整段提交**：" +
@@ -609,6 +612,7 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.script_propose_edit_blocks",
+    executionResource: "local_tool",
     description:
       "对剧本正文做单/多块精修（改内容/说话人/舞台提示、插入新块、删除块），需要人工在聊天栏确认（EN: edit script blocks update insert delete）。" +
       "blockId 来自剧本读取/搜索结果的 [b:] 标注；speakers 是完整新列表（整体替换），元素形如「张三」「张三（低声）」「#<角色id>」。" +
@@ -1050,6 +1054,7 @@ export const DEFS: ToolDefinition[] = [
       // 复用的待答问题不再重发卡（前端重开会话时经 /questions 恢复；重发只会多一张）
       if (!reused) run.publish({ type: "question", question: info });
       await run.setStatus("awaiting_answer");
+      await (await import("./admission")).waitForInput(run.runId, { kind: "question", id: info.id });
       const outcome = await awaitQuestion(info.id, run.signal, undefined, { isDetached: run.isDetached });
       if (outcome.kind === "detached") return "【本进程已脱离，提问由下一个进程接管】"; // 不会落库：storage 已 detach
       await run.setStatus("running");
@@ -1100,6 +1105,7 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
     description: d.description,
     parameters: d.parameters,
     readOnly: d.readOnly,
+    executionResource: d.executionResource,
     mutates: d.mutates,
     unattended: d.unattended,
     selfScribe: d.selfScribe,

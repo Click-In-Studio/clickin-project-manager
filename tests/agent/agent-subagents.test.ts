@@ -874,6 +874,7 @@ describe("持久子 Agent 基建", () => {
       [],
       new Promise<void>(() => {}),
     );
+    await eventually(async () => (await getPool().query("SELECT status FROM agent_run WHERE id=$1", [runId])).rows[0]?.status === "running");
     await spawnSubagent(p, { task: "核对第一场" });
     expect(await abortRun(sessionId)).toBe(true);
     await waitForIdle(sessionId);

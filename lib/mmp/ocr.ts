@@ -1,3 +1,4 @@
+import { admittedMmpRun } from "./admitted-run";
 // ocr.structured 任务的薄封装（#453：MMP 接入首例）。调用方给「公网可达的媒体 URL +
 // 页码 + 档位」，拿回按页的识别结果与计费真值；失败分两类如实回报，不抛给模型。
 //
@@ -87,9 +88,10 @@ export async function ocrPages(
   const handle = mmpMediaHandle(input.fileId, media.get(input.url));
   const pages = [...new Set(input.pages.map((p) => Math.floor(p)).filter((p) => p >= 1))].sort((a, b) => a - b);
   try {
-    const done = await client.run(
+    const done = await admittedMmpRun(client,
       { type: "ocr.structured", media: handle, tier: input.tier, params: { pages, lang: input.lang ?? "ch" } },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
+      input.fileId,
     );
     rememberMmpMediaId(input.fileId, done.media_id);
     const result = (done.result ?? {}) as {

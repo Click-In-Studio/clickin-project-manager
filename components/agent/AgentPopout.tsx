@@ -33,7 +33,7 @@ type SessionSummary = {
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;
-  status?: "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
+  status?: "queued" | "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
 };
 
 type ChatAttachment = {
@@ -382,7 +382,7 @@ export default function AgentPopout({
     } finally {
       if (activeKeyRef.current === key) setLoadingHistory(false);
     }
-    if (status === "running" || status === "compacting") {
+    if (status === "queued" || status === "running" || status === "compacting") {
       // 待答的 ask_user 问题卡片先恢复再接流：question.list 是真实事实来源，
       // 卡片看不见就等于 agent 在隐形卡死（run 阻塞在 waitAnswer 直到过期）。
       // 经 reducer 注入以复用按 id 去重——实时 question 事件再来也不会重卡。
@@ -405,7 +405,7 @@ export default function AgentPopout({
   }, [consumeStream]);
 
   const onSubagentParentRun = useCallback(
-    async (status: "running" | "compacting" | "done") => {
+    async (status: "queued" | "running" | "compacting" | "done") => {
       if (!activeKey || streaming || loadingHistory) return false;
       await openSession(activeKey, status);
       return true;
@@ -881,10 +881,10 @@ export default function AgentPopout({
                 }`}
                 onClick={() => openSession(s.key, s.status)}
               >
-                {(s.status === "running" || s.status === "compacting") && (
+                {(s.status === "queued" || s.status === "running" || s.status === "compacting") && (
                   <span
                     className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]"
-                    title={s.status === "compacting" ? "正在整理上下文" : "回复中"}
+                    title={s.status === "queued" ? "排队中" : s.status === "compacting" ? "正在整理上下文" : "回复中"}
                   />
                 )}
                 <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{s.title}</span>

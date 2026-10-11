@@ -41,9 +41,9 @@ export async function createApproval(
   // 工具调用时不再弹第二张卡（§4.4 ①"等待审批：什么都不用做"）
   const existing = await pool.query<{ id: string; preview: ApprovalCard; expires_at: Date }>(
     `SELECT id, preview, expires_at FROM agent_approval
-     WHERE session_id = $1 AND tool_call_id = $2 AND expires_at > now()
+     WHERE session_id = $1 AND tool_call_id = $2
        AND COALESCE(preview->>'purpose', 'tool-execution') = $3
-       AND (status = 'pending' OR (status = 'allowed' AND executed_at IS NULL))`,
+       AND executed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
     [input.sessionId, input.toolCallId, input.card.purpose ?? "tool-execution"],
   );
   if (existing.rows[0]) {
@@ -75,18 +75,16 @@ export async function createApproval(
   return { id, info, expiresAt, reused: false };
 }
 
-/** 某个工具调用能否在恢复时重跑：待答审批（还没执行）或已批未执行 → 可以；
+/** 未执行的审批可重新过门：待答继续等、拒绝/超时/取消补真实终态，不能执行写入。
  * 权限激活已经完成、但原写确认尚未创建时也可恢复——激活幂等且原工具还没执行。
- * 原写确认一旦存在：pending / 已批未执行走前两支恢复；拒绝 / 超时 / 取消代表这次
- * 调用已经终结，已执行则副作用未知，这四种都不能再借激活记录复活。因此下面的
+ * 原写确认已执行则副作用未知，不能再借激活记录复活。因此下面的
  * NOT EXISTS 刻意看全部写确认行，不加 expires_at 过滤。 */
-export async function approvalAllowsReexecute(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
+export async function canResumeApprovalGate(sessionId: string, toolCallId: string, pool: Pool = getPool()): Promise<boolean> {
   const r = await pool.query(
     `SELECT 1 FROM agent_approval a
-     WHERE a.session_id = $1 AND a.tool_call_id = $2 AND a.expires_at > now()
+     WHERE a.session_id = $1 AND a.tool_call_id = $2
        AND (
-         a.status = 'pending'
-         OR (a.status = 'allowed' AND a.executed_at IS NULL)
+         a.executed_at IS NULL
          OR (
            COALESCE(a.preview->>'purpose', 'tool-execution') = 'permission-activation'
            AND a.status = 'allowed' AND a.executed_at IS NOT NULL

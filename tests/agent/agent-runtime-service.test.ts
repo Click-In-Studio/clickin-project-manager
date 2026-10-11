@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
@@ -13,7 +13,7 @@ import {
 } from "@/lib/agent/runtime/service";
 import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/events";
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
-import { CHAT_MODEL } from "@/lib/agent/runtime/config";
+import { CHAT_MODEL, llmRuntime } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 
@@ -470,6 +470,27 @@ describe("agent-runtime service", () => {
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
   });
 
+  it("分割回合压缩的历史和前缀分别准入，不能错误复用第一份摘要", async () => {
+    const complete=vi.spyOn(llmRuntime(),"completeSimple").mockImplementation(async(_model,ctx)=>({...base(),content:[{type:"text",text:ctx.systemPrompt!}],stopReason:"stop"}));
+    let checks=0;
+    runtimeOverrides.shouldCompactFn=()=>checks++===0;
+    runtimeOverrides.compactFn=async(...args)=>{
+      const rt=args[8]!;
+      const history=await rt.completeSimple(args[1],{messages:[],systemPrompt:"历史摘要"});
+      const prefix=await rt.completeSimple(args[1],{messages:[],systemPrompt:"前缀摘要"});
+      return {ok:true,value:{summary:JSON.stringify([history.content,prefix.content]),firstKeptEntryId:args[0].firstKeptEntryId,tokensBefore:args[0].tokensBefore}};
+    };
+    runtimeOverrides.streamFn=scripted([{text:"执行完毕"}]).streamFn;
+    const key=newKey();
+    try {
+      const started=await startRun({sessionId:key,userId,message:"旧上下文".repeat(60_000)});
+      await collectUntilTerminal(key);await waitForIdle(key);
+      expect(complete).toHaveBeenCalledTimes(2);
+      const results=(await getPool().query("SELECT result FROM agent_admission WHERE run_id=$1 AND operation_key LIKE 'compact:%' ORDER BY operation_key",[started.runId])).rows;
+      expect(results.map(row=>row.result.content[0].text)).toEqual(["历史摘要","前缀摘要"]);
+    }finally{complete.mockRestore();delete runtimeOverrides.compactFn;delete runtimeOverrides.shouldCompactFn;}
+  });
+
   it("压缩期间输入先持久化，压缩后作为 steer 消费，终态最后发出", async () => {
     let compactStarted!: () => void;
     const started = new Promise<void>((resolve) => { compactStarted = resolve; });
@@ -659,6 +680,48 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+  });
+
+  it("等待输入卸载上下文，单个驻留名额仍能推进其他对话并恢复原任务", async () => {
+    const { admissionLimits } = await import("@/lib/agent/runtime/admission");
+    const { resolveQuestion } = await import("@/lib/agent/runtime/questions");
+    const oldLimit = admissionLimits.context;
+    admissionLimits.context = 1;
+    const firstKey=createNewSessionKey(userId), secondKey=createNewSessionKey(userId);
+    sessions.push(firstKey,secondKey);
+    const { streamFn,seen } = scripted([
+      { calls:[{ type:"toolCall",id:"park-input",name:exposedName("ask_user"),arguments:{ questions:[{questionId:"q",header:"日期",question:"选哪天？",options:[{label:"周一"},{label:"周二"}]}] } }] },
+      { text:"第二个对话完成" }, { text:"原任务收到周一" }, {text:"追加要求已处理"},
+    ]);
+    runtimeOverrides.streamFn=streamFn;
+    try {
+      const first=await startRun({sessionId:firstKey,userId,message:"先问我日期"});
+      let questionId:string|undefined;
+      for (let i=0;i<200;i++) {
+        questionId=(await getPool().query("SELECT id FROM agent_question WHERE run_id=$1", [first.runId])).rows[0]?.id;
+        const resident=(await getPool().query("SELECT 1 FROM agent_admission WHERE run_id=$1 AND resource='context' AND state='active'", [first.runId])).rowCount;
+        if (questionId && !resident) break;
+        await new Promise((r)=>setTimeout(r,20));
+      }
+      expect(questionId).toBeDefined();
+      const second=await startRun({sessionId:secondKey,userId,message:"完成另一项工作"});
+      expect(second.status).toBe("queued");
+      expect((await collectUntilTerminal(secondKey)).some((l)=>l.type==="final" && l.text.includes("第二个对话完成"))).toBe(true);
+      await waitForIdle(secondKey);
+      expect((await getPool().query("SELECT status FROM agent_run WHERE id=$1", [first.runId])).rows[0].status).toBe("awaiting_answer");
+      expect(await steerRun(firstKey,"追加要求：安排上午")).toMatchObject({runId:first.runId});
+      await resolveQuestion(questionId!,{answers:{q:["周一"]}});
+      const resumed=await collectUntilTerminal(firstKey);
+      expect(resumed.some((l)=>l.type==="final" && l.text.includes("追加要求"))).toBe(true);
+      await waitForIdle(firstKey);
+      expect(seen).toHaveLength(4);
+      expect(JSON.stringify(seen[2].messages)).toContain("用户的回答");
+      expect(await getHistory(firstKey)).toContainEqual({role:"assistant",content:"原任务收到周一"});
+      expect(JSON.stringify(seen[3].messages)).toContain("追加要求：安排上午");
+    } finally {
+      await abortRun(firstKey); await abortRun(secondKey);
+      admissionLimits.context=oldLimit;
+    }
   });
 
   it("模型调 ask_user → question 行（QuestionInfo 形态）→ 用户回答 → 模型看到答案；取消 → 错误结果", async () => {

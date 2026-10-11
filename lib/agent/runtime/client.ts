@@ -35,9 +35,9 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return data;
 }
 
-export async function startRun(input: StartRunRequest): Promise<{ runId: string }> {
+export async function startRun(input: StartRunRequest): Promise<{ runId: string; status: "queued" }> {
   if (!runnerUrl()) return service.startRun(input);
-  return post<{ runId: string }>("/runs", input);
+  return post<{ runId: string; status: "queued" }>("/runs", input);
 }
 
 export async function steerRun(

@@ -10,7 +10,7 @@ import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
 import { runtimeOverrides, waitForIdle } from "@/lib/agent/runtime/service";
 import { CHAT_MODEL } from "@/lib/agent/runtime/config";
-import { approvalAllowsReexecute, createApproval, markApprovalExecuted, resolveApproval } from "@/lib/agent/runtime/approvals";
+import { canResumeApprovalGate, createApproval, markApprovalExecuted, resolveApproval, awaitApproval } from "@/lib/agent/runtime/approvals";
 import { createOrReuseQuestion } from "@/lib/agent/runtime/questions";
 import { newApprovalId, newQuestionId, newRunId, newSessionId } from "@/lib/agent/runtime/ids";
 import { EventPublisher } from "@/lib/agent/runtime/events";
@@ -232,7 +232,7 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     await resolveApproval(activation.id, "allow-once", userId);
     await markApprovalExecuted(activation.id);
     // 激活已落行而原工具尚未执行：恢复时仍可回到同一次调用。
-    expect(await approvalAllowsReexecute(key, toolCallId)).toBe(true);
+    expect(await canResumeApprovalGate(key, toolCallId)).toBe(true);
 
     const write = await createApproval({
       runId, sessionId: key, toolCallId, tool: "clickin__production-scene_propose_update", args: {},
@@ -241,10 +241,10 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     expect(write.id).not.toBe(activation.id);
     await resolveApproval(write.id, "allow-once", userId);
     await markApprovalExecuted(write.id);
-    expect(await approvalAllowsReexecute(key, toolCallId)).toBe(false);
+    expect(await canResumeApprovalGate(key, toolCallId)).toBe(false);
   });
 
-  it("原写确认超时后，不借已完成的权限激活记录复活调用", async () => {
+  it("原写确认超时后恢复同一终态门，不借激活记录创建新确认", async () => {
     const toolCallId = `c_expired_write_${shortId()}`;
     const activation = await createApproval({
       runId, sessionId: key, toolCallId, tool: "clickin__production-scene_propose_update",
@@ -262,7 +262,14 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
       [write.id],
     );
 
-    expect(await approvalAllowsReexecute(key, toolCallId)).toBe(false);
+    expect(await canResumeApprovalGate(key, toolCallId)).toBe(true);
+    const resumed = await createApproval({
+      runId,sessionId:key,toolCallId,tool:"clickin__production-scene_propose_update",args:{},
+      card:{title:"修改构作",description:"执行修改",severity:"warning"},
+    });
+    expect(resumed.id).toBe(write.id);
+    expect(resumed.reused).toBe(true);
+    expect(await awaitApproval(resumed.id)).toEqual({kind:"expired"});
   });
 
   it("GET/POST /questions：runner 会话的待答列表；路人与伪造 aq_ id 统一 404；主人回答后落表", async () => {

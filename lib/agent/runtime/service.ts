@@ -1,3 +1,6 @@
+import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait } from "./admission";
+import { cancelAdmissions, inputWaitReady, recoverAdmissions, continuationKey, completedChatMessages } from "./admission-db";
+import type { InputWait } from "./admission-types";
 // 自建运行时的 run 服务（#367 S2）：把 vendor harness、PG 会话树、事件分发、
 // 审批门、注入链、记账串成一次 run。既可在 next 进程内跑（测试/灰度首期），也是
 // agent-runner 独立进程的核心——进程边界只是把这里的函数包一层 loopback HTTP。
@@ -37,9 +40,9 @@ import { tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
 import { approvalCard, permissionActivationCard } from "./cards";
-import { createApproval, awaitApproval, markApprovalExecuted, approvalAllowsReexecute } from "./approvals";
+import { createApproval, awaitApproval, markApprovalExecuted, canResumeApprovalGate } from "./approvals";
 import { buildSystemPrompt, recallBlock } from "./prompt";
-import { repairAndClassify } from "./resume";
+import { repairAndClassify, findPendingToolCalls } from "./resume";
 import { claimPendingSession, sessionsWithPendingInputs } from "./session-dispatch-db";
 import { runPaidFrom, setRunPaidFrom } from "./session-runtime-db";
 import { newRunId } from "./ids";
@@ -90,6 +93,7 @@ type ActiveRun = {
   detach: () => void;
 };
 let draining = false;
+const pendingExecutions = new Map<string, { runId: string; abort: AbortController; done: Promise<void> }>();
 const active = new Map<string, ActiveRun>(); // sessionId → 进行中的 run（同会话单执行者）
 
 /** 测试注入点：替换模型流（默认真 DeepSeek）和 MMP registry client。 */
@@ -109,15 +113,16 @@ export class SessionBusyError extends Error {
 
 // ── 会话 ─────────────────────────────────────────────────────────────────────
 
-async function ensureSession(sessionId: string, userId: string): Promise<PgSessionStorage> {
-  const existing = await PgSessionStorage.load(sessionId);
+async function ensureSession(sessionId: string, userId: string) {
+  const existing = await PgSessionStorage.metadata(sessionId);
   if (existing) {
-    if ((await existing.getMetadata()).userId !== userId) throw Object.assign(new Error("无权访问该会话"),{status:403});
+    if (existing.userId !== userId) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
     return existing;
   }
   const identity = parseSessionIdentity(sessionId);
   if (!identity || identity.userId !== userId) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
-  return PgSessionStorage.create({ id: sessionId, userId, productionId: identity.productionId ?? null });
+  const storage = await PgSessionStorage.create({ id: sessionId, userId, productionId: identity.productionId ?? null });
+  return storage.getMetadata();
 }
 
 export async function isRunnerSession(sessionId: string): Promise<boolean> {
@@ -126,7 +131,7 @@ export async function isRunnerSession(sessionId: string): Promise<boolean> {
 }
 
 export function sessionRunState(sessionId: string): "running" | "not-running" {
-  return active.has(sessionId) ? "running" : "not-running";
+  return (active.has(sessionId) || pendingExecutions.has(sessionId)) ? "running" : "not-running";
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
@@ -144,15 +149,15 @@ export interface StartRunInput {
 /** 发起一轮（不等待完成）。同会话已有 run 在跑 → 抛 SessionBusyError（调用方转 steer）。 */
 export async function startRun(
   input: StartRunInput,
-): Promise<{ runId: string }> {
-  if (active.has(input.sessionId)) throw new SessionBusyError();
-  const storage = await ensureSession(input.sessionId, input.userId);
+): Promise<{ runId: string; status: "queued" }> {
+  if (active.has(input.sessionId) || pendingExecutions.has(input.sessionId)) throw new SessionBusyError();
+  const meta = await ensureSession(input.sessionId, input.userId);
   // 额度门（#383）：只挡**新发起**的一轮。孤儿接管/审批后续跑不再判——那是
   // 已经开始的一次任务，判定的位置是这里，不是循环里。超限抛 429，文案由
   // assertAiQuota 按「找谁补」分三种人写。
   const { paidFrom } = await assertAiQuota({
     userId: input.userId,
-    productionId: (await storage.getMetadata()).productionId,
+    productionId: meta.productionId,
   });
   const runId = newRunId();
   const client = await getPool().connect();
@@ -164,13 +169,13 @@ export async function startRun(
     ]);
     const busy = await client.query(
       `SELECT 1 FROM agent_run WHERE session_id=$1
-      AND status IN ('running','compacting','awaiting_approval','awaiting_answer')`,
+      AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')`,
       [input.sessionId],
     );
     if (busy.rowCount) throw new SessionBusyError();
     await client.query(
-      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from)
-      VALUES($1,$2,'running',$3,now(),$4,$5,$6,$7)`,
+      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from,admission_class)
+      VALUES($1,$2,'queued',$3,now(),$4,$5,$6,$7,$8)`,
       [
         runId,
         input.sessionId,
@@ -179,6 +184,7 @@ export async function startRun(
         CHAT_MODEL.id,
         input.scheduleId ?? null,
         paidFrom,
+        input.scheduleId ? "schedule" : "interactive",
       ],
     );
     inboxId = (await import("./ids")).newInboxId();
@@ -200,8 +206,11 @@ export async function startRun(
   } finally {
     client.release();
   }
+  const queuedPublisher = new EventPublisher(input.sessionId,runId);
+  queuedPublisher.publish({ type: "queued", active: true });
+  await queuedPublisher.drain();
   await startExecution({
-    storage,
+    sessionId: input.sessionId,
     runId,
     userId: input.userId,
     message: input.message,
@@ -211,7 +220,7 @@ export async function startRun(
     paidFrom,
     scheduleId: input.scheduleId ?? null,
   });
-  return { runId };
+  return { runId, status: "queued" };
 }
 
 /** 中途插话先持久入队，在模型轮次之间消费。 */
@@ -220,7 +229,9 @@ export async function steerRun(
   message: string,
   attachmentIds: string[] = [],
 ): Promise<{ runId: string } | null> {
-  const run = active.get(sessionId);
+  const run = active.get(sessionId) ?? pendingExecutions.get(sessionId) ?? (await getPool().query<{ runId: string }>(
+    `SELECT id AS "runId" FROM agent_run WHERE session_id=$1 AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer') ORDER BY started_at DESC LIMIT 1`, [sessionId],
+  )).rows[0];
   if (!run) return null;
   const identity = parseSessionIdentity(sessionId);
   if (!identity)
@@ -267,6 +278,8 @@ export async function abortRun(
   reason = "用户停止",
 ): Promise<boolean> {
   const run = active.get(sessionId);
+  const pending = pendingExecutions.get(sessionId);
+  pending?.abort.abort();
   run?.abort.abort();
   await (
     await import("./subagents")
@@ -274,14 +287,29 @@ export async function abortRun(
   await getPool().query("DELETE FROM agent_session_inbox WHERE session_id=$1", [
     sessionId,
   ]);
-  if (!run) return false;
+  if (!run) {
+    const cancelled = await getPool().query<{ id: string }>("UPDATE agent_run SET status='aborted',ended_at=now(),input_wait=NULL WHERE session_id=$1 AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer') RETURNING id", [sessionId]);
+    for (const row of cancelled.rows) await cancelAdmissions(row.id);
+    await getPool().query("UPDATE agent_question SET status='cancelled',resolved_at=now() WHERE session_id=$1 AND status='pending'", [sessionId]);
+    await getPool().query("UPDATE agent_approval SET status='cancelled',resolved_at=now() WHERE session_id=$1 AND status='pending'", [sessionId]);
+    for (const row of cancelled.rows) {
+      const publisher = new EventPublisher(sessionId,row.id);
+      publisher.publish({ type: "aborted", text: "" });
+      await publisher.drain();
+    }
+    if (pending) await pending.done.catch(() => {});
+    return Boolean(pending || cancelled.rowCount);
+  }
   await run.abortHarness();
   return true;
 }
 
 interface ExecuteInput {
   onReady?: () => void;
-  storage: PgSessionStorage;
+  storage?: PgSessionStorage;
+  sessionId?: string;
+  abortController?: AbortController;
+  epoch?: number;
   inboxEntryId?: string;
   systemOnly?: boolean;
   runId: string;
@@ -299,16 +327,45 @@ interface ExecuteInput {
 
 /** 发起方等到本地执行槽建立，避免刚返回 runId 就收到插话 409。 */
 async function startExecution(input: ExecuteInput): Promise<void> {
-  let ready!: () => void;
-  const started = new Promise<void>((resolve) => {
-    ready = resolve;
+  const sessionId = input.sessionId ?? (await input.storage!.getMetadata()).id;
+  if (pendingExecutions.has(sessionId) || active.has(sessionId)) return;
+  const abort = new AbortController();
+  // 队列只持身份与取消器；输入和 transcript 获得驻留名额后从数据库读取。
+  const done = execute({ sessionId, runId: input.runId, userId: input.userId, pageKey: input.pageKey, paidFrom: input.paidFrom, scheduleId: input.scheduleId, systemOnly: input.systemOnly, abortController: abort });
+  pendingExecutions.set(sessionId, { runId: input.runId, abort, done });
+  void done.catch((error) => { if (!abort.signal.aborted) console.error("[agent-runtime] 执行失败", error); }).finally(async () => {
+    pendingExecutions.delete(sessionId);
+    if (!draining) await resumeOrphans(sessionId).catch((e) => console.error("[agent-runtime] 续跑失败",e));
   });
-  const done = execute({ ...input, onReady: ready });
-  void done.catch((error) => console.error("[agent-runtime] 执行失败", error));
-  await Promise.race([started, done]);
 }
 
 async function execute(input: ExecuteInput): Promise<void> {
+  const abort = input.abortController ?? new AbortController();
+  const row = (await getPool().query<{ execution_epoch: number; status: string }>("SELECT execution_epoch,status FROM agent_run WHERE id=$1", [input.runId])).rows[0];
+  if (!row || !["queued","running","compacting","awaiting_approval","awaiting_answer"].includes(row.status)) return;
+  const epoch = row.execution_epoch;
+  const ticket = await acquire(input.runId, `context:${epoch+1}`, "context", abort.signal);
+  try {
+    abort.signal.throwIfAborted();
+    const updated = await getPool().query<{ execution_epoch: number }>("UPDATE agent_run SET status='running',execution_epoch=execution_epoch+1,owner=$2,heartbeat_at=now() WHERE id=$1 AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer') RETURNING execution_epoch", [input.runId, RUNNER_OWNER]);
+    if (!updated.rowCount) return;
+    await reconcileConsumedInputs(input.sessionId!);
+    const storage = input.storage ?? await PgSessionStorage.load(input.sessionId!);
+    if (!storage) throw new Error("会话不存在");
+    // 待补的工具结果先恢复；挂起期间的追加输入留给同一 run 的后续消费。
+    const path = await storage.getPathToRoot(await storage.getLeafId());
+    const hasPendingTools = findPendingToolCalls(path.flatMap((e) => e.type === "message" ? [e.message] : [])).length > 0;
+    const first = !hasPendingTools ? (await pendingInputsForRun(input.sessionId!,input.runId))[0] : undefined;
+    const queuedPublisher = new EventPublisher(input.sessionId!,input.runId);
+    queuedPublisher.publish({ type: "queued", active: false });
+    await queuedPublisher.drain();
+    input.epoch = updated.rows[0].execution_epoch;
+    storage.bindRun(input.runId,input.epoch);
+    await runInAdmission(input.runId, abort.signal, () => active.get(input.sessionId!)?.detach(), () => executeBody({ ...input, ...(first ? { message: first.message, attachmentIds: first.attachment_ids, inboxEntryId: first.id } : {}), storage, abortController: abort }));
+  } finally { await release(ticket); }
+}
+
+async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }): Promise<void> {
   const { storage, runId, userId } = input;
   const meta = await storage.getMetadata();
   const sessionId = meta.id;
@@ -319,7 +376,7 @@ async function execute(input: ExecuteInput): Promise<void> {
   const schedule = input.scheduleId ? await getSchedule(input.scheduleId) : null;
   let scheduleReport: ScheduleReport | null = null;
   const rawPublisher = new EventPublisher(sessionId, runId);
-  const abort = new AbortController();
+  const abort = input.abortController ?? new AbortController();
   // 脱离（§4.4 ②）：本地停手但不留痕——不写 transcript、不发 aborted 行、不改 run 终态，
   // 下一个进程按孤儿接管续跑
   let detached = false;
@@ -368,6 +425,7 @@ async function execute(input: ExecuteInput): Promise<void> {
   // compaction 单列：它用的是 v4-pro（3 倍单价）、不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
+  const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,CHAT_MODEL),0);
   let message = input.message;
   let lastUser: string | null = message ?? null;
   let lastAssistant: string | null = null;
@@ -380,7 +438,8 @@ async function execute(input: ExecuteInput): Promise<void> {
 
   const toolArgs = new Map<string, Record<string, unknown>>(); // toolCallId → args（mutation 行用）
   const heartbeat = setInterval(() => {
-    void pool.query(`UPDATE agent_run SET heartbeat_at = now() WHERE id = $1`, [runId]).catch(() => {});
+    void pool.query(`UPDATE agent_run SET heartbeat_at = now() WHERE id = $1 AND execution_epoch=$2 AND owner=$3`, [runId,input.epoch,RUNNER_OWNER])
+      .then((r) => { if (!r.rowCount) active.get(sessionId)?.detach(); }).catch(() => {});
   }, HEARTBEAT_INTERVAL_MS);
 
   try {
@@ -389,7 +448,7 @@ async function execute(input: ExecuteInput): Promise<void> {
       { client: runtimeOverrides.mmpClient },
     );
     runHandle.runtimeToolCatalog = mmpSurface.catalog;
-    tools = [...tools, ...mmpSurface.tools];
+    tools = wrapTools([...tools, ...mmpSurface.tools]);
     toolByName = new Map(tools.map((t) => [t.name, t]));
 
     if (input.systemOnly && !(await (await import("./subagent-events-db")).appendSubagentEvents(storage,sessionId,runId))) return;
@@ -466,8 +525,8 @@ async function execute(input: ExecuteInput): Promise<void> {
         return { apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() };
       },
       runtime: runtimeOverrides.streamFn
-        ? { streamSimple: runtimeOverrides.streamFn, completeSimple: llmRuntime().completeSimple }
-        : { streamSimple: llmRuntime().streamSimple, completeSimple: llmRuntime().completeSimple },
+        ? { streamSimple: admittedStream(runtimeOverrides.streamFn), completeSimple: llmRuntime().completeSimple }
+        : { streamSimple: admittedStream(llmRuntime().streamSimple), completeSimple: llmRuntime().completeSimple },
     });
     abortHarness = async () => { await harness.abort(); };
     warmAttachmentsImpl = async (attachmentIds) => {
@@ -568,7 +627,7 @@ async function execute(input: ExecuteInput): Promise<void> {
         // 防失控硬顶（#383）：额度判定在 run 开始处、run 内不打断，所以透支上限
         // 就是单个 run 能烧的量。工具死循环会把「允许少量负 credit」变成无底洞——
         // 这道闸不是限流，豁免档同样受它约束。
-        const spent = creditsFromUsd(usage.usd);
+        const spent = creditsFromUsd(previousUsd+usage.usd);
         if (!abort.signal.aborted && spent > RUN_CREDIT_HARD_CAP) {
           console.error(`[agent-runtime] run ${runId} 触发单轮成本硬顶（${spent} credit > ${RUN_CREDIT_HARD_CAP}），中止`);
           publisher.publish({ type: "error", error: "本次任务消耗异常偏高，已自动中止。请把问题拆小后重试。" });
@@ -585,7 +644,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     } else {
       const decision = await repairAndClassify(session, toolByName, {
         signal: abort.signal,
-        canReexecuteWrite: (call) => approvalAllowsReexecute(sessionId, call.id),
+        canReexecuteWrite: (call) => canResumeApprovalGate(sessionId, call.id),
       });
       if (decision.kind === "continue") {
         // 审批待答/已批未执行的写工具：重新过确认门（复用同一张卡）后补结果，再续跑
@@ -618,6 +677,10 @@ async function execute(input: ExecuteInput): Promise<void> {
             await session.appendMessage({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: resultText }], isError, timestamp: Date.now() });
             publisher.publish({ type: "tool-result", id: call.id, result: resultText, ...(isError ? { isError: true } : {}) });
             publisher.publish({ type: "tool-end", id: call.id });
+            if (!isError && tool.mutates) {
+              const m = tool.mutates(call.arguments as Record<string, unknown>);
+              if (m) publisher.publish({ type: "mutation", ...m, productionId, tool: tool.mcpName, ...mutationAuditFields(audited, call.id) });
+            }
           }
         }
         const turn = harness.continueTurn();
@@ -704,6 +767,7 @@ async function execute(input: ExecuteInput): Promise<void> {
     }
     if (terminalLine) publisher.publish(terminalLine);
   } catch (err) {
+    if (err instanceof Error && err.message === "会话执行租约已失效") { detached=true; storage.detach(); abort.abort(); }
     status = abort.signal.aborted ? "aborted" : "failed";
     error = err instanceof Error ? err.message : String(err);
     if (status === "aborted") {
@@ -735,13 +799,15 @@ async function execute(input: ExecuteInput): Promise<void> {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；
       // 已花的 token 照记
       await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
+      await pool.query("UPDATE agent_run SET owner=NULL,heartbeat_at=NULL,input_tokens=input_tokens+$4,output_tokens=output_tokens+$5,cache_read_tokens=cache_read_tokens+$6 WHERE id=$1 AND execution_epoch=$2 AND owner=$3", [runId,input.epoch,RUNNER_OWNER,usage.input,usage.output,usage.cacheRead]);
       active.delete(sessionId);
       return;
     }
-    await pool.query(
-      `UPDATE agent_run SET status = $2, ended_at = now(), error = $3, input_tokens = $4, output_tokens = $5, cache_read_tokens = $6 WHERE id = $1`,
-      [runId, status, error, usage.input, usage.output, usage.cacheRead],
+    const finished = await pool.query(
+      `UPDATE agent_run SET status = $2, ended_at = now(), error = $3, input_tokens = input_tokens+$4, output_tokens = output_tokens+$5, cache_read_tokens = cache_read_tokens+$6,input_wait=NULL WHERE id = $1 AND execution_epoch=$7 AND owner=$8 RETURNING id`,
+      [runId, status, error, usage.input, usage.output, usage.cacheRead,input.epoch,RUNNER_OWNER],
     );
+    if (!finished.rowCount) { active.delete(sessionId); return; }
     await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
     await pruneStreamingUpdates(sessionId, runId).catch(() => {});
     // 定时任务收尾：写回摘要、按汇报调整任务、通知创建者（附本 run 的写审计改动清单）
@@ -995,6 +1061,7 @@ async function approvalGate(g: GateInput): Promise<GateResult> {
   // 复用的卡不再重发（attach 时 dispatch 会补发待答卡；重发只会在前端多一张）
   if (!reused) g.publisher.publish({ type: "approval", approval: info });
 
+  await waitForInput(g.runId, { kind: "approval", id });
   const outcome = await awaitApproval(id, g.signal, undefined, { isDetached: g.isDetached });
   if (outcome.kind === "detached") return { block: true, reason: "本进程已脱离，审批由下一个进程接管" }; // 不落库：storage 已 detach
   await getPool().query(`UPDATE agent_run SET status = 'running' WHERE id = $1 AND status = 'awaiting_approval'`, [g.runId]);
@@ -1027,6 +1094,7 @@ async function permissionActivationGate(g: GateInput, rawKeys: string[]): Promis
   await getPool().query(`UPDATE agent_run SET status = 'awaiting_approval' WHERE id = $1`, [g.runId]);
   if (!reused) g.publisher.publish({ type: "approval", approval: info });
 
+  await waitForInput(g.runId, { kind: "approval", id });
   const outcome = await awaitApproval(id, g.signal, undefined, { isDetached: g.isDetached });
   if (outcome.kind === "detached") return { block: true, reason: "本进程已脱离，权限确认由下一个进程接管" };
   await getPool().query(`UPDATE agent_run SET status = 'running' WHERE id = $1 AND status = 'awaiting_approval'`, [g.runId]);
@@ -1085,9 +1153,16 @@ export async function maybeCompact(
   if (!(runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
   const cost: CompactionCost = { usd: 0, tokens: 0, triggered: true };
   const rt = llmRuntime();
+  let compactionRequest = 0;
   const tapped = {
     completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
-      const msg = await rt.completeSimple(...args);
+      const { currentAdmissionScope } = await import("./admission");
+      const scope = currentAdmissionScope();
+      const ticket = scope ? await acquire(scope.runId, `compact:${await continuationKey(scope.runId)}:${compactionRequest++}`, "llm", signal) : undefined;
+      let msg: Awaited<ReturnType<typeof rt.completeSimple>> | undefined;
+      try { msg = ticket?.state === "done" && ticket.result ? ticket.result as typeof msg : await rt.completeSimple(...args); }
+      finally { if (ticket) await release(ticket,msg ? "done" : "failed",msg); }
+      if (!msg) throw new Error("压缩响应为空");
       if (msg.role === "assistant" && msg.usage) {
         cost.usd += usdOfUsage(msg.usage, COMPACTION_MODEL);
         cost.tokens += msg.usage.input + msg.usage.output + msg.usage.cacheRead;
@@ -1182,8 +1257,9 @@ function textOf(content: unknown): string {
 }
 
 export async function listSessions(userId: string): Promise<ChatSessionSummary[]> {
-  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean }>(
+  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean; queued_run: boolean }>(
     `SELECT s.id, s.title, s.updated_at,
+       EXISTS(SELECT 1 FROM agent_run r WHERE r.session_id=s.id AND r.status='queued') AS queued_run,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
                  AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')) AS active_run,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
@@ -1204,7 +1280,7 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
     title: row.title || stripUiContext(row.first_user ?? "").trim().slice(0, 60) || "新对话",
     lastMessagePreview: row.last_text ? stripUiContext(row.last_text).slice(0, 120) : undefined,
     updatedAt: row.updated_at.getTime(),
-    status: row.compacting_run ? "compacting" : row.active_run ? "running" : "done",
+    status: row.compacting_run ? "compacting" : row.active_run ? "running" : row.queued_run ? "queued" : "done",
   }));
 }
 
@@ -1235,32 +1311,32 @@ export async function deleteSessionRows(sessionId: string): Promise<void> {
 // ── 重启恢复（§4.4 ①）────────────────────────────────────────────────────────
 
 /** 启动/巡检：接管心跳过期的 run，按中断点修复后续跑。返回接管数。 */
-export async function resumeOrphans(): Promise<number> {
-  const pool = getPool();
-  const r = await pool.query<{ id: string; session_id: string; user_id: string; page_key: string | null; schedule_id: string | null }>(
-    `UPDATE agent_run r SET owner = $1, heartbeat_at = now(), status = 'running'
-     FROM agent_session s
-     WHERE r.session_id = s.id
-       AND r.subagent_id IS NULL
-       AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')
-       AND (r.heartbeat_at IS NULL OR r.heartbeat_at < now() - ($2::int * interval '1 millisecond'))
-       AND NOT (r.session_id=ANY($3::text[]))
-     RETURNING r.id, r.session_id, s.user_id, r.page_key, r.schedule_id`,
-    [RUNNER_OWNER, ORPHAN_AFTER_MS, [...active.keys()]],
-  );
-  for (const row of r.rows) {
-    if (active.has(row.session_id)) continue;
-    const storage = await PgSessionStorage.load(row.session_id);
-    if (!storage) continue;
-    void execute({ storage, runId: row.id, userId: row.user_id, pageKey: row.page_key, scheduleId: row.schedule_id });
+export async function resumeOrphans(sessionId?: string): Promise<number> {
+  await recoverAdmissions(ORPHAN_AFTER_MS);
+  const rows = (await getPool().query<{ id: string; session_id: string; user_id: string; page_key: string | null; schedule_id: string | null; input_wait: InputWait | null }>(
+    `SELECT r.*,s.user_id FROM agent_run r JOIN agent_session s ON s.id=r.session_id
+     WHERE r.subagent_id IS NULL AND r.status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')
+       AND ($2::text IS NULL OR r.session_id=$2)
+       AND (r.status='queued' OR r.owner IS NULL OR r.heartbeat_at<now()-$1*interval '1 millisecond') ORDER BY r.started_at,r.id`, [ORPHAN_AFTER_MS,sessionId ?? null],
+  )).rows;
+  let resumed = 0;
+  for (const row of rows) {
+    if (active.has(row.session_id) || pendingExecutions.has(row.session_id)) continue;
+    if (row.input_wait && !(await inputWaitReady(row.input_wait))) { await watchInputWait(row.id, row.input_wait); resumed++; continue; }
+    await reconcileConsumedInputs(row.session_id);
+    const first = (await pendingInputsForRun(row.session_id, row.id))[0];
+    await startExecution({ sessionId: row.session_id, runId: row.id, userId: row.user_id, pageKey: row.page_key, scheduleId: row.schedule_id,
+      ...(first ? { message: first.message, attachmentIds: first.attachment_ids, inboxEntryId: first.id } : {}) });
+    resumed++;
   }
-  return r.rows.length;
+  return resumed;
 }
 
 /** 排水（§4.4 ②）：不再接新 run，等进行中的到自然停点；等待态（审批/提问）的 run
  *  立即脱离交给下一个进程；超时仍没停的也脱离（下一个进程按 ① 恢复）。 */
 export async function drain(timeoutMs: number): Promise<void> {
   draining = true;
+  for (const [id, run] of pendingExecutions) if (!active.has(id)) run.abort.abort();
   const childDrain = (await import("./subagents")).drainSubagents(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   const pool = getPool();
@@ -1284,23 +1360,23 @@ export async function drain(timeoutMs: number): Promise<void> {
 
 /** 测试用：脱离全部进行中 run（模拟进程消失但不留痕）。 */
 export async function detachAll(): Promise<void> {
+  for (const [id, run] of pendingExecutions) if (!active.has(id)) run.abort.abort();
   for (const run of active.values()) run.detach();
   const settle = Date.now() + 5_000;
-  while (active.size > 0 && Date.now() < settle) await new Promise((r) => setTimeout(r, 20));
+  while ((active.size > 0 || pendingExecutions.size > 0) && Date.now() < settle) await new Promise((r) => setTimeout(r, 20));
 }
 
 /** 测试用：等待某会话的 run 结束。 */
 export async function waitForIdle(sessionId: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (active.has(sessionId) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  while ((active.has(sessionId) || pendingExecutions.has(sessionId)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
 }
 
 /** outbox 与运行中 inbox 的同一唤醒入口；busy 时只留队列，由 execute 安全消费。 */
 export async function dispatchPendingSession(sessionId: string): Promise<void> {
   if (draining || active.has(sessionId)) return;
-  const storage = await PgSessionStorage.load(sessionId);
-  if (!storage) return;
-  const meta = await storage.getMetadata();
+  const meta = await PgSessionStorage.metadata(sessionId);
+  if (!meta) return;
   const runId = newRunId();
   const rows = await claimPendingSession(sessionId, runId, RUNNER_OWNER, CHAT_MODEL.id);
   if (!rows?.length) return;
@@ -1309,14 +1385,14 @@ export async function dispatchPendingSession(sessionId: string): Promise<void> {
   const paidFrom = (await runPaidFrom(runId)) ?? await resolvePaidFrom(meta.userId, meta.productionId);
   await setRunPaidFrom(runId, paidFrom);
   await startExecution({
-    storage, runId, userId: meta.userId, paidFrom,
+    sessionId, runId, userId: meta.userId, paidFrom,
     ...(first
       ? { message: first.message, attachmentIds: first.attachment_ids, inboxEntryId: first.id }
       : { systemOnly: true }),
   });
 }
 
-export const __internal = { active, execute };
+export const __internal = { active, pendingExecutions, execute };
 
 /** 重启巡检补消费已接收输入，包含终态与 finally 之间的崩溃窗口。 */
 export async function resumePendingInputs(): Promise<void> {

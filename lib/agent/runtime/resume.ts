@@ -23,6 +23,7 @@ import type { ToolCall, ToolResultMessage } from "../../../vendor/openclaw/packa
 export type RuntimeTool = AgentTool & {
   /** 无副作用、可重复执行（对应 MCP 时代的 readOnlyHint）。写工具不保证幂等。 */
   readOnly: boolean;
+  completedResult?: (callId: string) => Promise<AgentToolResult<unknown> | undefined>;
 };
 
 export const UNKNOWN_STATE_TOOL_RESULT =
@@ -111,6 +112,12 @@ export async function repairAndClassify(
       continue;
     }
     const reexecute = tool.readOnly || (opts.canReexecuteWrite ? await opts.canReexecuteWrite(call) : false);
+    const completed = await tool.completedResult?.(call.id);
+    if (completed) {
+      await session.appendMessage(toolResultMessage(call, completed, Boolean((completed as { isError?: boolean }).isError)));
+      repaired.push({ toolCallId: call.id, toolName: call.name, action: "re-executed" });
+      continue;
+    }
     if (reexecute && !tool.readOnly) {
       // 写工具但可证明未执行：不在这里跑（跑了就绕过确认门），留给 continueTurn
       // 之前由调用方处理——这里只标记，transcript 保持"toolUse 无结果"形态
