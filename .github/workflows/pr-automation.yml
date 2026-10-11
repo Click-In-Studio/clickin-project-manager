@@ -161,11 +161,16 @@ jobs:
 
             if (hasEntry || exempt) {
               if (existing) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existing.id,
-                });
+                try {
+                  await github.rest.issues.deleteComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: existing.id,
+                  });
+                } catch (error) {
+                  // 并发任务可能已删除同一条提醒；其他 API 错误仍应失败（#942）。
+                  if (error.status !== 404) throw error;
+                }
               }
               return;
             }
