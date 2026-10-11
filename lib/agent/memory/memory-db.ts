@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
-import { getProductionPermissionContext } from "@/lib/perm/permission-context-db";
 import { MEMORY_ENTRY_MAX, MEMORY_SCOPE_MAX, type MemoryEntry, type MemoryScopeView } from "./memory-types";
 
 const newId = () => `mem_${Date.now().toString(36)}${randomBytes(5).toString("hex")}`;
@@ -9,10 +8,15 @@ export class MemoryAccessError extends Error {}
 export class MemoryConflictError extends Error {}
 export class MemoryValidationError extends Error {}
 
-export async function requireMemoryAccess(userId: string, productionId: string | null): Promise<void> {
-  if (productionId && !(await getProductionPermissionContext(userId, false, productionId))) {
-    throw new MemoryAccessError("当前没有这个项目的访问资格");
-  }
+export async function requireMemoryAccess(userId: string, productionId: string | null, client?: PoolClient): Promise<void> {
+  if (!productionId) return;
+  // 自己的项目记忆只检查 owner/active 成员资格，不发行或借用业务 grant。
+  // 持用户锁时复用事务连接，避免等锁请求耗尽连接池后再申请第二条连接。
+  const rows = (await (client ?? getPool()).query(
+    `SELECT p.id FROM production p WHERE p.id=$2 AND (p.owner_id=$1 OR EXISTS
+      (SELECT 1 FROM production_member m WHERE m.production_id=p.id AND m.user_id=$1 AND m.status='active'))`,
+    [userId, productionId])).rows;
+  if (!rows.length) throw new MemoryAccessError("当前没有这个项目的访问资格");
 }
 
 // 所有条目写入、历史落库与 dream 提交共用用户锁，截断和晚完成归档有确定顺序。
@@ -53,6 +57,7 @@ export async function readMemoryScope(userId: string, productionId: string | nul
   try {
     await client.query("BEGIN");
     await lockMemoryUser(client, userId);
+    await requireMemoryAccess(userId, productionId, client);
     const scope = await ensureScope(client, userId, productionId);
     const entries = await readEntries(client, scope.id);
     await client.query("COMMIT");
@@ -83,13 +88,13 @@ export async function mutateMemoryEntry(userId: string, productionId: string | n
   try {
     await client.query("BEGIN"); await lockMemoryUser(client, userId);
     // 在取锁之后再次检查，等待期间撤销访问不能继续写入。
-    await requireMemoryAccess(userId, productionId);
+    await requireMemoryAccess(userId, productionId, client);
     const scope = await ensureScope(client, userId, productionId);
     if (input.actor === "agent") {
       const origin = input.runId ? (await client.query<{ production_id: string | null }>(
         "SELECT a.production_id FROM agent_run r JOIN agent_session a ON a.id=r.session_id WHERE r.id=$1 AND a.user_id=$2", [input.runId, userId])).rows[0] : null;
       if (input.runId && !origin) throw new MemoryAccessError("记忆写入 run 不属于当前用户");
-      if (origin?.production_id) await requireMemoryAccess(userId, origin.production_id);
+      if (origin?.production_id) await requireMemoryAccess(userId, origin.production_id, client);
       // 时间比较留在 PostgreSQL 中，避免 JS Date 毫秒精度吃掉截断边界。
       const { rows } = await client.query<{ blocked: boolean }>(
         `SELECT EXISTS(SELECT 1 FROM agent_memory_scope s WHERE s.user_id=$1
@@ -155,6 +160,7 @@ export async function readDreamSnapshot(userId: string, productionId: string | n
   const client = await getPool().connect();
   try {
     await client.query("BEGIN"); await lockMemoryUser(client, userId);
+    await requireMemoryAccess(userId, productionId, client);
     const scope = await ensureScope(client, userId, productionId);
     const rows = (await client.query<{ id: string; text: string; history_seq: string; production_id: string | null }>(
       `SELECT c.id,c.text,c.history_seq,c.production_id FROM agent_memory_chunk c WHERE ${VISIBLE_HISTORY} AND c.history_seq>$3 ORDER BY c.history_seq LIMIT 100`,
@@ -180,7 +186,7 @@ export async function commitDream(snapshot: DreamSnapshot, bodies: string[] | nu
   const client = await getPool().connect();
   try {
     await client.query("BEGIN"); await lockMemoryUser(client, snapshot.userId);
-    await requireMemoryAccess(snapshot.userId, snapshot.productionId);
+    await requireMemoryAccess(snapshot.userId, snapshot.productionId, client);
     const scope = await ensureScope(client, snapshot.userId, snapshot.productionId);
     if (Number(scope.revision) !== snapshot.revision) { await client.query("ROLLBACK"); return false; }
     const eligible = (await client.query(

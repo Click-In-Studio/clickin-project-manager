@@ -161,7 +161,7 @@ export async function indexEpisodicRun(userId: string, rec: RunRecord, options: 
       if (!run) throw new Error("记忆归档 run 不属于当前用户");
       productionId = run.production_id; observedAt = run.started_at; sourceStartedAt = run.session_created_at;
     }
-    await requireMemoryAccess(userId, productionId);
+    await requireMemoryAccess(userId, productionId, client);
     if (!observedAt || Number.isNaN(Date.parse(observedAt))) throw new Error("无效历史时间");
     const text = episodicText({ ...rec, productionId });
     if (!text) { await client.query("ROLLBACK"); return; }
