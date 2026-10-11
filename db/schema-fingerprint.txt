@@ -114,6 +114,14 @@ COL|agent_mutation|tool_call_id|text|text|NO|
 COL|agent_mutation|tool|text|text|NO|
 COL|agent_mutation|unattended|boolean|bool|NO|false
 COL|agent_mutation|user_id|uuid|uuid|NO|
+COL|agent_observation|data|jsonb|jsonb|NO|
+COL|agent_observation|elapsed_ms|double precision|float8|YES|
+COL|agent_observation|ended_at|timestamp with time zone|timestamptz|YES|
+COL|agent_observation|id|text|text|NO|
+COL|agent_observation|kind|text|text|NO|
+COL|agent_observation|run_id|text|text|YES|
+COL|agent_observation|started_at|timestamp with time zone|timestamptz|NO|now()
+COL|agent_observation|user_id|uuid|uuid|YES|
 COL|agent_question|answer|jsonb|jsonb|YES|
 COL|agent_question|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_question|expires_at|timestamp with time zone|timestamptz|NO|
@@ -1285,6 +1293,9 @@ CON|agent_mutation|agent_mutation_run_id_fkey|FOREIGN KEY (run_id) REFERENCES ag
 CON|agent_mutation|agent_mutation_schedule_id_fkey|FOREIGN KEY (schedule_id) REFERENCES agent_schedule(id) ON DELETE SET NULL
 CON|agent_mutation|agent_mutation_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE SET NULL
 CON|agent_mutation|agent_mutation_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
+CON|agent_observation|agent_observation_kind_check|CHECK ((kind = ANY (ARRAY['model_request'::text, 'tool_retrieval'::text, 'memory_retrieval'::text, 'compaction_check'::text])))
+CON|agent_observation|agent_observation_pkey|PRIMARY KEY (id)
+CON|agent_observation|agent_observation_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_question|agent_question_pkey|PRIMARY KEY (id)
 CON|agent_question|agent_question_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_question|agent_question_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
@@ -1934,6 +1945,9 @@ IDX|agent_mutation|agent_mutation_production_idx|CREATE INDEX agent_mutation_pro
 IDX|agent_mutation|agent_mutation_run_idx|CREATE INDEX agent_mutation_run_idx ON public.agent_mutation USING btree (run_id) WHERE (run_id IS NOT NULL)
 IDX|agent_mutation|agent_mutation_schedule_idx|CREATE INDEX agent_mutation_schedule_idx ON public.agent_mutation USING btree (schedule_id, created_at DESC) WHERE (schedule_id IS NOT NULL)
 IDX|agent_mutation|agent_mutation_user_idx|CREATE INDEX agent_mutation_user_idx ON public.agent_mutation USING btree (user_id, created_at DESC)
+IDX|agent_observation|agent_observation_kind_idx|CREATE INDEX agent_observation_kind_idx ON public.agent_observation USING btree (kind, started_at)
+IDX|agent_observation|agent_observation_pkey|CREATE UNIQUE INDEX agent_observation_pkey ON public.agent_observation USING btree (id)
+IDX|agent_observation|agent_observation_run_idx|CREATE INDEX agent_observation_run_idx ON public.agent_observation USING btree (run_id, started_at)
 IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pending_idx ON public.agent_question USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
 IDX|agent_run_attachment_access|agent_run_attachment_access_pkey|CREATE UNIQUE INDEX agent_run_attachment_access_pkey ON public.agent_run_attachment_access USING btree (run_id, attachment_id, access_kind)

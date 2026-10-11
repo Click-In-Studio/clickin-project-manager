@@ -1,3 +1,4 @@
+import { withObservationRun, observeModelRequest } from "./observation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { StreamFn, AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
@@ -129,7 +130,7 @@ export function currentAdmissionScope(): Scope | undefined { return scopeStorage
 export function runInAdmission<T>(runId: string, signal: AbortSignal, park: () => void, fn: () => Promise<T>): Promise<T> {
   const scope: Scope = { runId, signal, park, sequence: 0, busy: 0, waits: new Map(), waitTail: Promise.resolve() };
   scopes.set(runId, scope);
-  return scopeStorage.run(scope, fn).finally(() => { scopes.delete(runId); });
+  return withObservationRun(runId, () => scopeStorage.run(scope, fn)).finally(() => { scopes.delete(runId); });
 }
 export async function waitForInput(runId: string, wait: InputWait): Promise<boolean> {
   const scope = scopes.get(runId);
@@ -214,6 +215,9 @@ export function admittedStream(streamFn: StreamFn): StreamFn {
     void (async () => {
       let ticket: AdmissionTicket | undefined;
       let result: AssistantMessage | undefined;
+      let observedResult: AssistantMessage | undefined;
+      let observation: Awaited<ReturnType<typeof observeModelRequest>> | undefined;
+      const queuedAt = performance.now();
       try {
         ticket = await acquire(scope.runId, `llm:${model.id}:${await db.continuationKey(scope.runId)}`, "llm", signal);
         if (ticket.state === "done" && ticket.result) {
@@ -222,19 +226,30 @@ export function admittedStream(streamFn: StreamFn): StreamFn {
           return;
         }
         signal.throwIfAborted();
+        observation = await observeModelRequest(model, context, "chat", performance.now() - queuedAt, options?.maxTokens);
         const stream = await streamFn(model, context, {...options,signal});
         for await (const event of stream) {
-          if (event.type === "done") result = event.message;
+          if (event.type === "done") { result = event.message; observedResult = event.message; }
+          if (event.type === "error") observedResult = event.error;
+          if (event.type === "done" || event.type === "error") {
+            await observation?.finish(observedResult, observedResult?.stopReason ?? "error");
+            observation = undefined;
+          }
           out.push(event);
         }
       } catch (e) {
         const aborted = signal.aborted;
+        await observation?.finish(observedResult, aborted ? "aborted" : "error");
+        observation = undefined;
         out.push({ type: "error", reason: aborted ? "aborted" : "error", error: {
           role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id,
           timestamp: Date.now(), stopReason: aborted ? "aborted" : "error", errorMessage: String(e),
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         } });
-      } finally { if (ticket) await release(ticket,result ? "done" : "failed",result); }
+      } finally {
+        await observation?.finish(observedResult, observedResult?.stopReason ?? (signal.aborted ? "aborted" : "error"));
+        if (ticket) await release(ticket,result ? "done" : "failed",result);
+      }
     })();
     return out;
   };

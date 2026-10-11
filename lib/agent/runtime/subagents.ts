@@ -1,3 +1,4 @@
+import { setToolObservationSources } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools } from "./admission";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { Type } from "typebox";
@@ -259,6 +260,7 @@ async function executeBody(
       },
     },
   ];
+  setToolObservationSources({ resident: tools.map(t => t.name) });
   const harness = new CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>({
     env: {} as ExecutionEnv,
     session,

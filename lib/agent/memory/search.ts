@@ -1,3 +1,4 @@
+import { observeRetrieval } from "../runtime/observation";
 // 记忆混合检索（my.memory_search 的实现）。
 //
 // 排序公式照抄 OpenClaw builtin 引擎（权重/阈值为 dist 实测值；关键词分是
@@ -73,38 +74,45 @@ export type MemorySearchResult = {
   note: string | null;
 };
 
-export async function searchMemory(userId: string, query: string, productionId: string | null = null): Promise<MemorySearchResult> {
-  await requireMemoryAccess(userId, productionId);
+async function searchMemoryImpl(userId: string, query: string, productionId: string | null, metrics: MemoryMetrics): Promise<MemorySearchResult> {
+  const accessStarted = performance.now();
+  try { await requireMemoryAccess(userId, productionId); }
+  finally { metrics.stages.access = performance.now() - accessStarted; }
+  const vectorStarted = performance.now();
   const pool = getPool();
-  const mode = embeddingMode();
   let note: string | null = null;
 
   // ── 向量车道可用性判定 + 查询嵌入 ──
   let queryVec: string | null = null;
-  if (mode === "none") {
-    note = "（embedding 未配置，本次为纯关键词检索）";
-  } else if (!(await ensureIndexIdentity())) {
-    note = "（索引与当前 embedding 配置不符，向量车道暂停待重建，本次为纯关键词检索）";
-  } else {
-    // fail-closed：这里失败直接抛，不落回纯关键词
-    try {
-      const q = await embedQuery(query);
-      queryVec = `[${q.embedding.join(",")}]`;
-      if (q.totalTokens > 0) {
-        pool
-          .query("INSERT INTO ai_usage (user_id, kind, model, tokens, billed_credits) VALUES ($1, 'embedding_query', $2, $3, $4)", [
-            userId, embeddingModel(), q.totalTokens, creditsFromEmbeddingTokens(q.totalTokens),
-          ])
-          .catch((e) => console.error("[memory-search] 用量记账失败（忽略）:", e));
+  try {
+    const mode = embeddingMode();
+    if (mode === "none") {
+      metrics.vectorReason = "not_configured";
+      note = "（embedding 未配置，本次为纯关键词检索）";
+    } else if (!(await ensureIndexIdentity())) {
+      metrics.vectorReason = "index_identity_mismatch";
+      note = "（索引与当前 embedding 配置不符，向量车道暂停待重建，本次为纯关键词检索）";
+    } else {
+      // fail-closed：这里失败直接抛，不落回纯关键词
+      try {
+        const q = await embedQuery(query);
+        queryVec = `[${q.embedding.join(",")}]`;
+        if (q.totalTokens > 0) {
+          pool
+            .query("INSERT INTO ai_usage (user_id, kind, model, tokens, billed_credits) VALUES ($1, 'embedding_query', $2, $3, $4)", [
+              userId, embeddingModel(), q.totalTokens, creditsFromEmbeddingTokens(q.totalTokens),
+            ])
+            .catch((e) => console.error("[memory-search] 用量记账失败（忽略）:", e));
+        }
+      } catch (err) {
+        if (err instanceof EmbeddingUnavailableError) {
+          throw new MemoryUnavailableError(`记忆检索暂不可用（embedding 供应商异常：${err.message}）`);
+        }
+        throw err;
       }
-    } catch (err) {
-      if (err instanceof EmbeddingUnavailableError) {
-        throw new MemoryUnavailableError(`记忆检索暂不可用（embedding 供应商异常：${err.message}）`);
-      }
-      throw err;
     }
-  }
-
+  } finally { metrics.stages.vector = performance.now() - vectorStarted; }
+  const queryStarted = performance.now();
   const qtokens = [...new Set(bigramTokens(query))];
   const tokenScoreSql = `(SELECT avg((c.text_tokens LIKE '%' || tt.tok || '%')::int) FROM unnest($4::text[]) AS tt(tok))`;
   type ScoredRow = LaneRow & { vscore: number; tscore: number };
@@ -115,6 +123,9 @@ export async function searchMemory(userId: string, query: string, productionId: 
       ORDER BY GREATEST(CASE WHEN c.embedding IS NULL OR $3::vector IS NULL THEN 0 ELSE 1-(c.embedding<=>$3::vector) END,COALESCE(${tokenScoreSql},0)) DESC LIMIT ${LANE_CANDIDATES}`,
     [userId, productionId, queryVec, qtokens]);
 
+  metrics.stages.candidates = performance.now() - queryStarted;
+  metrics.candidateCount = rows.length;
+  const scoringStarted = performance.now();
   // 单车道缺席时另一路独跑（该路权重升为 1.0，OpenClaw 同语义）
   const vWeight = queryVec ? VECTOR_WEIGHT : 0;
   const tWeight = queryVec ? TEXT_WEIGHT : 1;
@@ -124,17 +135,23 @@ export async function searchMemory(userId: string, query: string, productionId: 
     const weighted = vWeight * Number(row.vscore) + tWeight * Number(row.tscore);
     const hybrid = Math.max(weighted, KEYWORD_SOLO_WEIGHT * Number(row.tscore));
     const score = hybrid * recencyMultiplier(row.source, new Date(row.observed_at)) * importanceMultiplier(row.importance);
+    metrics.scores.push({ id: row.id, source: row.source, score, vector: Number(row.vscore), lexical: Number(row.tscore) });
     if (score < MIN_SCORE) continue;
     hits.push({ id: row.id, source: row.source, text: row.text, score, observedAt: new Date(row.observed_at) });
   }
   // 常驻条目量小，直接按关键词检索正文；不再建立长期记忆的第二份索引副本。
+  metrics.stages.scoring = performance.now() - scoringStarted;
+  const scopeStarted = performance.now();
   const scopes = [await readMemoryScope(userId, null)];
   if (productionId) scopes.push(await readMemoryScope(userId, productionId));
   for (const scope of scopes) for (const e of scope.entries) {
     const words = new Set(bigramTokens(e.body));
     const score = qtokens.length ? qtokens.filter(t => words.has(t)).length / qtokens.length : 0;
+    metrics.candidateCount = (metrics.candidateCount ?? 0) + 1;
+    metrics.scores.push({ id: e.id, source: e.source, score, vector: null, lexical: score });
     if (score >= MIN_SCORE) hits.push({ id: e.id, source: e.source, text: `${e.userEdited ? "[用户编辑]" : "[AI 记录，未经用户确认]"} ${e.body}`, score, observedAt: new Date(e.updatedAt) });
   }
+  metrics.stages.resident = performance.now() - scopeStarted;
   hits.sort((a,b) => b.score-a.score);
   const top = hits.slice(0, MAX_RESULTS);
 
@@ -151,6 +168,25 @@ export async function searchMemory(userId: string, query: string, productionId: 
   }
 
   return { hits: top, note };
+}
+
+type MemoryMetrics = {
+  stages: Record<string, number>; candidateCount?: number; vectorReason?: string;
+  scores: Array<{ id: string; source: string; score: number; vector: number | null; lexical: number }>;
+};
+export async function searchMemory(userId: string, query: string, productionId: string | null = null): Promise<MemorySearchResult> {
+  const observation = await observeRetrieval("memory_retrieval", "explicit", userId);
+  const metrics: MemoryMetrics = { stages: {}, scores: [] };
+  try {
+    const result = await searchMemoryImpl(userId, query, productionId, metrics);
+    await observation.finish({ ...metrics, status: "ok", reason: metrics.vectorReason ?? null,
+      returnedCount: result.hits.length, returnedIds: result.hits.map(h => h.id),
+      threshold: MIN_SCORE, limit: MAX_RESULTS, candidateLimit: LANE_CANDIDATES });
+    return result;
+  } catch (err) {
+    await observation.finish({ ...metrics, status: "error", reason: err instanceof MemoryUnavailableError ? "embedding_unavailable" : "retrieval_failed" });
+    throw err;
+  }
 }
 
 /** MCP 工具输出格式化。 */

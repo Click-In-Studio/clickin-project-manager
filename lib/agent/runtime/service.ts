@@ -1,3 +1,4 @@
+import { setToolObservationSources, addObservationTools, observeModelRequest, observeCompactionCheck } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait } from "./admission";
 import { cancelAdmissions, inputWaitReady, recoverAdmissions, continuationKey, completedChatMessages } from "./admission-db";
 import type { InputWait } from "./admission-types";
@@ -507,6 +508,10 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       available: tools.map((t) => t.mcpName),
     });
     const activeToolNames = new Set(tiers.active.map(exposedName));
+    setToolObservationSources(tiers.mode !== "tiered" ? { override: tiers.active.map(exposedName) } : Object.fromEntries(Object.entries({
+      resident: tiers.hot, page: tiers.page, recall: recalled, recent: used,
+      dependency: tiers.dependencies, dynamic: [...mmpSurface.tools.map(t => t.mcpName), ...attachmentLifecycle.toolNames],
+    }).map(([source, names]) => [source, names.map(exposedName)])), tiers.mode);
 
     const harness = new CoreAgentHarness({
       env: NO_ENV,
@@ -515,7 +520,11 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       activeToolNames: [...activeToolNames],
       // 冷层兜底闭环（补丁 #4）：模型按名调了不在本轮工具面里的工具（find_tools 搜到的，
       // 或它记得的）→ 从注册表临时加载。权限/制作语境仍在工具内部判定，分层≠权限。
-      resolveDeferredTool: ({ toolCall }) => toolByName.get(toolCall.name),
+      resolveDeferredTool: ({ toolCall }) => {
+        const tool = toolByName.get(toolCall.name);
+        if (tool) addObservationTools("deferred", [tool.name]);
+        return tool;
+      },
       systemPrompt: buildSystemPrompt(inject),
       model: CHAT_MODEL,
       thinkingLevel: "low",
@@ -532,9 +541,11 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     warmAttachmentsImpl = async (attachmentIds) => {
         if (!attachmentIds.length || !mmpSurface.capabilities.length) return;
         const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
-        for (const name of mmpAttachmentToolNamesFor(mmpSurface.capabilities, attachments)) {
+        const warmed = mmpAttachmentToolNamesFor(mmpSurface.capabilities, attachments);
+        for (const name of warmed) {
           activeToolNames.add(exposedName(name));
         }
+        addObservationTools("dynamic", warmed.map(exposedName));
         await harness.setTools(tools, [...activeToolNames]);
       };
     if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -1149,8 +1160,13 @@ export async function maybeCompact(
   const zero: CompactionCost = { usd: 0, tokens: 0, triggered: false };
   if (signal.aborted) return zero;
   const ctx = await session.buildContext();
-  const { tokens } = estimateContextTokens(ctx.messages);
-  if (!(runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS)) return zero;
+  const contextEstimate = estimateContextTokens(ctx.messages);
+  const { tokens } = contextEstimate;
+  const triggered = (runtimeOverrides.shouldCompactFn ?? shouldCompact)(tokens, CHAT_MODEL.contextWindow, DEFAULT_COMPACTION_SETTINGS);
+  const compactionObservation = await observeCompactionCheck({ contextEstimate, contextWindow: CHAT_MODEL.contextWindow,
+    reserveTokens: DEFAULT_COMPACTION_SETTINGS.reserveTokens, keepRecentTokens: DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
+    threshold: CHAT_MODEL.contextWindow - DEFAULT_COMPACTION_SETTINGS.reserveTokens, triggered });
+  if (!triggered) { await compactionObservation.finish("skipped"); return zero; }
   const cost: CompactionCost = { usd: 0, tokens: 0, triggered: true };
   const rt = llmRuntime();
   let compactionRequest = 0;
@@ -1158,10 +1174,21 @@ export async function maybeCompact(
     completeSimple: async (...args: Parameters<typeof rt.completeSimple>) => {
       const { currentAdmissionScope } = await import("./admission");
       const scope = currentAdmissionScope();
+      const queuedAt = performance.now();
       const ticket = scope ? await acquire(scope.runId, `compact:${await continuationKey(scope.runId)}:${compactionRequest++}`, "llm", signal) : undefined;
       let msg: Awaited<ReturnType<typeof rt.completeSimple>> | undefined;
-      try { msg = ticket?.state === "done" && ticket.result ? ticket.result as typeof msg : await rt.completeSimple(...args); }
-      finally { if (ticket) await release(ticket,msg ? "done" : "failed",msg); }
+      let observation: Awaited<ReturnType<typeof observeModelRequest>> | undefined;
+      try {
+        if (ticket?.state === "done" && ticket.result) msg = ticket.result as typeof msg;
+        else {
+          observation = await observeModelRequest(args[0], args[1], "compaction", performance.now() - queuedAt, args[2]?.maxTokens);
+          msg = await rt.completeSimple(...args);
+        }
+      }
+      finally {
+        await observation?.finish(msg, msg?.stopReason ?? (signal.aborted ? "aborted" : "error"));
+        if (ticket) await release(ticket,msg ? "done" : "failed",msg);
+      }
       if (!msg) throw new Error("压缩响应为空");
       if (msg.role === "assistant" && msg.usage) {
         cost.usd += usdOfUsage(msg.usage, COMPACTION_MODEL);
@@ -1176,13 +1203,16 @@ export async function maybeCompact(
     if (!result.ok) throw result.error;
     return { compaction: result.value };
   });
+  let compactionStatus: "ok" | "error" = "ok";
   try {
     await onCompacting?.();
     await harness.compact();
   } catch (err) {
+    compactionStatus = "error";
     console.error("[agent-runtime] compaction failed (continuing):", err);
   } finally {
     off();
+    await compactionObservation.finish(compactionStatus);
   }
   return cost;
 }
