@@ -1,12 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { sessionKeyOwnedBy } from "@/lib/agent/tools/session-identity-parse";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
-import { listPendingQuestions, questionSession, resolveQuestion } from "@/lib/agent/runtime/questions";
+import { listQuestions, questionSession, resolveQuestionDetailed } from "@/lib/agent/runtime/questions";
+import { EventPublisher } from "@/lib/agent/runtime/events";
+import { wakeSession } from "@/lib/agent/runtime/client";
 
 export const runtime = "nodejs";
 
-// ask_user 问题卡片的恢复与回答面。GET 用于重开会话时恢复待答卡片——卡片看不见就
-// 等于 agent 在隐形卡死；POST 把回答/取消送回，解除 agent 阻塞的 run。
+// ask_user 问题卡片的恢复与回答面。GET 恢复历史及待答卡片，前端按 toolCallId 放回
+// 原对话位置；POST 对 required 解除原 run，对 continue_independent 原子写入迟到回答 inbox。
 // 问题 id 以 aq_ 开头、在 agent_question 表里（前缀契约有测试钉住）。
 
 export async function GET(req: NextRequest) {
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const questions = await listPendingQuestions(sessionKey);
+    const questions = await listQuestions(sessionKey);
     return NextResponse.json({ questions });
   } catch (err) {
     return toErrorResponse(err);
@@ -69,9 +71,16 @@ export async function POST(req: NextRequest) {
     if (!sessionKey || !sessionKeyOwnedBy(sessionKey, auth.userId)) {
       return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
     }
-    const ok = await resolveQuestion(id, isCancel ? { cancel: true } : { answers: normalized });
-    if (!ok) return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
-    return NextResponse.json({ ok: true });
+    const question = await resolveQuestionDetailed(id, isCancel ? { cancel: true } : { answers: normalized });
+    if (!question) return NextResponse.json({ error: "问题不存在或已过期" }, { status: 404 });
+    if (question.waitMode === "continue_independent") {
+      const publisher = new EventPublisher(sessionKey,null);
+      publisher.publish({ type: "question-resolved",id,status: question.status,question });
+      await publisher.drain();
+      // 回答已随问题决议原子落进 inbox；唤醒失败也不会丢，runner 巡检会补消费。
+      await wakeSession(sessionKey).catch(() => {});
+    }
+    return NextResponse.json({ ok: true, question });
   } catch (err) {
     return toErrorResponse(err);
   }

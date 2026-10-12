@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/ui/Markdown";
 import {
   applyStreamLine,
+  mergeRestoredQuestions,
   type Bubble,
   type QuestionInfo,
   type QuestionItem,
@@ -33,6 +34,8 @@ type SessionSummary = {
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;
+  pendingQuestionCount?: number;
+  latestQuestionAt?: number;
   status?: "queued" | "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
 };
 
@@ -59,6 +62,20 @@ const subscribeMobileViewport = (onChange: () => void) => {
 };
 const getMobileViewportSnapshot = () => window.matchMedia(MOBILE_VIEWPORT_QUERY).matches;
 const getServerMobileViewportSnapshot = () => false;
+
+function questionAge(createdAtMs?: number): string {
+  if (!createdAtMs) return "刚刚";
+  const minutes = Math.max(0,Math.floor((Date.now()-createdAtMs)/60_000));
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes/60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours/24)} 天前`;
+}
+
+function questionTimeTitle(createdAtMs?: number): string | undefined {
+  return createdAtMs ? new Date(createdAtMs).toLocaleString("zh-CN",{ hour12: false }) : undefined;
+}
 
 // AI 助手浮动 popout——退休 /agent 独立页面（components/AgentChatClient 原逻辑
 // 迁移至此，改为 AppShell 内挂载）。会话范围由所在语境决定，不再有「个人/关联
@@ -149,6 +166,10 @@ export default function AgentPopout({
     [productionId],
   );
   const scopedSessions = sessions.filter((s) => inScope(s.key));
+  const pendingQuestions = bubbles.filter(
+    (bubble): bubble is Extract<Bubble,{ kind: "question" }> =>
+      bubble.kind === "question" && !bubble.status && bubble.question.status === "pending",
+  );
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -371,34 +392,28 @@ export default function AgentPopout({
           messages: ({ role: "user" | "assistant" | "thinking"; content: string; attachments?: ChatAttachment[] } | { role: "tool"; name: string; id?: string; result?: string; attachments?: ChatAttachment[] })[];
         };
         if (activeKeyRef.current !== key) return;
-        setBubbles(
-          data.messages.map((m) =>
+        const history = data.messages.map((m) =>
             m.role === "tool"
               ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
               : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
-          )
-        );
+          ) as Bubble[];
+        setBubbles(history);
       }
-    } finally {
-      if (activeKeyRef.current === key) setLoadingHistory(false);
-    }
-    if (status === "queued" || status === "running" || status === "compacting") {
-      // 待答的 ask_user 问题卡片先恢复再接流：question.list 是真实事实来源，
-      // 卡片看不见就等于 agent 在隐形卡死（run 阻塞在 waitAnswer 直到过期）。
-      // 经 reducer 注入以复用按 id 去重——实时 question 事件再来也不会重卡。
       try {
         const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`);
         if (qres.ok) {
           const data = (await qres.json()) as { questions?: QuestionInfo[] };
           if (activeKeyRef.current === key && data.questions?.length) {
-            setBubbles((prev) =>
-              data.questions!.reduce((acc, q) => applyStreamLine(acc, { type: "question", question: q }), prev)
-            );
+            setBubbles((prev) => mergeRestoredQuestions(prev,data.questions!));
           }
         }
       } catch {
-        // 恢复失败不挡接流；卡片还有实时事件这条路
+        // 恢复失败不挡接流；进行中的问题还有实时事件这条路
       }
+    } finally {
+      if (activeKeyRef.current === key) setLoadingHistory(false);
+    }
+    if (status === "queued" || status === "running" || status === "compacting") {
       const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`);
       consumeStream(res, key);
     }
@@ -760,17 +775,25 @@ export default function AgentPopout({
         setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "回答提交失败" }]);
         return;
       }
-      // 乐观翻状态；question-resolved 事件回来会按 id 再翻一次（幂等）。
-      // 事件仍然要转发渲染——回答也可能来自别的 OpenClaw 客户端。
-      const status = "cancel" in payload ? "cancelled" : "answered";
+      const data = (await res.json().catch(() => ({}))) as { question?: QuestionInfo };
+      const status = data.question?.status ?? ("cancel" in payload ? "cancelled" : "answered");
       setBubbles((prev) =>
         prev.map((b) =>
-          b.kind === "question" && b.question.id === questionId ? { ...b, status, resolving: false } : b
+          b.kind === "question" && b.question.id === questionId
+            ? { ...b, ...(data.question ? { question: data.question } : {}), status, resolving: false }
+            : b
         )
       );
+      void refreshSessions();
     },
-    []
+    [refreshSessions]
   );
+
+  const revealQuestion = useCallback((id: string) => {
+    const element = scrollRef.current?.querySelector<HTMLElement>(`[data-question-id="${id}"]`);
+    element?.scrollIntoView({ behavior: "smooth",block: "center" });
+    element?.focus({ preventScroll: true });
+  },[]);
 
   const removeSession = useCallback(async (key: string) => {
     if (!confirm("删除这个对话？")) return;
@@ -838,6 +861,11 @@ export default function AgentPopout({
                 {activeSession ? activeSession.title : "新对话"}
               </span>
             </span>
+            {!!activeSession?.pendingQuestionCount && (
+              <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                待补充 {activeSession.pendingQuestionCount}
+              </span>
+            )}
             <span className="shrink-0 text-[10px] text-[var(--muted)]">{pickerOpen ? "▲" : "▼"}</span>
           </button>
           <button
@@ -888,6 +916,14 @@ export default function AgentPopout({
                   />
                 )}
                 <span className="min-w-0 flex-1 truncate text-[var(--ink)]">{s.title}</span>
+                {!!s.pendingQuestionCount && (
+                  <span
+                    className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                    title={s.latestQuestionAt ? `最近提问：${questionTimeTitle(s.latestQuestionAt)}` : undefined}
+                  >
+                    待补充 {s.pendingQuestionCount}
+                  </span>
+                )}
                 <span className="flex shrink-0 gap-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                   <button
                     onClick={(e) => { e.stopPropagation(); renameSession(s.key, s.title); }}
@@ -912,6 +948,22 @@ export default function AgentPopout({
 
       {statusBanner}
       {activeKey && <SubagentPanel key={activeKey} sessionKey={activeKey} onParentRun={onSubagentParentRun} />}
+      {pendingQuestions.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+          <span className="shrink-0 font-semibold">待你补充 {pendingQuestions.length}</span>
+          {pendingQuestions.map((bubble) => (
+            <button
+              key={bubble.question.id}
+              type="button"
+              onClick={() => revealQuestion(bubble.question.id)}
+              className="max-w-44 shrink-0 truncate rounded-md border border-amber-300 bg-white px-2 py-1 text-left hover:bg-amber-100"
+              title={`${bubble.question.questions[0]?.question ?? "查看问题"} · ${questionTimeTitle(bubble.question.createdAtMs) ?? ""}`}
+            >
+              {bubble.question.questions[0]?.header ?? "问题"} · {questionAge(bubble.question.createdAtMs)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 聊天区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
@@ -1092,7 +1144,7 @@ export default function AgentPopout({
           }
           if (b.kind === "question") {
             return (
-              <div key={i} className="flex justify-start">
+              <div key={i} className="flex justify-start" data-question-id={b.question.id} tabIndex={-1}>
                 <QuestionCard
                   question={b.question}
                   status={b.status}
@@ -1488,15 +1540,15 @@ function ToolCallBubble({
   );
 }
 
-/** ask_user 问题卡片：AI 主动向人索取输入，run 阻塞到有人回答或问题过期
- * （默认 15 分钟）。单题单选且不允许自由文本时点选项即提交；其余情况选完
- * 按"提交回答"。
+/** ask_user 问题卡片：required 会阻塞原 run；continue_independent 保留待答卡，
+ * 同时只继续卡片上写明的独立工作。单题单选且不允许自由文本时点选项即提交；
+ * 其余情况选完按"提交回答"。
  *
  * 曾有一支 isSecret（password 输入框、不回显）——那是照着网关 question.* 协议
  * 写的前向兼容代码。自建运行时的 ask_user schema 刻意不带这个字段：回答会原样
  * 进工具结果与 transcript 落库，"不回显"根本兑现不了；助手也没有任何索取凭据的
  * 正当理由（TOOLS.md 已明写不要问）。要加回来先解决落库明文问题。 */
-function QuestionCard({
+export function QuestionCard({
   question,
   status,
   resolving,
@@ -1546,21 +1598,50 @@ function QuestionCard({
     return out;
   };
   const ready = collectAnswers() !== null;
+  const resolvedStatus = status ?? (question.status !== "pending" ? question.status : undefined);
+  const askedWhen = questionAge(question.createdAtMs);
+  const askedTitle = questionTimeTitle(question.createdAtMs);
 
-  if (status) {
+  if (resolvedStatus) {
     const label =
-      status === "answered" ? "✓ 已回答" : status === "cancelled" ? "已取消提问" : status === "expired" ? "已过期" : `已处理（${status}）`;
+      resolvedStatus === "answered" ? "✓ 已回答" : resolvedStatus === "cancelled"
+        ? question.cancellationReason ?? "已取消提问"
+        : resolvedStatus === "expired" ? "已过期" : `已处理（${resolvedStatus}）`;
     return (
-      <div className="max-w-[92%] rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-3 text-sm">
-        <p className="font-medium text-zinc-800">❓ AI 提问{question.questions.length > 1 ? `（${question.questions.length} 题）` : `：${question.questions[0]?.question ?? ""}`}</p>
+      <div className="w-full max-w-[92%] rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-3 text-sm">
+        <div className="flex items-start justify-between gap-3">
+          <p className="font-medium text-zinc-800">AI 提问{question.questions.length > 1 ? `（${question.questions.length} 题）` : `：${question.questions[0]?.question ?? ""}`}</p>
+          <span className="shrink-0 text-[10px] text-zinc-500" title={askedTitle}>{askedWhen}</span>
+        </div>
         <p className="mt-1.5 text-xs font-medium text-zinc-600">{label}</p>
+        {resolvedStatus === "answered" && question.answer && (
+          <div className="mt-1.5 space-y-0.5 text-xs text-zinc-600">
+            {question.questions.map((item) => (
+              <p key={item.questionId}>{item.header}：{question.answer?.[item.questionId]?.join("、") ?? "（未回答）"}</p>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="max-w-[92%] rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-3 text-sm">
-      <p className="font-medium text-zinc-800">❓ AI 需要你的选择才能继续</p>
+    <div className="w-full max-w-[92%] rounded-xl border border-indigo-300 bg-indigo-50 px-3.5 py-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium text-zinc-800">
+            {question.waitMode === "continue_independent" ? "待你补充" : "需要你的选择才能继续"}
+          </p>
+          <p className="mt-0.5 text-[10px] text-zinc-500" title={askedTitle}>提问于 {askedWhen}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+          question.waitMode === "continue_independent" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+        }`}>
+          {question.waitMode === "continue_independent"
+            ? question.originRunStatus === "completed" ? "其他部分已完成" : "其他部分继续中"
+            : "正在等待"}
+        </span>
+      </div>
       {question.questions.map((item) => (
         <div key={item.questionId} className="mt-2">
           <p className="text-xs text-zinc-700">
@@ -1601,6 +1682,12 @@ function QuestionCard({
           )}
         </div>
       ))}
+      {question.continuation && (
+        <div className="mt-2.5 space-y-1 rounded-lg border border-indigo-200 bg-white/70 px-2.5 py-2 text-[11px] leading-relaxed text-zinc-600">
+          <p><span className="font-medium text-emerald-700">已继续：</span>{question.continuation.continueWith}</p>
+          <p><span className="font-medium text-amber-700">仍等待：</span>{question.continuation.blockedUntilAnswer}</p>
+        </div>
+      )}
       <div className="mt-2.5 flex gap-2">
         {!quickSubmit && (
           <button
@@ -1619,7 +1706,7 @@ function QuestionCard({
           onClick={onCancel}
           className="rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-40"
         >
-          取消提问
+          {question.waitMode === "continue_independent" ? "不再需要回答" : "取消提问"}
         </button>
       </div>
     </div>

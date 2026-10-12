@@ -123,8 +123,10 @@ COL|agent_observation|run_id|text|text|YES|
 COL|agent_observation|started_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_observation|user_id|uuid|uuid|YES|
 COL|agent_question|answer|jsonb|jsonb|YES|
+COL|agent_question|cancellation_reason|text|text|YES|
+COL|agent_question|continuation|jsonb|jsonb|NO|'{}'::jsonb
 COL|agent_question|created_at|timestamp with time zone|timestamptz|NO|now()
-COL|agent_question|expires_at|timestamp with time zone|timestamptz|NO|
+COL|agent_question|expires_at|timestamp with time zone|timestamptz|YES|
 COL|agent_question|id|text|text|NO|
 COL|agent_question|payload|jsonb|jsonb|NO|
 COL|agent_question|resolved_at|timestamp with time zone|timestamptz|YES|
@@ -132,6 +134,7 @@ COL|agent_question|run_id|text|text|NO|
 COL|agent_question|session_id|text|text|NO|
 COL|agent_question|status|text|text|NO|'pending'::text
 COL|agent_question|tool_call_id|text|text|NO|
+COL|agent_question|wait_mode|text|text|NO|'required'::text
 COL|agent_run_attachment_access|access_kind|text|text|NO|
 COL|agent_run_attachment_access|attachment_id|text|text|NO|
 COL|agent_run_attachment_access|run_id|text|text|NO|
@@ -1301,6 +1304,7 @@ CON|agent_question|agent_question_pkey|PRIMARY KEY (id)
 CON|agent_question|agent_question_run_id_fkey|FOREIGN KEY (run_id) REFERENCES agent_run(id) ON DELETE CASCADE
 CON|agent_question|agent_question_session_id_fkey|FOREIGN KEY (session_id) REFERENCES agent_session(id) ON DELETE CASCADE
 CON|agent_question|agent_question_status_check|CHECK ((status = ANY (ARRAY['pending'::text, 'answered'::text, 'cancelled'::text, 'expired'::text])))
+CON|agent_question|agent_question_wait_mode_check|CHECK ((wait_mode = ANY (ARRAY['required'::text, 'continue_independent'::text])))
 CON|agent_run_attachment_access|agent_run_attachment_access_access_kind_check|CHECK ((access_kind = ANY (ARRAY['attached'::text, 'preflight'::text, 'read'::text, 'mmp_capability'::text])))
 CON|agent_run_attachment_access|agent_run_attachment_access_attachment_id_fkey|FOREIGN KEY (attachment_id) REFERENCES agent_session_attachment(id) ON DELETE CASCADE
 CON|agent_run_attachment_access|agent_run_attachment_access_pkey|PRIMARY KEY (run_id, attachment_id, access_kind)
@@ -1951,6 +1955,7 @@ IDX|agent_observation|agent_observation_pkey|CREATE UNIQUE INDEX agent_observati
 IDX|agent_observation|agent_observation_run_idx|CREATE INDEX agent_observation_run_idx ON public.agent_observation USING btree (run_id, started_at)
 IDX|agent_question|agent_question_pending_idx|CREATE INDEX agent_question_pending_idx ON public.agent_question USING btree (status, expires_at) WHERE (status = 'pending'::text)
 IDX|agent_question|agent_question_pkey|CREATE UNIQUE INDEX agent_question_pkey ON public.agent_question USING btree (id)
+IDX|agent_question|agent_question_session_tool_call_idx|CREATE UNIQUE INDEX agent_question_session_tool_call_idx ON public.agent_question USING btree (session_id, tool_call_id)
 IDX|agent_run_attachment_access|agent_run_attachment_access_pkey|CREATE UNIQUE INDEX agent_run_attachment_access_pkey ON public.agent_run_attachment_access USING btree (run_id, attachment_id, access_kind)
 IDX|agent_run|agent_run_active_idx|CREATE INDEX agent_run_active_idx ON public.agent_run USING btree (status, heartbeat_at) WHERE (status = ANY (ARRAY['running'::text, 'compacting'::text, 'awaiting_approval'::text, 'awaiting_answer'::text]))
 IDX|agent_run|agent_run_delegation_key_key|CREATE UNIQUE INDEX agent_run_delegation_key_key ON public.agent_run USING btree (delegation_key)

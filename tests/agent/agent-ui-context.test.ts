@@ -80,6 +80,11 @@ describe("stripUiContext", () => {
     expect(truncated).toContain("<clickin-ui-context>");
     expect(stripUiContext(truncated)).toBe("");
   });
+
+  it("迟到回答只展示用户答案，不把持久关联脚手架显示成聊天正文", () => {
+    const message="<clickin-question-answer>\n问题 id：aq_1；原工具调用 id：c_1\n</clickin-question-answer>\n用户的回答：\n- 风格：舞台化";
+    expect(stripUiContext(message)).toBe("用户的回答：\n- 风格：舞台化");
+  });
 });
 
 describe("会话附件上下文（#704）", () => {

@@ -1091,6 +1091,130 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
     const bubbles = lines.reduce<Bubble[]>((acc, l) => applyStreamLine(acc, l), []);
     expect(bubbles.filter((b) => b.kind === "question").map((b) => (b as { status?: string }).status)).toEqual(["answered", "cancelled"]);
   });
+
+  it("非阻塞提问立即继续独立工作；迟到回答按 questionId 只入 inbox 一次并启动后续执行", async () => {
+    const { resolveQuestion,listQuestions } = await import("@/lib/agent/runtime/questions");
+    const deferred: ToolCall = {
+      type: "toolCall",id: "c_deferred",name: exposedName("ask_user"),arguments: {
+        mode: "continue_independent",
+        continueWith: "核对枪声次数、人物动作和已有素材",
+        blockedUntilAnswer: "确定最终音色并写入 cue",
+        questions: [{ questionId: "style",header: "枪声风格",question: "这一枪希望写实还是舞台化？",
+          options: [{ label: "写实" },{ label: "舞台化" }] }],
+      },
+    };
+    const { streamFn,seen } = scripted([
+      { calls: [deferred] },
+      { text: "独立核对已完成，音色仍等待你的选择。" },
+      { text: "已按迟到回答继续未完成部分。" },
+    ]);
+    runtimeOverrides.streamFn=streamFn;
+    const key=createNewSessionKey(userId);
+    sessions.push(key);
+    await startRun({sessionId:key,userId,message:"整理第三幕枪声"});
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+
+    const [question] = await listQuestions(key);
+    expect(question).toMatchObject({
+      toolCallId: "c_deferred",waitMode: "continue_independent",status: "pending",
+      continuation: { continueWith: "核对枪声次数、人物动作和已有素材",blockedUntilAnswer: "确定最终音色并写入 cue" },
+    });
+    expect(question.expiresAtMs).toBeUndefined();
+    expect((await listSessions(userId)).find((session)=>session.key===key)).toMatchObject({pendingQuestionCount:1});
+    expect((await getPool().query("SELECT status FROM agent_run WHERE session_id=$1 ORDER BY started_at DESC LIMIT 1",[key])).rows[0].status).toBe("completed");
+    expect(JSON.stringify(seen[1].messages)).toContain("pending 不代表默认选择、跳过或同意");
+    expect(JSON.stringify(seen[1].messages)).toContain("只可继续：核对枪声次数、人物动作和已有素材");
+
+    const results=await Promise.all([
+      resolveQuestion(question.id,{answers:{style:["舞台化"]}}),
+      resolveQuestion(question.id,{answers:{style:["写实"]}}),
+    ]);
+    expect(results.sort()).toEqual([false,true]);
+    const inbox = await getPool().query<{ message: string; payload: { questionAnswer: { questionId: string } } }>(
+      "SELECT message,payload FROM agent_session_inbox WHERE session_id=$1",[key],
+    );
+    expect(inbox.rows).toHaveLength(1);
+    expect(inbox.rows[0].payload.questionAnswer.questionId).toBe(question.id);
+    expect(inbox.rows[0].message).toContain(`问题 id：${question.id}`);
+    expect(inbox.rows[0].message).toContain("不要自动撤销已经落地的业务写入");
+
+    const cursor=(await readEventsSince(key,0)).at(-1)?.seq ?? 0;
+    await (await import("@/lib/agent/runtime/service")).dispatchPendingSession(key);
+    await collectUntilTerminal(key,10_000,cursor);
+    await waitForIdle(key);
+    expect(seen).toHaveLength(3);
+    expect(JSON.stringify(seen[2].messages)).toContain(`<clickin-question-answer>`);
+    expect(JSON.stringify(seen[2].messages)).toContain(`问题 id：${question.id}`);
+    expect((await getPool().query("SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id=$1",[key])).rows[0].n).toBe(0);
+  });
+
+  it("回答已到但 deferred 工具结果尚未落库时崩溃，恢复只消费答案一次", async () => {
+    const { PgSessionStorage }=await import("@/lib/agent/runtime/pg-session-storage");
+    const { Session }=await import("../../vendor/openclaw/packages/agent-core/src/harness/session/session");
+    const { newRunId }=await import("@/lib/agent/runtime/ids");
+    const { createOrReuseQuestion,resolveQuestion }=await import("@/lib/agent/runtime/questions");
+    const key=createNewSessionKey(userId);
+    sessions.push(key);
+    const storage=await PgSessionStorage.create({id:key,userId,productionId:null});
+    const session=new Session(storage);
+    const runId=newRunId();
+    const call: ToolCall={type:"toolCall",id:"c_deferred_recovery",name:exposedName("ask_user"),arguments:{
+      mode:"continue_independent",continueWith:"核对动作",blockedUntilAnswer:"确定音色",
+      questions:[{questionId:"style",header:"风格",question:"写实还是舞台化？",options:[{label:"写实"},{label:"舞台化"}]}],
+    }};
+    await session.appendMessage({role:"user",content:[{type:"text",text:"整理枪声"}],timestamp:Date.now()});
+    await session.appendMessage({...base(),content:[call],stopReason:"toolUse"});
+    await getPool().query(
+      `INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at,model)
+       VALUES($1,$2,'running','dead:1',now()-interval '5 minutes',$3)`,[runId,key,CHAT_MODEL.id],
+    );
+    const question=await createOrReuseQuestion({
+      runId,sessionId:key,toolCallId:call.id,waitMode:"continue_independent",
+      continuation:{continueWith:"核对动作",blockedUntilAnswer:"确定音色"},
+      questions:call.arguments.questions as never,
+    });
+    expect(await resolveQuestion(question.id,{answers:{style:["舞台化"]}})).toBe(true);
+    expect((await getPool().query("SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id=$1",[key])).rows[0].n).toBe(1);
+
+    const { streamFn,seen }=scripted([{text:"已按舞台化继续未完成部分"}]);
+    runtimeOverrides.streamFn=streamFn;
+    expect(await resumeOrphans(key)).toBe(1);
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(JSON.stringify(seen[0].messages)).toContain("用户的回答");
+    expect(JSON.stringify(seen[0].messages)).not.toContain("<clickin-question-answer>");
+    expect((await getPool().query("SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id=$1",[key])).rows[0].n).toBe(0);
+  });
+
+  it("同轮多个待补充问题与新指令交错时，各自按持久 id 排队", async () => {
+    runtimeOverrides.streamFn=scripted([{ text:"先建立会话" }]).streamFn;
+    const key=createNewSessionKey(userId);
+    sessions.push(key);
+    const started=await startRun({sessionId:key,userId,message:"开始整理"});
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+    const { createOrReuseQuestion,resolveQuestion } = await import("@/lib/agent/runtime/questions");
+    const { enqueueSessionInput,pendingInputsForSession } = await import("@/lib/agent/runtime/session-inbox");
+    const makeQuestion=(toolCallId:string,questionId:string)=>createOrReuseQuestion({
+      runId:started.runId,sessionId:key,toolCallId,waitMode:"continue_independent",
+      continuation:{continueWith:`继续 ${questionId}`,blockedUntilAnswer:`等待 ${questionId}`},
+      questions:[{questionId,header:questionId,question:`问题 ${questionId}？`,options:[{label:"甲"},{label:"乙"}]}],
+    });
+    const [first,second]=await Promise.all([makeQuestion("call_first","q_first"),makeQuestion("call_second","q_second")]);
+
+    expect(await resolveQuestion(second.id,{answers:{q_second:["乙"]}})).toBe(true);
+    await enqueueSessionInput({sessionId:key,runId:null,message:"用户追加的新指令",attachmentIds:[]});
+    expect(await resolveQuestion(first.id,{answers:{q_first:["甲"]}})).toBe(true);
+
+    const queued=await pendingInputsForSession(key);
+    expect(queued).toHaveLength(3);
+    expect(queued[0].message).toContain(`问题 id：${second.id}`);
+    expect(queued[1].message).toBe("用户追加的新指令");
+    expect(queued[2].message).toContain(`问题 id：${first.id}`);
+    expect(queued[0].message).not.toContain(first.id);
+    expect(queued[2].message).not.toContain(second.id);
+  });
 });
 
 describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕、不重问", () => {
