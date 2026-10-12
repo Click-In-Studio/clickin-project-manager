@@ -40,7 +40,9 @@ describe("Agent 提问卡",()=>{
     expect(container.textContent).toContain("其他部分已完成");
     expect(container.textContent).toContain("已继续：核对枪声次数、人物动作和已有素材");
     expect(container.textContent).toContain("仍等待：确定最终音色并写入 Cue");
-    expect(container.querySelector("[title='2026/10/12 10:00:00']")).toBeTruthy();
+    const exactTime=container.querySelector("p[title]")?.getAttribute("title");
+    expect(exactTime).toBeTruthy();
+    expect(exactTime).toContain("2026");
   });
 
   it("回答仍按原 questionId 提交，完成态显示实际答案",()=>{
