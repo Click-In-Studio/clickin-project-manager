@@ -1,6 +1,7 @@
 // next 侧调用运行时的统一入口（#367 §4.2 进程边界）。
 //
-// 只有三个动作需要触达"执行者"（它们碰进程内的 harness）：发起 run / 中途插话 / 中止。
+// 只有四个动作需要触达"执行者"（它们碰进程内的 harness）：发起 run / 中途插话 /
+// inbox 唤醒 / 中止。
 // 其余（历史、列表、改名、审批与提问的决议）都是 DB 读写，next 直接做，与执行者无关——
 // 观看者与执行者解耦（§4.4 ③）的自然结果。
 //
@@ -52,6 +53,12 @@ export async function abortRun(sessionId: string): Promise<boolean> {
   if (!runnerUrl()) return service.abortRun(sessionId);
   const r = await post<{ aborted: boolean }>("/runs/abort", { sessionId });
   return r.aborted;
+}
+
+/** inbox 内容已经由调用方事务性落库；这里只负责让空闲会话尽快接着跑。 */
+export async function wakeSession(sessionId: string): Promise<void> {
+  if (!runnerUrl()) return service.dispatchPendingSession(sessionId);
+  await post("/runs/wake", { sessionId });
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

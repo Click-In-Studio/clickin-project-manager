@@ -27,10 +27,24 @@ export type QuestionItem = {
   multiSelect?: boolean;
   isOther?: boolean;
 };
+export type QuestionWaitMode = "required" | "continue_independent";
+export type QuestionContinuation = {
+  continueWith: string;
+  blockedUntilAnswer: string;
+};
 export type QuestionInfo = {
   id: string;
+  toolCallId: string;
   questions: QuestionItem[];
+  waitMode: QuestionWaitMode;
+  continuation?: QuestionContinuation;
+  status: "pending" | "answered" | "cancelled" | "expired";
+  answer?: Record<string, string[]>;
+  cancellationReason?: string;
+  createdAtMs: number;
+  resolvedAtMs?: number;
   expiresAtMs?: number;
+  originRunStatus?: string;
 };
 
 export type Bubble =
@@ -58,7 +72,7 @@ export type StreamLine =
   | { type: "approval"; approval?: ApprovalInfo }
   | { type: "approval-resolved"; id?: string; decision?: string }
   | { type: "question"; question?: QuestionInfo }
-  | { type: "question-resolved"; id?: string; status?: string }
+  | { type: "question-resolved"; id?: string; status?: string; question?: QuestionInfo }
   | { type: "ping" }
   | { type: "session"; key?: string }
   | { type: "compacting"; active: boolean }
@@ -215,14 +229,23 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       if (last?.kind === "assistant" && last.streaming) {
         next[next.length - 1] = { kind: "assistant", text: last.text };
       }
-      next.push({ kind: "question", question: line.question });
+      next.push({
+        kind: "question",
+        question: line.question,
+        ...(line.question.status !== "pending" ? { status: line.question.status } : {}),
+      });
       return next;
     }
     case "question-resolved": {
       for (let i = next.length - 1; i >= 0; i--) {
         const b = next[i];
         if (b.kind === "question" && b.question.id === line.id) {
-          next[i] = { ...b, status: line.status || "answered", resolving: false };
+          next[i] = {
+            ...b,
+            ...(line.question ? { question: line.question } : {}),
+            status: line.status || line.question?.status || "answered",
+            resolving: false,
+          };
           break;
         }
       }
@@ -256,4 +279,24 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
     default:
       return next; // ping/session 等非渲染事件
   }
+}
+
+/** 历史接口只有 toolResult；按 toolCallId 把问题卡插回原工具位置，不堆到对话末尾。 */
+export function mergeRestoredQuestions(bubbles: Bubble[], questions: QuestionInfo[]): Bubble[] {
+  const next = [...bubbles];
+  for (const question of questions) {
+    const existing = next.findIndex((bubble) => bubble.kind === "question" && bubble.question.id === question.id);
+    const card: Bubble = {
+      kind: "question", question,
+      ...(question.status !== "pending" ? { status: question.status } : {}),
+    };
+    if (existing >= 0) {
+      next[existing] = card;
+      continue;
+    }
+    const toolIndex = next.findIndex((bubble) => bubble.kind === "tool" && bubble.id === question.toolCallId);
+    if (toolIndex < 0) next.push(card);
+    else next.splice(toolIndex+1,0,card);
+  }
+  return next;
 }

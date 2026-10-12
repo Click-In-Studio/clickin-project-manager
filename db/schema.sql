@@ -3669,12 +3669,19 @@ CREATE TABLE IF NOT EXISTS agent_question (
   tool_call_id TEXT        NOT NULL,
   payload      JSONB       NOT NULL,           -- questions[]（形态对齐 stream-reducer 的 QuestionInfo）
   answer       JSONB       NULL,
+  wait_mode    TEXT        NOT NULL DEFAULT 'required'
+                 CHECK (wait_mode IN ('required', 'continue_independent')),
+  continuation JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  cancellation_reason TEXT NULL,
   status       TEXT        NOT NULL DEFAULT 'pending'
                  CHECK (status IN ('pending', 'answered', 'cancelled', 'expired')),
-  expires_at   TIMESTAMPTZ NOT NULL,
+  expires_at   TIMESTAMPTZ NULL,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at  TIMESTAMPTZ NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS agent_question_session_tool_call_idx
+  ON agent_question (session_id, tool_call_id);
 
 CREATE INDEX IF NOT EXISTS agent_question_pending_idx
   ON agent_question (status, expires_at)

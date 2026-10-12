@@ -288,10 +288,17 @@ export async function abortRun(
   await getPool().query("DELETE FROM agent_session_inbox WHERE session_id=$1", [
     sessionId,
   ]);
+  const cancelQuestionRows = async (runIds: string[]) => {
+    const ids = await (await import("./questions")).cancelQuestionsForRuns(runIds,reason);
+    if (ids.length === 0) return;
+    const publisher = new EventPublisher(sessionId,null);
+    for (const id of ids) publisher.publish({ type: "question-resolved",id,status: "cancelled" });
+    await publisher.drain();
+  };
   if (!run) {
     const cancelled = await getPool().query<{ id: string }>("UPDATE agent_run SET status='aborted',ended_at=now(),input_wait=NULL WHERE session_id=$1 AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer') RETURNING id", [sessionId]);
     for (const row of cancelled.rows) await cancelAdmissions(row.id);
-    await getPool().query("UPDATE agent_question SET status='cancelled',resolved_at=now() WHERE session_id=$1 AND status='pending'", [sessionId]);
+    await cancelQuestionRows(cancelled.rows.map((row) => row.id));
     await getPool().query("UPDATE agent_approval SET status='cancelled',resolved_at=now() WHERE session_id=$1 AND status='pending'", [sessionId]);
     for (const row of cancelled.rows) {
       const publisher = new EventPublisher(sessionId,row.id);
@@ -301,6 +308,7 @@ export async function abortRun(
     if (pending) await pending.done.catch(() => {});
     return Boolean(pending || cancelled.rowCount);
   }
+  await cancelQuestionRows([...new Set([run.runId,pending?.runId].filter((id): id is string => !!id))]);
   await run.abortHarness();
   return true;
 }
@@ -819,6 +827,12 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       status = "aborted";
       error = COST_CAP_ERROR;
     }
+    if (!detached && (status === "aborted" || status === "failed")) {
+      const questionIds = await (await import("./questions")).cancelQuestionsForRuns(
+        [runId], status === "failed" ? "原任务执行失败，不再需要回答" : "原任务已停止，不再需要回答",
+      );
+      for (const id of questionIds) publisher.publish({ type: "question-resolved",id,status: "cancelled" });
+    }
     await publisher.drain();
     if (detached) {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；
@@ -1223,13 +1237,17 @@ function textOf(content: unknown): string {
 }
 
 export async function listSessions(userId: string): Promise<ChatSessionSummary[]> {
-  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean; queued_run: boolean }>(
+  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean; queued_run: boolean; pending_question_count: number; latest_question_at: Date | null }>(
     `SELECT s.id, s.title, s.updated_at,
        EXISTS(SELECT 1 FROM agent_run r WHERE r.session_id=s.id AND r.status='queued') AS queued_run,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
                  AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')) AS active_run,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
                  AND r.status = 'compacting') AS compacting_run,
+       (SELECT count(*)::int FROM agent_question q WHERE q.session_id=s.id AND q.status='pending'
+         AND (q.expires_at IS NULL OR q.expires_at>now())) AS pending_question_count,
+       (SELECT max(q.created_at) FROM agent_question q WHERE q.session_id=s.id AND q.status='pending'
+         AND (q.expires_at IS NULL OR q.expires_at>now())) AS latest_question_at,
        (SELECT e.payload->'message'->'content'->0->>'text' FROM agent_session_entry e
          WHERE e.session_id = s.id AND e.type = 'message' AND e.payload->'message'->>'role' = 'user'
          ORDER BY e.seq LIMIT 1) AS first_user,
@@ -1246,6 +1264,8 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
     title: row.title || stripUiContext(row.first_user ?? "").trim().slice(0, 60) || "新对话",
     lastMessagePreview: row.last_text ? stripUiContext(row.last_text).slice(0, 120) : undefined,
     updatedAt: row.updated_at.getTime(),
+    pendingQuestionCount: row.pending_question_count,
+    ...(row.latest_question_at ? { latestQuestionAt: row.latest_question_at.getTime() } : {}),
     status: row.compacting_run ? "compacting" : row.active_run ? "running" : row.queued_run ? "queued" : "done",
   }));
 }

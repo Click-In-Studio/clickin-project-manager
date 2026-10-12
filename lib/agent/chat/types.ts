@@ -3,6 +3,8 @@ export interface ChatSessionSummary {
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;
+  pendingQuestionCount?: number;
+  latestQuestionAt?: number;
   status?: "queued" | "running" | "compacting" | "done" | "failed" | "killed" | "timeout";
 }
 

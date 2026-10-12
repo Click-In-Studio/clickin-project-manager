@@ -1020,15 +1020,22 @@ export const DEFS: ToolDefinition[] = [
     },
   },
 
-  // ── ask_user（#290）：向用户提问并等待回答。只读（无副作用）；恢复/重跑按
-  // toolCallId 复用同一待答问题，不重问。取消/过期以错误结果回模型。
+  // ── ask_user：默认等待；明确声明 continue_independent 时留下持久问题并立即
+  // 返回 pending，让模型只继续不依赖答案的部分。恢复/重跑按 toolCallId 幂等。
   {
     mcpName: "ask_user",
     description:
-      "向用户提出一个或多个带选项的问题并**等待回答**（用户会看到卡片，可能几分钟后才答）。" +
+      "向用户提出一个或多个带选项的问题。默认 mode=required，会等待回答；只有仍有明确的独立工作可做时才用 mode=continue_independent。" +
+      "非阻塞提问必须分别写清 continueWith（可继续什么）与 blockedUntilAnswer（哪些决定或写入仍须等待），pending 不是默认选择、跳过或同意。" +
       "只在信息确实缺失、且答案会改变你的做法时用；能自己查工具确定的事不要问。" +
-      "每个问题给 2–5 个简短选项；需要自由输入就把 isOther 设为 true。用户可能取消（结果会说明），此时不要重复提问。",
+      "确认、权限激活和正式审批不能用非阻塞提问替代。每题给 2–5 个简短选项；需要自由输入就把 isOther 设为 true。",
     parameters: Type.Object({
+      mode: Type.Optional(Type.Union([
+        Type.Literal("required"),
+        Type.Literal("continue_independent"),
+      ], { description: "required=必须等答案；continue_independent=问题保留待答，同时继续独立工作" })),
+      continueWith: Type.Optional(Type.String({ description: "非阻塞时必填：不依赖答案、现在会继续的工作" })),
+      blockedUntilAnswer: Type.Optional(Type.String({ description: "非阻塞时必填：依赖答案、仍然不会执行的决定或写入" })),
       questions: Type.Array(Type.Object({
         questionId: Type.String({ description: "本次提问内唯一的短 id，如 q1" }),
         header: Type.String({ description: "问题标题（≤12 字）" }),
@@ -1046,15 +1053,42 @@ export const DEFS: ToolDefinition[] = [
     execute: async (ctx, args, toolCallId) => {
       const run = ctx.run;
       if (!run) return "【提问不可用：当前执行环境没有会话交互通道】";
-      const { createOrReuseQuestion, awaitQuestion, formatAnswers } = await import("./questions");
+      const { createOrReuseQuestion, awaitQuestion, consumeDeferredResolutionInbox, formatAnswers } = await import("./questions");
+      const waitMode = args.mode === "continue_independent" ? "continue_independent" : "required";
+      const continueWith = typeof args.continueWith === "string" ? args.continueWith.trim() : "";
+      const blockedUntilAnswer = typeof args.blockedUntilAnswer === "string" ? args.blockedUntilAnswer.trim() : "";
+      if (waitMode === "continue_independent" && (!continueWith || !blockedUntilAnswer)) {
+        return "【非阻塞提问缺少边界：必须同时说明 continueWith 和 blockedUntilAnswer；不要把 pending 当作许可。】";
+      }
       const questions = (args.questions as QuestionItem[]).map((q) => ({
         questionId: String(q.questionId), header: String(q.header), question: String(q.question),
         options: (q.options ?? []).map((o) => ({ label: String(o.label), ...(o.description ? { description: String(o.description) } : {}) })),
         ...(q.multiSelect ? { multiSelect: true } : {}), ...(q.isOther ? { isOther: true } : {}),
       }));
-      const { reused, ...info } = await createOrReuseQuestion({ runId: run.runId, sessionId: run.sessionId, toolCallId, questions });
+      const { reused, ...info } = await createOrReuseQuestion({
+        runId: run.runId, sessionId: run.sessionId, toolCallId, questions, waitMode,
+        ...(waitMode === "continue_independent" ? { continuation: { continueWith, blockedUntilAnswer } } : {}),
+      });
       // 复用的待答问题不再重发卡（前端重开会话时经 /questions 恢复；重发只会多一张）
       if (!reused) run.publish({ type: "question", question: info });
+      if (info.waitMode === "continue_independent") {
+        if (info.status === "answered") {
+          await consumeDeferredResolutionInbox(info.id);
+          return formatAnswers(info.questions,info.answer ?? {});
+        }
+        if (info.status === "cancelled") {
+          await consumeDeferredResolutionInbox(info.id);
+          return "【用户取消了这次待补充提问。不要把未回答当作同意或默认选择。】";
+        }
+        const continuation = info.continuation!;
+        return [
+          `待补充问题已保留（questionId: ${info.id}），当前没有答案。`,
+          "pending 不代表默认选择、跳过或同意。",
+          `只可继续：${continuation.continueWith}`,
+          `必须等待回答：${continuation.blockedUntilAnswer}`,
+          "迟到回答会按 questionId 进入当前或后续执行；若推翻先前假设，只调整尚未完成的工作，不自动撤销已落地写入。",
+        ].join("\n");
+      }
       await run.setStatus("awaiting_answer");
       await (await import("./admission")).waitForInput(run.runId, { kind: "question", id: info.id });
       const outcome = await awaitQuestion(info.id, run.signal, undefined, { isDetached: run.isDetached });

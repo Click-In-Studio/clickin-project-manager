@@ -292,5 +292,23 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     expect(row.status).toBe("answered");
     expect(row.answer).toEqual({ q1: ["A 厅"] });
     expect((await POST(post("/api/agent/questions", { id: q.id, answers: { q1: ["B 厅"] } }))).status).toBe(404); // 已答不能再答
+
+    const deferred=await createOrReuseQuestion({
+      runId,sessionId:key,toolCallId:`c_deferred_${shortId()}`,waitMode:"continue_independent",
+      continuation:{continueWith:"盘点场地资料",blockedUntilAnswer:"确定最终排练厅"},
+      questions:[{questionId:"room",header:"排练厅",question:"最终用哪个厅？",options:[{label:"A 厅"},{label:"B 厅"}]}],
+    });
+    const cancelled=await POST(post("/api/agent/questions",{id:deferred.id,cancel:true}));
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).question).toMatchObject({
+      id:deferred.id,status:"cancelled",cancellationReason:"用户取消了提问",
+    });
+    expect((await getPool().query("SELECT count(*)::int AS n FROM agent_session_inbox WHERE session_id=$1",[key])).rows[0].n).toBe(0);
+
+    const restored=await GET(new NextRequest(new URL(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`,"http://localhost"),{headers:{cookie}}));
+    expect((await restored.json()).questions).toEqual(expect.arrayContaining([
+      expect.objectContaining({id:q.id,status:"answered",answer:{q1:["A 厅"]}}),
+      expect.objectContaining({id:deferred.id,status:"cancelled"}),
+    ]));
   });
 });

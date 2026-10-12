@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyStreamLine, type Bubble } from "@/lib/agent/chat/stream-reducer";
+import { applyStreamLine,mergeRestoredQuestions,type Bubble } from "@/lib/agent/chat/stream-reducer";
 
 // 聊天流 reducer 的渲染语义测试——重点覆盖 #198 的两个修复：
 // fallback final 去重（只吞兜底重复，不吞正常重复回复）与流式段落收尾。
@@ -177,6 +177,10 @@ describe("applyStreamLine", () => {
 
   const question = {
     id: "q-1",
+    toolCallId: "tool-q-1",
+    waitMode: "required" as const,
+    status: "pending" as const,
+    createdAtMs: 1,
     questions: [
       {
         questionId: "pick_one",
@@ -203,10 +207,23 @@ describe("applyStreamLine", () => {
     expect(b[0]).toMatchObject({ kind: "question", status: "answered", resolving: false });
   });
 
+  it("恢复问题时按 toolCallId 放回原工具位置，而不是追加到对话底部", () => {
+    const history: Bubble[] = [
+      { kind: "user",text: "先核对" },
+      { kind: "tool",name: "ask_user",id: "tool-q-1",done: true,result: "pending" },
+      { kind: "assistant",text: "其余核对完成" },
+    ];
+    const restored=mergeRestoredQuestions(history,[{ ...question,waitMode: "continue_independent",
+      continuation: { continueWith: "核对素材",blockedUntilAnswer: "确定音色" } }]);
+    expect(restored.map((bubble)=>bubble.kind)).toEqual(["user","tool","question","assistant"]);
+  });
+
   it("malformed question lines change nothing", () => {
     const prev: Bubble[] = [{ kind: "user", text: "hi" }];
     expect(applyStreamLine(prev, { type: "question" })).toEqual(prev);
-    expect(applyStreamLine(prev, { type: "question", question: { id: "x", questions: [] } })).toEqual(prev);
+    expect(applyStreamLine(prev, { type: "question", question: {
+      id: "x",toolCallId: "tool-x",waitMode: "required",status: "pending",createdAtMs: 1,questions: [],
+    } })).toEqual(prev);
   });
 
   it("fallback final after an unfinished tool appends an incompleteness notice", () => {
