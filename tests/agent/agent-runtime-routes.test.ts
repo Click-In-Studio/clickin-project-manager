@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, StreamFn } from "../../vendor/openclaw/packages/llm-core/src/types";
@@ -49,6 +49,7 @@ describe("agent routes（自建运行时）", () => {
     ({ prodId } = await makeProduction(userId));
     await setProductionTier(prodId, "pro"); // 项目档位门（#280）：AI 功能在 pro 档
     cookie = `${SESSION_COOKIE}=${createSession({ userId, name: "测试用户", avatarUrl: null, isAdmin: false })}`;
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
   });
 
@@ -57,6 +58,7 @@ describe("agent routes（自建运行时）", () => {
     delete runtimeOverrides.apiKey;
     for (const k of keys) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [k]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
+    vi.unstubAllEnvs();
   });
 
   function req(url: string, init?: { method?: string; body?: string }): NextRequest {
@@ -172,6 +174,7 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     await setProductionTier(prodId, "pro");
     cookie = `${SESSION_COOKIE}=${createSession({ userId, name: "主人", avatarUrl: null, isAdmin: false })}`;
     strangerCookie = `${SESSION_COOKIE}=${createSession({ userId: strangerId, name: "路人", avatarUrl: null, isAdmin: false })}`;
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.streamFn = textStream("ok");
     // 一轮真实 run：产生 agent_session + agent_run（审批/提问表 FK 到 run）
@@ -189,6 +192,7 @@ describe("agent approval/questions routes：runner 分支（ap_/aq_）", () => {
     delete runtimeOverrides.apiKey;
     await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [key]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
+    vi.unstubAllEnvs();
   });
 
   function post(url: string, body: unknown, c = cookie): NextRequest {

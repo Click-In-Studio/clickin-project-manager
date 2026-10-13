@@ -105,7 +105,6 @@ describe("agent-runtime service", () => {
     ({ userId: denyingUserId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deny-${shortId()}`, null, false));
     const made = await makeProduction(userId);
     await setProductionTier(made.prodId, "pro");
-    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     prodId = made.prodId;
     pendingSceneId = await makeScene(prodId, made.versionId, { number: "1", name: "待改场次" });
     await addProductionMember(prodId, pendingUserId);
@@ -127,6 +126,7 @@ describe("agent-runtime service", () => {
       "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
       [prodId, denyingUserId, roleId],
     );
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     // 与 MMP 无关的 runtime 用例不碰 .env.local 指向的真实服务；媒体用例单独开启。
     runtimeOverrides.mmpClient = null;
@@ -134,12 +134,12 @@ describe("agent-runtime service", () => {
 
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
-    vi.unstubAllEnvs();
-    delete runtimeOverrides.apiKey;
     delete runtimeOverrides.mmpClient;
     delete runtimeOverrides.compactFn;
     delete runtimeOverrides.shouldCompactFn;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
     await cleanupProduction(prodId).catch(() => {});
   });
 
@@ -1010,6 +1010,7 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-ask-${shortId()}`, null, false));
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1017,6 +1018,8 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
   });
 
   it("等待输入卸载上下文，单个驻留名额仍能推进其他对话并恢复原任务", async () => {
@@ -1241,6 +1244,7 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-detach-${shortId()}`, null, false));
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1248,6 +1252,8 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
   });
 
   it("等提问时脱离 → transcript 无 aborted、run 仍 awaiting_answer、无 aborted 事件；接管后复用同一问题并续跑", async () => {
@@ -1343,6 +1349,8 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
     await cleanupProduction(prodId).catch(() => {});
   });
 

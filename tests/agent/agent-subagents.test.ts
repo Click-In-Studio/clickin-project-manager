@@ -175,7 +175,6 @@ describe("持久子 Agent 基建", () => {
     runtimeOverrides.streamFn = model([]);
   });
   afterAll(async () => {
-    vi.unstubAllEnvs();
     for (const parent of parents) {
       await waitForIdle(parent.sessionId);
       await getPool().query(
@@ -193,6 +192,7 @@ describe("持久子 Agent 基建", () => {
     delete runtimeOverrides.mmpClient;
     delete runtimeOverrides.streamFn;
     await cleanupProduction(prodId).catch(() => {});
+    vi.unstubAllEnvs();
   });
   async function parent(): Promise<RunHandle> {
     const sessionId = createNewSessionKey(userId, prodId);
