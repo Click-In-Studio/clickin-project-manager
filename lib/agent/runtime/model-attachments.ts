@@ -90,8 +90,10 @@ export async function prepareModelAttachments(
       totalChars + 4 * Math.ceil(attachment.fileSize / 3) >
         Math.min(charLimit, capability.maxRequestBase64Chars)
     ) {
-      routes.push(`${attachment.id}：原生请求体积/数量超过预算，走解析/预检。`);
-      continue;
+      throw Object.assign(
+        new Error(`${attachment.fileName}：原生输入体积或数量超过本次传输预算，请缩小附件范围；不会改用媒体预检。`),
+        { status: 400 },
+      );
     }
     try {
       input.signal.throwIfAborted();
@@ -227,8 +229,9 @@ export async function prepareModelAttachments(
       routes.push(`${attachment.id}：原生媒体已提供给${input.model.name}。`);
     } catch (error) {
       input.signal.throwIfAborted();
-      routes.push(
-        `${attachment.id}：${error instanceof Error ? error.message : "读取失败"}，走解析/预检；不得声称已读原件。`,
+      throw Object.assign(
+        new Error(`${attachment.fileName}：原生输入准备失败（${error instanceof Error ? error.message : "读取失败"}）；不会改用媒体预检。`),
+        { status: 400 },
       );
     }
   }

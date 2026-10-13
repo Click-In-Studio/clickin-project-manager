@@ -6,7 +6,7 @@ import {
   restoreModelMedia,
   type MediaInput,
 } from "@/lib/agent/runtime/model-attachments";
-import { resolveModel } from "@/lib/agent/runtime/config";
+import { llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import type { AgentAttachment } from "@/lib/agent/attachment-db";
 const state = vi.hoisted(() => ({
   rows: [] as AgentAttachment[],
@@ -61,6 +61,89 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("原件准备与恢复", () => {
+  it("灵光将超过旧 14 MiB 上限的音频和图片送入真实 SDK 原生请求，保留总载荷上限", async () => {
+    const pcmBytes = 16 * 1024 * 1024;
+    const bytes = Buffer.alloc(44 + pcmBytes);
+    bytes.write("RIFF", 0);
+    bytes.writeUInt32LE(bytes.length - 8, 4);
+    bytes.write("WAVEfmt ", 8);
+    bytes.writeUInt32LE(16, 16);
+    bytes.writeUInt16LE(1, 20);
+    bytes.writeUInt16LE(2, 22);
+    bytes.writeUInt32LE(48000, 24);
+    bytes.writeUInt32LE(192000, 28);
+    bytes.writeUInt16LE(4, 32);
+    bytes.writeUInt16LE(16, 34);
+    bytes.write("data", 36);
+    bytes.writeUInt32LE(pcmBytes, 40);
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: "red" },
+    }).png().toBuffer();
+    const sound = {
+      ...attachment(bytes.length),
+      id: "sound",
+      fileName: "声音.wav",
+      mimeType: "audio/wav",
+      mediaKind: "audio",
+    };
+    state.rows = [sound, attachment(png.length)];
+    let payload = "";
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(new Uint8Array(bytes)))
+      .mockResolvedValueOnce(new Response(new Uint8Array(png)))
+      .mockImplementationOnce(async (_url: unknown, init?: RequestInit) => {
+        payload = String(init?.body);
+        const response = {
+          candidates: [{
+            content: { role: "model", parts: [{ text: "已收到音频" }] },
+            finishReason: "STOP",
+          }],
+          usageMetadata: {
+            promptTokenCount: 3000,
+            candidatesTokenCount: 5,
+            totalTokenCount: 3005,
+          },
+        };
+        return new Response(`data: ${JSON.stringify(response)}\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      });
+    vi.stubGlobal("fetch", fetch);
+    const model = resolveModel("inspiration");
+    const result = await prepareModelAttachments(
+      "分析声音和图片", ["sound", "picture"], { ...input, model },
+    );
+    expect(result.media.map((part) => part.type)).toEqual(["audio", "image"]);
+    expect(result.media[0].budget?.durationSeconds).toBeCloseTo(pcmBytes / 192000);
+    expect(state.preflight.mock.calls[0][0]).toEqual([]);
+    const reply = await llmRuntime().completeSimple(
+      model,
+      { messages: [{
+        role: "user",
+        timestamp: 1,
+        content: [{ type: "text", text: result.text }, ...result.media],
+      }] },
+      { apiKey: "test", maxTokens: 100 },
+    );
+    expect(reply.stopReason).toBe("stop");
+    const parts = JSON.parse(payload).contents[0].parts;
+    const nativeAudio = parts.find(
+      (part: { inlineData?: { mimeType: string } }) =>
+        part.inlineData?.mimeType === "audio/wav",
+    );
+    expect(Buffer.from(nativeAudio.inlineData.data, "base64").equals(bytes)).toBe(true);
+    expect(parts.some(
+      (part: { inlineData?: { mimeType: string } }) =>
+        part.inlineData?.mimeType === "image/png",
+    )).toBe(true);
+    state.rows = [{ ...sound, fileSize: 71_250_001 }];
+    state.preflight.mockClear();
+    await expect(
+      prepareModelAttachments("听声音", ["sound"], { ...input, model }),
+    ).rejects.toThrow("超过本次传输预算");
+    expect(state.preflight).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
   it("读取真实 PNG 尺寸与版本，支持视觉时跳过 MMP；恢复时核对版本", async () => {
     const bytes = await sharp({
       create: { width: 30, height: 20, channels: 3, background: "red" },
@@ -143,7 +226,7 @@ describe("原件准备与恢复", () => {
     });
     expect(state.preflight.mock.calls[0][0]).toEqual([]);
   });
-  it("归属不符不取原件；超过媒体体积时走预检并明确说明", async () => {
+  it("归属不符不取原件；原生输入超限或读取失败明确报错，不转 MMP", async () => {
     state.rows = [{ ...attachment(10), sessionId: "another" }];
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -152,14 +235,28 @@ describe("原件准备与恢复", () => {
     ).rejects.toThrow("不属于该会话");
     expect(fetch).not.toHaveBeenCalled();
     state.rows = [attachment(30 * 1024 * 1024)];
-    const oversized = await prepareModelAttachments(
+    await expect(prepareModelAttachments(
       "读图片",
       ["picture"],
       input,
-    );
-    expect(oversized.media).toEqual([]);
+    )).rejects.toThrow("超过本次传输预算");
     expect(fetch).not.toHaveBeenCalled();
-    expect(oversized.text).toContain("超过预算");
+    expect(state.preflight).not.toHaveBeenCalled();
+    state.rows = [attachment(10)];
+    fetch.mockResolvedValue(new Response(null, { status: 503 }));
+    await expect(
+      prepareModelAttachments("读图片", ["picture"], input),
+    ).rejects.toThrow("原件读取失败");
+    expect(state.preflight).not.toHaveBeenCalled();
+  });
+  it("模型未接入的格式才自动走解析预检，与文件大小无关", async () => {
+    state.rows = [{ ...attachment(10), mimeType: "image/svg+xml" }];
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const result = await prepareModelAttachments("读图片", ["picture"], input);
+    expect(result.media).toEqual([]);
+    expect(result.text).toContain("未接入此格式");
+    expect(fetch).not.toHaveBeenCalled();
     expect(state.preflight).toHaveBeenCalledWith(
       [expect.objectContaining({ attachmentId: "picture" })],
       expect.anything(),

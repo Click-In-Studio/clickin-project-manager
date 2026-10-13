@@ -65,11 +65,15 @@ const omniVideo = {
   maxRequestBytes: omniAudio.maxRequestBytes,
   maxRequestBase64Chars: omniAudio.maxRequestBase64Chars,
 };
+// Gemini inline 已支持 100 MB payload；为文字、工具和 JSON 留出 5 MB。
+// https://ai.google.dev/gemini-api/docs/file-input-methods
+const GOOGLE_INLINE_BASE64_CHARS = 95_000_000;
+const GOOGLE_INLINE_BYTES = (GOOGLE_INLINE_BASE64_CHARS / 4) * 3;
 const googleMedia = [image, pdf, audio, video].map((capability) => ({
   ...capability,
-  maxBytes: 14 * 1024 * 1024,
-  maxRequestBytes: 14 * 1024 * 1024,
-  maxRequestBase64Chars: 19_000_000,
+  maxBytes: capability.kind === "audio" ? GOOGLE_INLINE_BYTES : 14 * 1024 * 1024,
+  maxRequestBytes: GOOGLE_INLINE_BYTES,
+  maxRequestBase64Chars: GOOGLE_INLINE_BASE64_CHARS,
   mimeTypes:
     capability.kind === "image"
       ? ["image/png", "image/jpeg", "image/webp"]
