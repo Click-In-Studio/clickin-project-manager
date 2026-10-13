@@ -88,7 +88,7 @@ const entries: Entry[] = [
   {
     info: {
       key: "deepseek-flash",
-      name: "DeepSeek Flash",
+      name: "澄思·轻量",
       description: "低成本文本与图片理解，默认模型。",
       costTier: "low",
       input: ["text", "image"],
@@ -97,7 +97,7 @@ const entries: Entry[] = [
     credential: "DEEPSEEK_API_KEY",
     model: {
       id: "deepseek-flash",
-      name: "DeepSeek Flash",
+      name: "澄思·轻量",
       provider: "deepseek",
       api: "openai-completions",
       baseUrl: "https://api.deepseek.com/v1",
@@ -115,7 +115,7 @@ const entries: Entry[] = [
   {
     info: {
       key: "deepseek-pro",
-      name: "DeepSeek Pro",
+      name: "澄思·进阶",
       description: "文本分析与复核，仅支持文本。",
       costTier: "medium",
       input: ["text"],
@@ -124,7 +124,7 @@ const entries: Entry[] = [
     credential: "DEEPSEEK_API_KEY",
     model: {
       id: "deepseek-v4-pro",
-      name: "DeepSeek Pro",
+      name: "澄思·进阶",
       provider: "deepseek",
       api: "openai-completions",
       baseUrl: "https://api.deepseek.com/v1",

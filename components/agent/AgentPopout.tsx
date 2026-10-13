@@ -23,6 +23,7 @@ import AgentModelPicker from "@/components/agent/AgentModelPicker";
 import SubagentPanel from "@/components/agent/SubagentPanel";
 import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import DropdownPicker from "@/components/ui/DropdownPicker";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
@@ -254,7 +255,8 @@ export default function AgentPopout({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // 菜单先处理 Escape；document 上的监听器需用 DOM 判据让行。
+      if (e.key === "Escape" && !panelRef.current?.querySelector("[data-dropdown-picker-open]")) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -1312,29 +1314,13 @@ export default function AgentPopout({
             {attachmentError && <span className="text-[11px] text-[var(--danger)]">{attachmentError}</span>}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="agent-composer-box">
           <input
             ref={fileInputRef}
             type="file"
             multiple
             className="hidden"
             onChange={(e) => uploadAttachments(e.target.files)}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={attachmentBusy || voiceBusy || attachments.length >= 8}
-            title="附带临时文件（单个 50 MB；每条 8 个；对话 1 GiB/128 个；个人 5 GiB/512 个）"
-            aria-label="附带文件"
-            className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-lg border border-zinc-300 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
-          >
-            📎
-          </button>
-          <VoiceRecordButton
-            disabled={attachmentBusy || voiceBusy || modelSettingsBusy}
-            cancelKey={`${open ? "open" : "closed"}:${activeKey ?? "none"}`}
-            onRecorded={sendVoiceFile}
-            onError={setAttachmentError}
           />
           <textarea
             ref={textareaRef}
@@ -1347,30 +1333,55 @@ export default function AgentPopout({
                 send();
               }
             }}
-            rows={1}
+            rows={2}
             placeholder={streaming
               ? compacting ? "正在整理上下文，发送后将继续处理…" : "回复中，输入消息将注入本轮…"
               : isMobileViewport ? "输入消息…" : "输入消息，Enter 发送"}
-            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none"
+            className="agent-composer-input"
           />
-          {streaming ? (
-            <button
-              onClick={abort}
-              className="shrink-0 rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-            >
-              停止
-            </button>
-          ) : null}
-          <button
-            onClick={send}
-            disabled={(!input.trim() && attachments.length === 0) || attachmentBusy || voiceBusy || modelSettingsBusy}
-            className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-          >
-            发送
-          </button>
+          <div className="agent-composer-toolbar">
+            <div className="agent-composer-add" aria-label="添加附件或语音">
+              <DropdownPicker
+                key={`${open ? "open" : "closed"}:${activeKey ?? "none"}`}
+                ariaLabel="添加附件或语音"
+                appearance="text"
+                searchableAfter={8}
+                showIndicator={false}
+                placeholder="+"
+                disabled={attachmentBusy || voiceBusy}
+                items={[{
+                  id: "file", label: "添加文件", disabled: attachments.length >= 8,
+                  sublabel: "单个 50 MB · 每条最多 8 个",
+                }]}
+                onChange={() => fileInputRef.current?.click()}
+                footer={<p className="agent-attachment-limits">临时附件：当前对话 1 GiB/128 个 · 个人 5 GiB/512 个</p>}
+              />
+            </div>
+            {open && <AgentModelPicker sessionKey={activeKey} productionId={productionId} running={streaming} ensureSession={ensureSession} onSavingChange={(saving) => setPendingModelSaves(count => count + (saving ? 1 : -1))} />}
+            <div className="agent-composer-actions">
+              {streaming && <button type="button" onClick={abort} className="agent-composer-stop" aria-label="停止回复" title="停止回复">■</button>}
+              <VoiceRecordButton
+                appearance="toolbar"
+                disabled={attachmentBusy || voiceBusy || modelSettingsBusy}
+                cancelKey={`${open ? "open" : "closed"}:${activeKey ?? "none"}`}
+                onRecorded={sendVoiceFile}
+                onError={setAttachmentError}
+              />
+              <button
+                type="button"
+                onClick={send}
+                disabled={(!input.trim() && attachments.length === 0) || attachmentBusy || voiceBusy || modelSettingsBusy}
+                className="agent-composer-send"
+                aria-label="发送"
+                title="发送"
+              >
+                <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18" fill="none">
+                  <path d="M10 15V5M6 9l4-4 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
-        {open && <AgentModelPicker sessionKey={activeKey} productionId={productionId} running={streaming} ensureSession={ensureSession} onSavingChange={(saving) => setPendingModelSaves(count => count + (saving ? 1 : -1))} />}
-        <p className="mt-1 text-[10px] text-[var(--muted)]">临时附件：单个 50 MB · 每条 8 个 · 当前对话 1 GiB/128 个 · 个人 5 GiB/512 个</p>
       </div>
 
       {previewToolCallId && productionId && (

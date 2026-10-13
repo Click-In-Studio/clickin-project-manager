@@ -44,12 +44,14 @@ export default function VoiceRecordButton({
   cancelKey,
   onRecorded,
   onError,
+  appearance = "icon",
 }: {
   disabled: boolean;
   /** 面板关闭或会话切换时改变；正在授权/录音的内容必须丢弃并释放麦克风。 */
   cancelKey: string;
   onRecorded: (file: File) => Promise<void>;
   onError: (message: string) => void;
+  appearance?: "icon" | "toolbar";
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [cancelArmed, setCancelArmed] = useState(false);
@@ -202,7 +204,7 @@ export default function VoiceRecordButton({
     : phase === "recording" ? "松开发送语音，上滑取消" : phase === "processing" ? "正在发送语音…" : "按住说话";
 
   return (
-    <div className="relative shrink-0 sm:hidden">
+    <div className={`relative shrink-0 ${appearance === "toolbar" ? "agent-voice-toolbar" : "sm:hidden"}`}>
       {(phase === "recording" || phase === "requesting") && (
         <div className={`pointer-events-none absolute bottom-[46px] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium shadow-md ${
           cancelArmed ? "bg-red-600 text-white" : "bg-zinc-800 text-white"
@@ -224,7 +226,7 @@ export default function VoiceRecordButton({
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}
         onContextMenu={(event) => event.preventDefault()}
-        className={`grid h-[38px] touch-none select-none place-items-center rounded-lg border px-2 text-sm ${
+        className={appearance === "toolbar" ? `agent-composer-voice ${cancelArmed ? "is-cancel" : phase === "recording" ? "is-recording" : ""}` : `grid h-[38px] touch-none select-none place-items-center rounded-lg border px-2 text-sm ${
           cancelArmed
             ? "min-w-[112px] border-red-500 bg-red-600 text-white"
             : phase === "recording"
@@ -232,7 +234,11 @@ export default function VoiceRecordButton({
               : "w-[38px] border-zinc-300 text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
         }`}
       >
-        {cancelArmed ? "松开取消" : phase === "recording" ? "松开发送" : phase === "requesting" ? "…" : phase === "processing" ? "↥" : "🎤"}
+        {appearance === "toolbar" ? (
+          <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18" fill="none">
+            <path d="M4 8v4M7 5.5v9M10 3.5v13M13 6v8M16 8.5v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          </svg>
+        ) : cancelArmed ? "松开取消" : phase === "recording" ? "松开发送" : phase === "requesting" ? "…" : phase === "processing" ? "↥" : "🎤"}
       </button>
     </div>
   );

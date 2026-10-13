@@ -7,7 +7,7 @@ import type { AgentModelInfo, ModelSelection } from "@/lib/agent/model-types";
 const models: AgentModelInfo[] = [
   {
     key: "deepseek-flash",
-    name: "DeepSeek Flash",
+    name: "澄思·轻量",
     description: "基线",
     costTier: "low",
     input: ["text", "image"],
@@ -77,18 +77,24 @@ describe("模型选择器", () => {
       running: true,
       ensureSession: async () => "existing",
     });
-    expect(host.textContent).toContain("下一轮生效");
+    expect(host.textContent).not.toContain("下轮生效");
+    expect(host.querySelector('[aria-label="会话模型"] button')?.textContent).toContain("澄思·轻量");
+    expect(host.textContent).not.toContain("低成本");
     await click(host.querySelector('[aria-label="会话模型"] button'));
     expect(document.body.textContent).toContain("个人创作者档可使用此模型");
+    expect(document.body.textContent).toContain("低成本");
+    expect(document.body.textContent).toContain("中成本");
     const restricted = [...document.body.querySelectorAll("button")].find(
-      (item) => item.textContent?.includes("灵光 ·"),
+      (item) => item.textContent?.startsWith("灵光"),
     );
     expect(restricted?.disabled).toBe(true);
     const resonance = [...document.body.querySelectorAll("button")].find(
-      (item) => item.textContent?.includes("共鸣 ·"),
+      (item) => item.textContent?.startsWith("共鸣"),
     );
     await click(resonance ?? null);
     expect(writes[0]).toEqual({ ...initial, modelKey: "resonance" });
+    expect(host.textContent).toContain("下轮生效");
+    expect(host.querySelector('[aria-label="会话模型"] button')?.textContent).not.toContain("成本");
     await click(host.querySelector('[aria-label="思考强度"] button'));
     await click(
       [...document.body.querySelectorAll("button")].find((item) =>
@@ -96,7 +102,9 @@ describe("模型选择器", () => {
       ) ?? null,
     );
     expect(writes.at(-1)?.thinkingLevel).toBe("medium");
-    await click(host.querySelectorAll('input[type="checkbox"]')[2]);
+    await click(host.querySelector('[aria-label="会话模型"] button'));
+    await click(document.body.querySelector("summary"));
+    await click(document.body.querySelectorAll('input[type="checkbox"]')[2]);
     expect(writes.at(-1)?.disabledSubagentModels).toEqual(["inspiration"]);
   });
   it("新会话建立导致 prop 更新时，较慢的目录响应不会覆盖刚保存的选择", async () => {
@@ -139,11 +147,11 @@ describe("模型选择器", () => {
     await click(host.querySelector('[aria-label="会话模型"] button'));
     await click(
       [...document.body.querySelectorAll("button")].find((item) =>
-        item.textContent?.includes("共鸣 ·"),
+        item.textContent?.startsWith("共鸣"),
       ) ?? null,
     );
     expect(saving).toHaveBeenLastCalledWith(true);
-    expect(host.textContent).toContain("正在保存模型设置");
+    expect(host.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe("正在保存模型设置");
     await act(async () => {
       finishSave();
       await gate;
