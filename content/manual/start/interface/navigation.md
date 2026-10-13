@@ -6,7 +6,7 @@ routes: [/]
 tier: all
 platform: [desktop, mobile]
 related: [start/interface/glossary, start/notifications/notifications]
-updated: 2026-10-07
+updated: 2026-10-14
 ---
 
 ## 这是什么
@@ -73,6 +73,8 @@ updated: 2026-10-07
   ![宽窗口下的头像菜单](/manual/start/avatar-menu.png)
 
 ### 手机 / 窄窗口
+
+手机点顶部「更多」，主栏下方会展开第二条工具栏，正文随之向下让出空间；工具多时会换行。再次点「更多」收起，切换页面也会收起。搜索和工具下拉仍从对应入口打开。宽窗口继续在「更多」下拉中显示折叠的操作。
 
 左侧栏收起，改为底部四个标签：项目外是 **今日 / 项目 / 概览 / 我**，项目内是 **概览 / 创作 / 制作 / 我**。项目内点「概览」可以打开**我的工作、我的通知、审批**；点「创作」「制作」展开对应的一组菜单。
 

@@ -52,7 +52,7 @@ export function DramaturgyWorkspaceHeading({
       <ProductionTopMenuContext label="构作" side="script" />
       <ProductionTopMenuDivider />
       {compact ? (
-        <div ref={workspaceMenuRef} className="relative shrink-0">
+        <div ref={workspaceMenuRef} data-dramaturgy-heading className="relative shrink-0">
           <button
             type="button"
             aria-haspopup="menu"

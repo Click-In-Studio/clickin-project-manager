@@ -734,8 +734,74 @@ span[data-stage-inline] {
   display: none;
 }
 
-#production-top-toolbar-overflow:not(:has(#production-page-toolbar-overflow-slot > *)) {
+#production-top-toolbar-overflow:not(:has(button)) {
   display: none;
+}
+
+/* 折叠槽只挂载一次：桌面仍定位到“更多”，手机占据主栏下方的真实空间。 */
+@media (max-width: 767px) {
+  .production-secondary-toolbar[data-secondary-toolbar-open="true"] {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    visibility: visible !important;
+    width: 100%;
+    max-width: none !important;
+    max-height: 38vh !important;
+    overflow-y: auto !important;
+    flex-shrink: 0;
+    border-radius: 0;
+    border-width: 0 0 1px;
+    padding: 6px;
+    box-shadow: none;
+  }
+
+  .production-secondary-toolbar #production-page-toolbar-overflow-slot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .production-secondary-toolbar #production-page-toolbar-overflow-slot > button {
+    width: auto;
+    max-width: 100%;
+    border-radius: 6px;
+  }
+
+  .production-secondary-toolbar #production-page-toolbar-overflow-slot > p {
+    width: 100%;
+  }
+
+  .production-secondary-toolbar #production-page-toolbar-overflow-slot > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* 构作视图切换优先占位，工作区标题在最窄窗口截断。 */
+@media (max-width: 639px) {
+  [data-dramaturgy-heading] {
+    min-width: 0;
+    flex: 1;
+  }
+
+  [data-dramaturgy-heading] > button {
+    max-width: 100%;
+    padding-inline: 4px;
+  }
+
+  [data-dramaturgy-heading] > button > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-production-top-menu-root]:has([data-dramaturgy-heading]) > [data-production-top-menu-context],
+  [data-production-top-menu-root]:has([data-dramaturgy-heading]) > [data-production-top-menu-divider] {
+    display: none;
+  }
 }
 
 @property --panel-scrollbar-thumb-opacity {

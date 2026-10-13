@@ -22,9 +22,12 @@ function Probe({ pathname }: { pathname: string }) {
   const s = useProductionToolbarStage({ pathname });
   seen.push(s);
   return (
-    <header ref={s.topbarRef}>
-      <div ref={s.topOverflowRef} data-testid="overflow" />
-    </header>
+    <>
+      <header ref={s.topbarRef}>
+        <div ref={s.topOverflowRef} data-testid="overflow" />
+      </header>
+      <div ref={s.topOverflowMenu.menuRef} data-testid="panel" />
+    </>
   );
 }
 
@@ -88,6 +91,8 @@ describe("useProductionToolbarStage — 搜索与溢出菜单联动", () => {
     const overflow = container.querySelector('[data-testid="overflow"]')!;
     mousedownOn(overflow);
     expect(latest().topOverflowOpen).toBe(true);
+    mousedownOn(container.querySelector('[data-testid="panel"]')!);
+    expect(latest().topOverflowOpen).toBe(true);
 
     const child = document.createElement("div");
     child.setAttribute("data-production-overflow-menu-child", "");
@@ -97,6 +102,19 @@ describe("useProductionToolbarStage — 搜索与溢出菜单联动", () => {
     child.remove();
 
     mousedownOn(document.body);
+    expect(latest().topOverflowOpen).toBe(false);
+  });
+
+  it("手机第二栏点击正文保持展开，再次点击或切页才收起", () => {
+    setInnerWidth(319);
+    mount("/production/p1/dramaturgy");
+    act(() => latest().setTopOverflowOpen(true));
+    mousedownOn(document.body);
+    expect(latest().topOverflowOpen).toBe(true);
+    act(() => latest().setTopOverflowOpen(open => !open));
+    expect(latest().topOverflowOpen).toBe(false);
+    act(() => latest().setTopOverflowOpen(true));
+    navigate("/production/p1/cues");
     expect(latest().topOverflowOpen).toBe(false);
   });
 

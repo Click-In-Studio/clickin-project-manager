@@ -427,6 +427,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   ref={topOverflowMenu.anchorRef}
                   type="button"
                   aria-label="更多工具"
+                  aria-controls="production-page-toolbar-overflow-slot"
                   aria-expanded={topOverflowOpen}
                   onClick={() => setTopOverflowOpen((open) => !open)}
                   className="flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border-0 bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
@@ -434,22 +435,28 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   <span>更多</span><span aria-hidden="true">⋮</span>
                 </button>
               )}
-              <div
-                ref={topOverflowMenu.menuRef}
-                style={topOverflowMenu.style}
-                data-production-overflow-menu="true"
-                className={productionToolbarHasStoredControls && topOverflowOpen
-                  ? "z-40 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-                  : "hidden"
-                }
-              >
-                <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
-                <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
-              </div>
             </div>
           )}
         </div>
       </header>
+
+      {hasTopMenu && (
+        <div
+          ref={topOverflowMenu.menuRef}
+          style={topOverflowMenu.style}
+          data-production-overflow-menu="true"
+          data-secondary-toolbar-open={productionToolbarHasStoredControls && topOverflowOpen ? "true" : undefined}
+          role="region"
+          aria-label="更多工具栏"
+          className={productionToolbarHasStoredControls && topOverflowOpen
+            ? "production-secondary-toolbar z-50 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
+            : "hidden"
+          }
+        >
+          <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
+          <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
+        </div>
+      )}
 
       {/* Body: sidebar + workspace */}
       <div className="relative flex flex-1 min-h-0">
