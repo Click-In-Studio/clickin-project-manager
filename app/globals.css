@@ -734,10 +734,6 @@ span[data-stage-inline] {
   display: none;
 }
 
-#production-top-toolbar-overflow:not(:has(button)) {
-  display: none;
-}
-
 /* 折叠槽只挂载一次：桌面仍定位到“更多”，手机占据主栏下方的真实空间。 */
 @media (max-width: 767px) {
   .production-secondary-toolbar[data-secondary-toolbar-open="true"] {
