@@ -210,9 +210,9 @@ function SceneEditRow({
             ? "inset 0 2px #2563eb"
             : dropEdge === "bottom" ? "inset 0 -2px #2563eb" : undefined,
         }}
-        className={`group cursor-pointer border-b transition-colors hover:bg-zinc-100/70 ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}${isDragging ? " relative z-10 bg-blue-50/70 opacity-70 outline outline-2 outline-blue-400 outline-offset-[-2px]" : ""}`}
+        className={`group ${canReorder ? "h-[52px]" : "h-[37px]"} cursor-pointer border-b transition-colors hover:bg-zinc-100/70 ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}${isDragging ? " relative z-10 bg-blue-50/70 opacity-70 outline outline-2 outline-blue-400 outline-offset-[-2px]" : ""}`}
       >
-        <td className={`border-r border-zinc-100/80 py-3 w-28 sm:w-32${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
+        <td className={`border-r border-zinc-100/80 py-1.5 w-28 sm:w-32${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
           <div className="flex items-center gap-1">
             {canReorder && (
               <button
@@ -222,14 +222,17 @@ function SceneEditRow({
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 onClick={() => setSortingOpen((value) => !value)}
-                className="flex h-11 w-11 shrink-0 cursor-grab items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-blue-600 active:cursor-grabbing disabled:opacity-50"
+                className="group/sort flex h-[38px] w-9 shrink-0 cursor-grab items-center justify-center rounded text-zinc-500 outline-offset-0 focus-visible:outline-2 focus-visible:outline-blue-600 active:cursor-grabbing disabled:opacity-50"
                 title="拖动排序，或点击上移 / 下移"
                 aria-label={`调整顺序：${scene.name || scene.number}`}
                 aria-expanded={sortingOpen}
               >
-                <svg width="18" height="20" viewBox="0 0 18 20" fill="currentColor" aria-hidden="true">
-                  {[4, 10, 16].map((y) => <React.Fragment key={y}><circle cx="6" cy={y} r="1.7" /><circle cx="12" cy={y} r="1.7" /></React.Fragment>)}
-                </svg>
+                {/* 视觉框与命中区分开：六点始终可见，命中区留在本行内。 */}
+                <span className="flex h-[22px] w-[calc(44px*2/3)] items-center justify-center rounded border border-transparent group-hover/sort:border-zinc-300 group-hover/sort:bg-zinc-100 group-focus-visible/sort:border-blue-600 group-focus-visible/sort:bg-blue-50">
+                  <svg width="18" height="20" viewBox="0 0 18 20" fill="currentColor" aria-hidden="true">
+                    {[4, 10, 16].map((y) => <React.Fragment key={y}><circle cx="6" cy={y} r="1.7" /><circle cx="12" cy={y} r="1.7" /></React.Fragment>)}
+                  </svg>
+                </span>
               </button>
             )}
             <span className="flex w-4 flex-shrink-0 items-center text-zinc-400 sm:hidden">
@@ -240,7 +243,7 @@ function SceneEditRow({
             </span>
           </div>
         </td>
-        <td className="border-r border-zinc-100/80 px-2 sm:px-4 py-3">
+        <td className="border-r border-zinc-100/80 px-2 sm:px-4 py-1.5">
           {editingName ? (
             <input
               autoFocus
@@ -261,7 +264,7 @@ function SceneEditRow({
             </span>
           )}
         </td>
-        <td className="border-r border-zinc-100/80 px-4 py-3">
+        <td className="border-r border-zinc-100/80 px-4 py-1.5">
           {marks.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {marks.map((m) => (
@@ -272,7 +275,7 @@ function SceneEditRow({
             </div>
           )}
         </td>
-        <td className="w-72 px-4 py-3 text-right hidden sm:table-cell">
+        <td className="w-72 px-4 py-1.5 text-right hidden sm:table-cell">
           <div className="flex h-5 items-center justify-end gap-3">
             {(canEdit && fieldPerms.kind || canDelete) && (
               <span className="inline-flex h-5 items-center">
@@ -299,9 +302,9 @@ function SceneEditRow({
           <td colSpan={4} className="border-b border-zinc-200 bg-zinc-50 px-3 py-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-zinc-600">{scene.kind === "scene" ? "在本章内调整顺序" : "调整章节顺序"}</span>
-              <button type="button" disabled={reorderBusy || !canMoveUp} onClick={() => { void onMove("up"); }} aria-label={`上移：${scene.name || scene.number}`} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 disabled:opacity-40">↑ 上移</button>
-              <button type="button" disabled={reorderBusy || !canMoveDown} onClick={() => { void onMove("down"); }} aria-label={`下移：${scene.name || scene.number}`} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 disabled:opacity-40">↓ 下移</button>
-              <button type="button" onClick={() => setSortingOpen(false)} className="min-h-11 rounded-lg px-3 text-sm text-zinc-600">收起排序</button>
+              <button type="button" disabled={reorderBusy || !canMoveUp} onClick={() => { void onMove("up"); }} aria-label={`上移：${scene.name || scene.number}`} className="min-h-7 rounded border border-zinc-300 bg-white px-2 py-1 text-xs leading-4 text-zinc-700 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-40">↑ 上移</button>
+              <button type="button" disabled={reorderBusy || !canMoveDown} onClick={() => { void onMove("down"); }} aria-label={`下移：${scene.name || scene.number}`} className="min-h-7 rounded border border-zinc-300 bg-white px-2 py-1 text-xs leading-4 text-zinc-700 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-40">↓ 下移</button>
+              <button type="button" onClick={() => setSortingOpen(false)} className="min-h-7 rounded px-2 py-1 text-xs leading-4 text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-blue-600">收起排序</button>
             </div>
           </td>
         </tr>
@@ -480,7 +483,7 @@ function InsertSceneRow({
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
                 className={prominent
                   ? "flex h-full min-h-32 w-full items-center justify-center gap-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-700"
-                  : "flex h-6 w-full items-center justify-center gap-1.5 rounded text-[11px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-zinc-100/80 hover:text-zinc-600 group-hover:opacity-100"}
+                  : "flex h-[calc(25px*6/7-1px)] w-full items-center justify-center gap-1.5 rounded text-[11px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-zinc-100/80 hover:text-zinc-600 group-hover:opacity-100"}
                 aria-label="添加章节或场景"
               >
                 <span className="text-base leading-none">+</span>
