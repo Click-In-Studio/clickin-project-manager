@@ -51,7 +51,7 @@ describe("MMP 持久操作与取消", () => {
     await reconcileMmpAdmissions(f.client);
     expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1", [id])).rows[0].state).toBe("done");
   });
-  it("提交响应丢失且无 job_id 时，不盲目再提交", async () => {
+  it("提交响应丢失且无 job_id 时不盲目再提交；父 run 终止并超过总超时后释放名额", async () => {
     const id=await run(), f=fake(), signal=new AbortController().signal;
     f.submit.mockRejectedValue(new MmpError("network","响应丢失"));
     await expect(runInAdmission(id,signal,()=>{},()=>admittedMmpRun(f.client,job,{},"file-3"))).rejects.toBeDefined();
@@ -59,7 +59,12 @@ describe("MMP 持久操作与取消", () => {
     expect(f.submit).toHaveBeenCalledTimes(1);
     const ticket=(await getPool().query("SELECT state,remote_id FROM agent_admission WHERE run_id=$1", [id])).rows[0];
     expect(ticket).toEqual({state:"unknown",remote_id:null});
-    await getPool().query("DELETE FROM agent_admission WHERE run_id=$1", [id]);
+    await getPool().query("UPDATE agent_run SET status='failed',ended_at=now() WHERE id=$1",[id]);
+    await getPool().query("UPDATE agent_admission SET started_at=now()-interval '11 minutes' WHERE run_id=$1 AND resource='mmp'",[id]);
+    await reconcileMmpAdmissions(f.client);
+    expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1",[id])).rows[0].state).toBe("failed");
+    expect(f.submit).toHaveBeenCalledTimes(1);
+    expect(f.get).not.toHaveBeenCalled();
   });
   it("失联任务已知 job_id 时，主任务停止后的对账继续请求远端取消并等待确认", async () => {
     const id=await run(),f=fake(),signal=new AbortController().signal;

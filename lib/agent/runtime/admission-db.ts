@@ -98,7 +98,7 @@ export async function admissionMetrics(): Promise<unknown[]> {
 }
 export async function unknownMmpAdmissions(): Promise<Array<AdmissionTicket & { run_status: string }>> {
   return (await getPool().query<AdmissionTicket & { run_status: string }>(
-    "SELECT a.*,r.status AS run_status FROM agent_admission a JOIN agent_run r ON r.id=a.run_id WHERE a.resource='mmp' AND a.state='unknown' AND a.remote_id IS NOT NULL",
+    "SELECT a.*,r.status AS run_status FROM agent_admission a JOIN agent_run r ON r.id=a.run_id WHERE a.resource='mmp' AND a.state='unknown'",
   )).rows;
 }
 

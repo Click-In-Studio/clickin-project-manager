@@ -8,6 +8,8 @@ import type { AdmissionTicket } from "@/lib/agent/runtime/admission-types";
 type Job = Parameters<MmpClient["run"]>[0];
 type Options = NonNullable<Parameters<MmpClient["run"]>[1]>;
 type Pending = { job_id: string; type: string; status: "queued" | "running"; media_ids: Record<string, string | string[]>; eta_sec?: number; queue_position?: number };
+const UNKNOWN_WITHOUT_ID_TIMEOUT_MS = 10 * 60_000;
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "compacting", "awaiting_approval", "awaiting_answer"]);
 
 /** Agent 操作拆分提交/等待并保存远程身份；非 Agent 调用继续使用 MMP 自己的调度。 */
 export async function admittedMmpRun(
@@ -74,8 +76,18 @@ export async function reconcileMmpAdmissions(client = getMmpClient()): Promise<v
   if (!client) return;
   const tickets = await unknownMmpAdmissions();
   for (const ticket of tickets) {
+    if (!ticket.remote_id) {
+      // submit 响应丢失时不能盲目重提；但没有远端身份也不能永久占满本地名额。
+      // 父 run 已终止且超过单次 MMP 总超时后，将这笔不确定执行结为失败。
+      if (!ACTIVE_RUN_STATUSES.has(ticket.run_status)
+        && ticket.started_at
+        && Date.now() - ticket.started_at.getTime() >= UNKNOWN_WITHOUT_ID_TIMEOUT_MS) {
+        await release(ticket, "failed");
+      }
+      continue;
+    }
     try {
-      const result = ticket.run_status === "aborted" ? await client.cancel(ticket.remote_id!,0) : await client.get(ticket.remote_id!,0);
+      const result = ticket.run_status === "aborted" ? await client.cancel(ticket.remote_id,0) : await client.get(ticket.remote_id,0);
       if (result.status === "done") await release(ticket,"done",result);
       else if (result.status === "cancelled") await release(ticket,"failed");
     } catch (e) {
