@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import sharp from "sharp";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
@@ -266,6 +267,36 @@ describe("agent-runtime service", () => {
       globalThis.fetch = oldFetch;
       runtimeOverrides.mmpClient = null;
       if (oldUrl === undefined) delete process.env.MMP_BASE_URL; else process.env.MMP_BASE_URL = oldUrl;
+    }
+  });
+
+  it("续轮同时保留历史媒体原件与附件生命周期注入，不让后一个 context hook 覆盖媒体恢复", async () => {
+    const bytes = await sharp({
+      create: { width: 24, height: 16, channels: 3, background: "red" },
+    }).jpeg().toBuffer();
+    const { streamFn, seen } = scripted([{ text: "看到了" }, { text: "有图片生成能力" }]);
+    runtimeOverrides.streamFn = streamFn;
+    runtimeOverrides.mmpClient = null;
+    const key = newKey(false);
+    const pending = await createPendingAttachment({
+      sessionId: key, userId, fileName: "reference.jpg", mimeType: "image/jpeg", mediaKind: "image", fileSize: bytes.length,
+    });
+    await markAttachmentReady(pending.id, key, userId, bytes.length);
+    const oldFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(bytes))));
+    try {
+      await startRun({ sessionId: key, userId, message: "能看到这张图吗", attachmentIds: [pending.id] });
+      await collectUntilTerminal(key);
+      await waitForIdle(key);
+      const lastSeq = Math.max(...(await readEventsSince(key, 0)).map((row) => row.seq));
+      await startRun({ sessionId: key, userId, message: "你有图片生成能力吗" });
+      await collectUntilTerminal(key, 10_000, lastSeq);
+      await waitForIdle(key);
+      const secondContext = JSON.stringify(seen[1].messages);
+      expect(secondContext).toContain(bytes.toString("base64"));
+      expect(secondContext).toContain("<clickin-attachment-lifecycle>");
+    } finally {
+      vi.stubGlobal("fetch", oldFetch);
     }
   });
 

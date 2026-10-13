@@ -615,14 +615,12 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       lastUser = message;
     }
 
-    harness.on("context", async ({ messages }) => ({ messages: await restoreModelMedia(messages, mediaInput) }));
-    // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
-    // 不进 session（下一轮不再带，与 prependContext 语义一致）。
-    if (injectedNote) {
-      harness.on("context", ({ messages }) => {
-        return { messages: withInjectedNote(messages) };
-      });
-    }
+    // context hook 只保留一个：agent-core 的多个同类 hook 不串联前一项结果，而是
+    // 取最后一个非空返回值。分开注册会让注入说明覆盖已恢复的媒体 data，续轮请求
+    // 最终只剩持久引用并在 provider 边界失败。
+    harness.on("context", async ({ messages }) => ({
+      messages: withInjectedNote(await restoreModelMedia(messages, mediaInput)),
+    }));
 
     // 审批门（工具调用权限门原则①）：非只读工具先卡；deny 的理由随工具结果回模型。
     // 无人值守（定时任务）没有人在场：写工具按「注册表 unattended=allow ∩ 任务 allowed_tools」
