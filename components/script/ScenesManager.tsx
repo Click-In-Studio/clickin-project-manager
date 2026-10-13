@@ -228,7 +228,7 @@ function SceneEditRow({
                 aria-expanded={sortingOpen}
               >
                 {/* 视觉框与命中区分开：六点始终可见，命中区留在本行内。 */}
-                <span className="flex h-[22px] w-[calc(44px*2/3)] items-center justify-center rounded border border-transparent group-hover/sort:border-zinc-300 group-hover/sort:bg-zinc-100 group-focus-visible/sort:border-blue-600 group-focus-visible/sort:bg-blue-50">
+                <span className="flex h-[22px] w-[29.33px] items-center justify-center rounded border border-transparent group-hover/sort:border-zinc-300 group-hover/sort:bg-zinc-100 group-focus-visible/sort:border-blue-600 group-focus-visible/sort:bg-blue-50">
                   <svg width="18" height="20" viewBox="0 0 18 20" fill="currentColor" aria-hidden="true">
                     {[4, 10, 16].map((y) => <React.Fragment key={y}><circle cx="6" cy={y} r="1.7" /><circle cx="12" cy={y} r="1.7" /></React.Fragment>)}
                   </svg>
@@ -481,9 +481,10 @@ function InsertSceneRow({
             {!open ? (
               <button
                 onClick={() => setOpen(onAddScene ? "scene" : "chapter")}
+                // 普通插入行原高 25px；按钮 20.43px 加行边框 1px，约为原来的 6/7。
                 className={prominent
                   ? "flex h-full min-h-32 w-full items-center justify-center gap-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-700"
-                  : "flex h-[calc(25px*6/7-1px)] w-full items-center justify-center gap-1.5 rounded text-[11px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-zinc-100/80 hover:text-zinc-600 group-hover:opacity-100"}
+                  : "flex h-[20.43px] w-full items-center justify-center gap-1.5 rounded text-[11px] leading-none text-zinc-300 opacity-0 transition-all hover:bg-zinc-100/80 hover:text-zinc-600 group-hover:opacity-100"}
                 aria-label="添加章节或场景"
               >
                 <span className="text-base leading-none">+</span>
