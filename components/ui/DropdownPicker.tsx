@@ -42,6 +42,7 @@ type Props = {
   searchableAfter?: number;
   ariaLabel?: string;
   showIndicator?: boolean;
+  triggerContent?: ReactNode;
   footer?: ReactNode;
   /** 多选触发按钮文案（缺省"已选 N 人"） */
   multiCountLabel?: (n: number) => string;
@@ -61,7 +62,7 @@ const POP_MAX_H = 300;
 export default function DropdownPicker({
   items, value, values, multi, placeholder, clearLabel, searchPlaceholder, disabled,
   multiCountLabel, onChange, onToggle, appearance = "field", searchableAfter = 0, ariaLabel,
-  showIndicator = true, footer,
+  showIndicator = true, triggerContent, footer,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -192,10 +193,12 @@ export default function DropdownPicker({
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selectedLabel
-            ?? (selectedCount > 0 ? (multiCountLabel?.(selectedCount) ?? `已选 ${selectedCount} 人`) : placeholder)}
-        </span>
+        {triggerContent ?? (
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {selectedLabel
+              ?? (selectedCount > 0 ? (multiCountLabel?.(selectedCount) ?? `已选 ${selectedCount} 人`) : placeholder)}
+          </span>
+        )}
         {showIndicator && <span style={{ fontSize: 9, color: "var(--muted)", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>}
       </button>
 

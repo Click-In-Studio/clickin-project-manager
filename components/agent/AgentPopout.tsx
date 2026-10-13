@@ -1348,6 +1348,11 @@ export default function AgentPopout({
                 searchableAfter={8}
                 showIndicator={false}
                 placeholder="+"
+                triggerContent={
+                  <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18" fill="none">
+                    <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  </svg>
+                }
                 disabled={attachmentBusy || voiceBusy}
                 items={[{
                   id: "file", label: "添加文件", disabled: attachments.length >= 8,
