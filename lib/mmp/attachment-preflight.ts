@@ -1,7 +1,7 @@
 import { admittedMmpRun } from "./admitted-run";
 // 会话附件与资产文件共用的 MMP 自动预检入口。
 //
-// MMP 2.0 自己用 purpose + Content-Type 选择唯一能力，并由任务端生成可直接交给
+// MMP v3 自己用 purpose + Content-Type 选择唯一能力，并由任务端生成可直接交给
 // base model 的 agent_context。宿主不维护模态枚举、不解释 digest，也不根据任务 id
 // 推断能力；PDF、视频等专属预检上线后只需出现在 MMP registry 中。MMP registry
 // 不应让图片 triage 接受 PDF；没有 PDF triage 时，PDF 留给既有结构化阅读或 OCR。
@@ -92,22 +92,25 @@ export async function preflightAttachment(
 
     const source = media.get(presignedGet(input.r2Key, 15 * 60), undefined, input.mimeType);
     const handle = mmpMediaHandle(input.attachmentId, source);
+    const mediaField = capability.input.fields.find((field) => field.kind === "media");
+    if (!mediaField) throw new Error(`${capability.id} 没有 media 输入字段`);
     const done = await admittedMmpRun(client,
-      { type: capability.id, media: handle, priority: "interactive" },
+      { type: capability.id, arguments: { [mediaField.name]: handle }, priority: "interactive" },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
       input.attachmentId,
     );
-    rememberMmpMediaId(input.attachmentId, done.media_id);
+    const mediaId = done.media_ids[mediaField.name];
+    if (typeof mediaId === "string") rememberMmpMediaId(input.attachmentId, mediaId);
     if (!done.agent_context?.text) throw new Error(`${capability.id} 完成但没有 agent_context`);
 
     if (opts.usage && !done.cached) {
-      const timings = done.timings_ms ?? (done.result as { timings_ms?: Record<string, number> } | undefined)?.timings_ms;
-      const compute = billableMmpCompute(done, () => legacyComputeMs(timings));
+      const compute = billableMmpCompute(done, () => legacyComputeMs(done.timings_ms));
       await (await import("./usage-db")).recordMmpUsage({
         ...opts.usage,
         type: capability.id,
         tier: String(done.usage?.tier ?? done.source?.tier ?? capability.tiers[0]?.tier ?? "cpu"),
         computeMs: compute.ms,
+        sourceId: done.job_id,
       });
     }
     return { status: "ok", contextText: done.agent_context.text, capabilityId: capability.id };

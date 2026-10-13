@@ -1183,7 +1183,7 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
     } else if (m.role === "toolResult") {
       const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
       const attached = [...attachments.values()]
-        .filter((a) => a.sourceKind === "web_fetch" && a.sourceToolCallId === m.toolCallId)
+        .filter((a) => (a.sourceKind === "web_fetch" || a.sourceKind === "mmp") && a.sourceToolCallId === m.toolCallId)
         .map(chatAttachment);
       entries.push({
         role: "tool", name: m.toolName, id: m.toolCallId || undefined,

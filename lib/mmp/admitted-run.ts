@@ -7,12 +7,18 @@ import type { AdmissionTicket } from "@/lib/agent/runtime/admission-types";
 
 type Job = Parameters<MmpClient["run"]>[0];
 type Options = NonNullable<Parameters<MmpClient["run"]>[1]>;
+type Pending = { job_id: string; type: string; status: "queued" | "running"; media_ids: Record<string, string | string[]>; eta_sec?: number; queue_position?: number };
 
 /** Agent 操作拆分提交/等待并保存远程身份；非 Agent 调用继续使用 MMP 自己的调度。 */
-export async function admittedMmpRun(client: MmpClient, job: Job, opts: Options, fileId: string): ReturnType<MmpClient["run"]> {
+export async function admittedMmpRun(
+  client: MmpClient,
+  job: Job,
+  opts: Options & { onStatus?: (status: Pending) => void },
+  cacheKey: string,
+): ReturnType<MmpClient["run"]> {
   const scope = currentAdmissionScope();
   if (!scope) return client.run(job, opts);
-  const digest = createHash("sha256").update(JSON.stringify([fileId, job.type, job.tier, job.params])).digest("hex");
+  const digest = createHash("sha256").update(JSON.stringify([cacheKey, job.type, job.tier, job.arguments])).digest("hex");
   const key = `${scope.operationKey ?? "preflight"}:mmp:${digest}`;
   const ticket = await acquire(scope.runId, key, "mmp", scope.signal);
   if (ticket.state === "done") return ticket.result as Awaited<ReturnType<MmpClient["run"]>>;
@@ -30,6 +36,7 @@ export async function admittedMmpRun(client: MmpClient, job: Job, opts: Options,
       await admissionRemoteId(ticket.id, remoteId);
       if (first.status === "done") { await release(ticket, "done", first); return first; }
       if (first.status === "cancelled") throw new MmpError("unexpected", "远程任务已取消", { jobId: remoteId });
+      if (first.status === "queued" || first.status === "running") opts.onStatus?.({ ...first, status: first.status });
     }
     const deadline = (ticket.started_at?.getTime() ?? Date.now()) + (opts.timeoutMs ?? 600_000);
     while (true) {
@@ -38,6 +45,7 @@ export async function admittedMmpRun(client: MmpClient, job: Job, opts: Options,
       const result = await client.get(remoteId, Math.min(opts.pollWaitSec ?? 30, Math.ceil((deadline-Date.now())/1000)));
       if (result.status === "done") { await release(ticket, "done", result); return result; }
       if (result.status === "cancelled") { await release(ticket, "failed"); throw new MmpError("unexpected", "远程任务已取消", { jobId: remoteId }); }
+      if (result.status === "queued" || result.status === "running") opts.onStatus?.({ ...result, status: result.status });
     }
   } catch (e) {
     const failedJob = e instanceof MmpError && Boolean(e.jobId) && !e.retryable && e.code !== "timeout" && e.code !== "network";

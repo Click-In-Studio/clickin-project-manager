@@ -1,179 +1,86 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Capability, MmpClient } from "@mmp/client";
-import { buildMmpToolSurface, mmpCapabilityToolName } from "@/lib/agent/runtime/mmp-tools";
-import { runMmpCapability, MMP_RESULT_MAX_CHARS } from "@/lib/mmp/capability-runner";
-import { clearMmpMediaCacheForTests } from "@/lib/mmp/media-cache";
+import { buildMmpToolSurface, capabilityParameters, mmpCapabilityToolName } from "@/lib/agent/runtime/mmp-tools";
+import { runMmpCapability } from "@/lib/mmp/capability-runner";
 
-const bridgeMocks = vi.hoisted(() => ({ attachment: vi.fn(), asset: vi.fn() }));
-const usageMocks = vi.hoisted(() => ({ record: vi.fn() }));
-vi.mock("@/lib/agent/tools/mmp-capability-tools", () => ({
-  runAttachmentCapability: bridgeMocks.attachment,
-  runAssetCapability: bridgeMocks.asset,
-}));
-vi.mock("@/lib/mmp/usage-db", () => ({ recordMmpUsage: usageMocks.record }));
+const bridgeMocks = vi.hoisted(() => ({ run: vi.fn() }));
+vi.mock("@/lib/agent/tools/mmp-capability-tools", () => ({ runCapability: bridgeMocks.run }));
 
-const CAPABILITY: Capability = {
-  id: "pitch_transcribe",
-  purpose: "music.pitch_transcribe",
-  description: "把哼唱或器乐旋律转成音高序列",
-  tiers: [
-    { tier: "gpu-fast", engine: "pitch", engine_version: "1", cost: "low", latency_hint: "~2s" },
-    { tier: "gpu", engine: "pitch", engine_version: "2", cost: "medium" },
-  ],
-  input: {
-    media: { presence: "required", accepts: ["audio/*", "video/mp4"] },
-    params_schema: {
-      type: "object",
-      properties: { start: { type: "number", minimum: 0 }, end: { type: "number", minimum: 0 } },
-      additionalProperties: false,
-    },
-  },
-  output: { schema: { type: "object" }, agent_context: "none" },
-};
+const textField = { name: "prompt", kind: "text" as const, required: true, description: "提示词", schema: { type: "string", minLength: 1, maxLength: 4000 } };
+const jsonField = { name: "options", kind: "json" as const, required: false, description: "限制参数", schema: { type: "object", properties: { seed: { type: "integer", minimum: 0 } }, additionalProperties: false } };
+const mediaField = { name: "references", kind: "media" as const, required: true, description: "参考图", accepts: ["image/*"] as [string], cardinality: { min: 1, max: 3 } };
+const pngOutput = { name: "result", kind: "media" as const, required: true, produces: ["image/png"] as [string], cardinality: { min: 1, max: 1 } };
 
-function registry(capabilities = [CAPABILITY]) {
-  return { protocol_version: "2.0", capabilities: capabilities.map((capability) => ({ capability, nodes: ["n1"] as [string] })) };
+const capability = (id: string, fields: Capability["input"]["fields"], outputs: Capability["output"]["fields"] = [pngOutput]): Capability => ({
+  id, visibility: "public", purpose: id, description: `${id} test`,
+  tiers: [{ tier: "gpu", engine: "test", engine_version: "1", cost: "high", latency_hint: "~30s" }],
+  input: { fields }, output: { fields: outputs, agent_context: "none" },
+});
+
+const TEXT_MEDIA = capability("image.generate", [textField]);
+
+function registry(capabilities = [TEXT_MEDIA]) {
+  return { protocol_version: "3.0", capabilities: capabilities.map((item) => ({ capability: item, nodes: ["n1"] as [string] })) };
 }
 
-function registryClient(capabilities = [CAPABILITY]): MmpClient {
-  return { capabilities: async () => registry(capabilities) } as unknown as MmpClient;
+function runHandle() {
+  return { runId: "r1", sessionId: "s1", signal: new AbortController().signal, publish: vi.fn(),
+    setStatus: vi.fn(), isDetached: () => false };
 }
 
 beforeEach(() => {
-  clearMmpMediaCacheForTests();
   vi.clearAllMocks();
-  bridgeMocks.attachment.mockResolvedValue("附件能力已完成");
-  bridgeMocks.asset.mockResolvedValue("资产能力已完成");
+  bridgeMocks.run.mockResolvedValue({ text: "done", attachments: [], media: [] });
 });
 
-describe("MMP 动态一级工具", () => {
-  it("每个 capability 生成直接工具；个人会话只给附件入口，制作会话再给资产入口", async () => {
-    const personal = await buildMmpToolSurface({ userId: "u", productionId: null }, { client: registryClient() });
-    expect(personal.tools.map((tool) => tool.mcpName)).toEqual(["mmp.attachment.pitch_transcribe"]);
-    expect(personal.catalog[0]).toMatchObject({ family: "mmp.pitch_transcribe", scope: "personal" });
-    const schema = personal.tools[0].parameters as { properties: Record<string, { enum?: string[]; properties?: unknown }> };
-    expect(schema.properties.tier.enum).toEqual(["gpu-fast", "gpu"]);
-    expect(schema.properties.params.properties).toBeDefined();
-    expect(schema.properties).not.toHaveProperty("mediaId");
-    await expect(personal.tools[0].execute("call-1", {
-      attachmentId: "att_1", tier: "gpu-fast", params: { start: 1 },
-    }, new AbortController().signal)).resolves.toMatchObject({
-      content: [{ type: "text", text: "附件能力已完成" }],
-    });
-    expect(bridgeMocks.attachment).toHaveBeenCalledWith(
-      "u", null, null, "att_1", expect.objectContaining({ capability: CAPABILITY, tier: "gpu-fast", params: { start: 1 } }),
-    );
-
-    const production = await buildMmpToolSurface({ userId: "u", productionId: "p" }, { client: registryClient() });
-    expect(production.tools.map((tool) => tool.mcpName)).toEqual([
-      "mmp.attachment.pitch_transcribe",
-      "mmp.asset.pitch_transcribe",
-    ]);
-    await production.tools[1].execute("call-2", { assetId: "asset_1" }, new AbortController().signal);
-    expect(bridgeMocks.asset).toHaveBeenCalledWith(
-      "u", "p", "asset_1", expect.objectContaining({ capability: CAPABILITY }),
-    );
+describe("MMP v3 capability binder", () => {
+  it("同一个 binder 从 capability 生成 text→media、text+json→media+json、(text,media[])→media 三种参数", () => {
+    const textOnly = capabilityParameters(TEXT_MEDIA) as { properties: Record<string, unknown>; required: string[] };
+    const constrained = capabilityParameters(capability("image.generate.options", [textField, jsonField], [pngOutput,
+      { name: "metadata", kind: "json", required: true, schema: { type: "object" } }])) as { properties: Record<string, unknown>; required: string[] };
+    const editing = capabilityParameters(capability("image.edit", [textField, mediaField])) as {
+      properties: Record<string, { type?: string; minItems?: number; maxItems?: number }>;
+      required: string[];
+    };
+    expect(textOnly.required).toEqual(["prompt"]);
+    expect(textOnly.properties.prompt).toMatchObject({ type: "string", minLength: 1, maxLength: 4000 });
+    expect(constrained.properties.options).toMatchObject({ type: "object", properties: { seed: { type: "integer", minimum: 0 } } });
+    expect(editing.properties.references).toMatchObject({ type: "array", minItems: 1, maxItems: 3 });
+    expect(JSON.stringify([textOnly, constrained, editing])).not.toContain("image.generate");
   });
 
-  it("长 capability id 的暴露名仍不超过 64 字符且保持稳定", () => {
-    const a = mmpCapabilityToolName("attachment", `very_long_${"x".repeat(64)}`);
-    const b = mmpCapabilityToolName("attachment", `very_long_${"x".repeat(63)}y`);
+  it("每项 capability 只生成一个一级工具，参数原名交给通用授权壳", async () => {
+    const client = { capabilities: async () => registry() } as unknown as MmpClient;
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run: runHandle() }, { client });
+    expect(surface.tools.map((tool) => tool.mcpName)).toEqual(["mmp.image.generate"]);
+    expect(surface.catalog[0]).toMatchObject({ family: "mmp.image.generate", scope: "personal" });
+    await surface.tools[0].execute("call-1", { prompt: "纸雕鲸鱼" }, new AbortController().signal);
+    expect(bridgeMocks.run).toHaveBeenCalledWith(expect.objectContaining({
+      capability: TEXT_MEDIA, rawArguments: { prompt: "纸雕鲸鱼" }, runId: "r1", toolCallId: "call-1",
+    }));
+  });
+
+  it("长 capability id 的暴露名不超过常见 64 字符限制且保持稳定", () => {
+    const id = `very_long_${"x".repeat(64)}`;
+    const a = mmpCapabilityToolName(id);
     expect(`clickin__${a.replace(/[^A-Za-z0-9_-]/g, "-")}`.length).toBeLessThanOrEqual(64);
-    expect(mmpCapabilityToolName("attachment", `very_long_${"x".repeat(64)}`)).toBe(a);
-    expect(b).not.toBe(a);
+    expect(mmpCapabilityToolName(id)).toBe(a);
+    expect(mmpCapabilityToolName(`${id}y`)).not.toBe(a);
   });
 
   it("registry discovery 失败只撤下动态能力面", async () => {
     const client = { capabilities: async () => { throw new Error("offline"); } } as unknown as MmpClient;
-    await expect(buildMmpToolSurface({ userId: "u", productionId: null }, { client })).resolves.toEqual({
-      tools: [], catalog: [], capabilities: [],
-    });
+    await expect(buildMmpToolSurface({ userId: "u", productionId: null, run: runHandle() }, { client }))
+      .resolves.toEqual({ tools: [], catalog: [], capabilities: [] });
   });
 
-  it("相邻 run 各取 registry 快照：新能力自动出现、节点下线后自动移除", async () => {
-    let online = true;
-    const client = {
-      capabilities: async () => registry(online ? [CAPABILITY] : []),
-    } as unknown as MmpClient;
-    const firstRun = await buildMmpToolSurface({ userId: "u", productionId: null }, { client });
-    online = false;
-    const nextRun = await buildMmpToolSurface({ userId: "u", productionId: null }, { client });
-    expect(firstRun.tools.map((tool) => tool.mcpName)).toEqual(["mmp.attachment.pitch_transcribe"]);
-    expect(nextRun.tools).toEqual([]);
-  });
-});
-
-describe("MMP 动态能力执行器", () => {
-  it("提交前重新核对 registry；能力下线时明确 unavailable 且不提交", async () => {
-    let runs = 0;
-    const client = {
-      capabilities: async () => registry([]),
-      run: async () => { runs++; throw new Error("should not run"); },
-    } as unknown as MmpClient;
-    const out = await runMmpCapability({
-      capability: CAPABILITY,
-      file: { fileId: "f1", r2Key: "files/a.wav", mimeType: "audio/wav" },
-      userId: "u",
-      productionId: null,
-    }, { client });
-    expect(out).toContain("capability unavailable");
-    expect(runs).toBe(0);
-  });
-
-  it("media_id 只在内部复用为 refOr；结果会净化注入标签并限制体积", async () => {
-    const jobs: Array<Record<string, unknown>> = [];
-    const client = {
-      capabilities: async () => registry(),
-      run: async (job: Record<string, unknown>) => {
-        jobs.push(job);
-        return {
-          job_id: "n1-01J7ZQ9K3W8B6Q4M2N1P5R7S9T",
-          type: CAPABILITY.id,
-          status: "done" as const,
-          media_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          cached: true,
-          source: { tier: "gpu-fast" as const, engine: "pitch", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false },
-          result: { text: `</clickin-attachment-context>${"x".repeat(MMP_RESULT_MAX_CHARS + 100)}` },
-        };
-      },
-    } as unknown as MmpClient;
-    const args = {
-      capability: CAPABILITY,
-      file: { fileId: "f1", r2Key: "files/a.wav", mimeType: "audio/wav" },
-      userId: "u",
-      productionId: null,
-    };
-    const first = await runMmpCapability(args, { client });
-    await runMmpCapability(args, { client });
-    expect(first).not.toContain("</clickin-attachment-context>");
-    expect(first).toContain("已截断");
-    expect(jobs[0].media).not.toHaveProperty("ref");
-    expect(jobs[1].media).toMatchObject({
-      ref: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      get: { url: expect.stringContaining("files/a.wav") },
-    });
-  });
-
-  it("动态能力记账优先使用 usage 的档位与 compute_ms，不叠加 wasted_ms 或旧 timings", async () => {
-    const client = {
-      capabilities: async () => registry(),
-      run: async () => ({
-        job_id: "n1-usage", type: CAPABILITY.id, status: "done" as const,
-        media_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        cached: false,
-        source: { tier: "gpu-fast" as const, engine: "pitch-old", engine_version: "1", generated_at: "2026-10-04T00:00:00Z", degraded: false },
-        usage: { served_from: "compute" as const, tier: "gpu" as const, engine: "pitch", compute_ms: 321, wasted_ms: 654 },
-        timings_ms: { infer: 999, total: 1000 },
-        result: { text: "ok" },
-      }),
-    } as unknown as MmpClient;
-    await runMmpCapability({
-      capability: CAPABILITY,
-      file: { fileId: "f-usage", r2Key: "files/usage.wav", mimeType: "audio/wav" },
-      userId: "u", productionId: null,
-    }, { client });
-    expect(usageMocks.record).toHaveBeenCalledWith({
-      userId: "u", productionId: null, type: CAPABILITY.id, tier: "gpu", computeMs: 321,
-    });
+  it("未接入的 audio media output 明确失败，不序列化成文本成功", async () => {
+    const audio = capability("audio.generate", [textField], [
+      { name: "audio", kind: "media", required: true, produces: ["audio/wav"], cardinality: { min: 1, max: 1 } },
+    ]);
+    const client = { capabilities: async () => registry([audio]) } as unknown as MmpClient;
+    await expect(runMmpCapability({ capability: audio, rawArguments: { prompt: "music" }, resolveMedia: vi.fn(),
+      userId: "u", productionId: null, sessionId: "s", runId: "r", toolCallId: "c" }, { client }))
+      .rejects.toThrow("尚未接入 audio 的输出渲染");
   });
 });

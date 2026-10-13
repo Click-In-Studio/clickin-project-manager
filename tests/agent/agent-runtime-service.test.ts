@@ -227,20 +227,20 @@ describe("agent-runtime service", () => {
     runtimeOverrides.mmpClient = undefined;
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
-        return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
-          id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: { presence: "required", accepts: ["audio/*"] } },
-          output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
+        return Response.json({ protocol_version: "3.0", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", visibility: "public", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { fields: [{ name: "media", kind: "media", required: true, accepts: ["audio/*"], cardinality: { min: 1, max: 1 } }] },
+          output: { fields: [{ name: "digest", kind: "json", required: true, schema: { type: "object" } }], agent_context: "required" },
         } }] });
       }
       const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
       return Response.json({
-        job_id: "test-node-1", type: "triage.audio", status: "done", media_id: "sha256:runtime-audio", cached: false, source,
+        job_id: "test-node-1", type: "triage.audio", status: "done", media_ids: { media: "sha256:runtime-audio" }, cached: false, source,
         usage: { served_from: "compute", tier: "cpu", engine: "test", compute_ms: 12, wasted_ms: 0 },
         timings_ms: { vad: 3, tagging: 4, asr: 5 },
-        result: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
+        outputs: { digest: { kind: "json", value: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
           segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "帮我记下来", lang: "zh", confidence: 0.9 } }],
-          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source } } },
         agent_context: { format: "mmp-agent-context-v1", content_type: "text/plain; charset=utf-8",
           text: "[mmp:agent-context start]\n语音：帮我记下来\n[mmp:agent-context end]" },
       });
@@ -253,8 +253,7 @@ describe("agent-runtime service", () => {
       expect(firstContext).toContain("帮我记下来");
       expect(firstContext).toContain(pending.id);
       // registry 生成的一级工具确实进入本 run；近期附件只温启附件入口，不顺带暴露资产入口。
-      expect(seen[0].tools).toContain(exposedName("mmp.attachment.triage.audio"));
-      expect(seen[0].tools).not.toContain(exposedName("mmp.asset.triage.audio"));
+      expect(seen[0].tools).toContain(exposedName("mmp.triage.audio"));
       expect(await getHistory(key)).toEqual([
         { role: "user", content: "听一下", attachments: [{ id: pending.id, fileName: "录音.mp4", mimeType: "video/mp4", mediaKind: "audio" }] },
         { role: "assistant", content: "已听到" },
@@ -939,19 +938,19 @@ describe("agent-runtime service", () => {
     globalThis.fetch = (async (url: string) => {
       if (url.endsWith("/capabilities")) {
         await capabilityWait;
-        return Response.json({ protocol_version: "2.0", capabilities: [{ nodes: ["test-node"], capability: {
-          id: "triage.audio", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
-          input: { media: { presence: "required", accepts: ["audio/*"] } },
-          output: { schema: "urn:mmp:protocol:2:digest", agent_context: "required" },
+        return Response.json({ protocol_version: "3.0", capabilities: [{ nodes: ["test-node"], capability: {
+          id: "triage.audio", visibility: "public", purpose: "triage", tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }],
+          input: { fields: [{ name: "media", kind: "media", required: true, accepts: ["audio/*"], cardinality: { min: 1, max: 1 } }] },
+          output: { fields: [{ name: "digest", kind: "json", required: true, schema: { type: "object" } }], agent_context: "required" },
         } }] });
       }
       jobs++;
       const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
       return Response.json({
-        job_id: "test-node-steer", type: "triage.audio", status: "done", media_id: "sha256:steer-audio", cached: true, source,
-        result: { media_id: "sha256:steer-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
+        job_id: "test-node-steer", type: "triage.audio", status: "done", media_ids: { media: "sha256:steer-audio" }, cached: true, source,
+        outputs: { digest: { kind: "json", value: { media_id: "sha256:steer-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",
           segments: [{ start: 0, end: 1, label_status: "ok", labels: [{ tag: "Speech", score: 0.9 }], asr: { text: "这是补充说明", lang: "zh", confidence: 0.9 } }],
-          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source },
+          tools: { vad: "ok", tagging: "ok", asr: "ok" }, gaps: [], capabilities_available: [], source } } },
         agent_context: { format: "mmp-agent-context-v1", content_type: "text/plain; charset=utf-8",
           text: "[mmp:agent-context start]\n语音：这是补充说明\n[mmp:agent-context end]" },
       });

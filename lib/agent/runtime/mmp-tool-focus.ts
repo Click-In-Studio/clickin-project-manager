@@ -48,19 +48,26 @@ function successfulAssetCalls(messages: AgentMessage[]): string[] {
     if (message.role !== "assistant") continue;
     for (const item of message.content) {
       if (item.type !== "toolCall" || !successful.has(item.id)) continue;
-      const isAssetTool = ASSET_READ_TOOLS.has(item.name) || item.name.startsWith("clickin__mmp-asset-");
-      const assetId = (item.arguments as { assetId?: unknown } | undefined)?.assetId;
-      if (isAssetTool && typeof assetId === "string" && assetId && !ids.includes(assetId)) ids.push(assetId);
+      const isAssetTool = ASSET_READ_TOOLS.has(item.name) || item.name.startsWith("clickin__mmp-");
+      const collect = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) { value.forEach(collect); return; }
+        const record = value as Record<string, unknown>;
+        if (typeof record.assetId === "string" && record.assetId && !ids.includes(record.assetId)) ids.push(record.assetId);
+        Object.values(record).forEach(collect);
+      };
+      if (isAssetTool) collect(item.arguments);
     }
   }
   return ids;
 }
 
-function matchingNames(capabilities: Capability[], contentTypes: Iterable<string>, scope: "attachment" | "asset"): string[] {
+function matchingNames(capabilities: Capability[], contentTypes: Iterable<string>): string[] {
   const types = [...contentTypes];
   return capabilities
-    .filter((capability) => types.some((contentType) => capability.input.media.accepts.some((pattern) => matchesMediaType(pattern, contentType))))
-    .map((capability) => mmpCapabilityToolName(scope, capability.id));
+    .filter((capability) => types.some((contentType) => capability.input.fields
+      .some((field) => field.kind === "media" && field.accepts.some((pattern) => matchesMediaType(pattern, contentType)))))
+    .map((capability) => mmpCapabilityToolName(capability.id));
 }
 
 export async function focusedMmpToolNames(args: {
@@ -99,8 +106,8 @@ export async function focusedMmpToolNames(args: {
     : [];
 
   return [...new Set([
-    ...matchingNames(args.capabilities, attachmentTypes, "attachment"),
-    ...matchingNames(args.capabilities, assetTypes, "asset"),
+    ...matchingNames(args.capabilities, attachmentTypes),
+    ...matchingNames(args.capabilities, assetTypes),
   ])];
 }
 
@@ -109,5 +116,5 @@ export function mmpAttachmentToolNamesFor(
   attachments: Array<{ mediaKind?: string | null; mimeType: string }>,
 ): string[] {
   const types = attachments.map(capabilityContentType);
-  return matchingNames(capabilities, types, "attachment");
+  return matchingNames(capabilities, types);
 }

@@ -25,13 +25,13 @@ function fakeClient(respond: (call: Call, n: number) => { status: number; body: 
 
 function doneBody(over: Partial<Record<string, unknown>> = {}) {
   return {
-    job_id: "gpu-lab-01", type: "ocr.structured", status: "done", media_id: "sha256:abc", cached: false,
+    job_id: "gpu-lab-01", type: "ocr.structured", status: "done", media_ids: { media: "sha256:abc" }, cached: false,
     source: { tier: "gpu-fast", engine: "pp-ocrv6", engine_version: "1", generated_at: "2026-09-21T00:00:00Z", degraded: false, params: {} },
-    result: {
+    outputs: { document: { kind: "json", value: {
       page_count: 3,
       pages: [{ page: 2, tier: "gpu-fast", text: "阿兰：你到底把信藏在哪儿了？", quality: { lines: 1, chars: 13, mean_score: 0.98 }, flags: [] }],
       suggest_upgrade_pages: [],
-    },
+    } } },
     usage: { served_from: "compute", tier: "gpu-fast", engine: "pp-ocrv6", compute_ms: 827, wasted_ms: 1234 },
     timings_ms: { fetch: 5000, render: 15, ocr: 812, total: 44452 },
     ...over,
@@ -54,15 +54,15 @@ describe("ocrPages：媒体句柄与结果", () => {
     expect(a.pages[0].text).toContain("阿兰");
     expect(a.pageCount).toBe(3);
     expect(a.mediaId).toBe("sha256:abc");
-    expect(calls[0].body?.media).toEqual({ get: { url: "https://r2/x.pdf?sig" } });
+    expect((calls[0].body?.arguments as Record<string, unknown>).media).toEqual({ get: { url: "https://r2/x.pdf?sig" } });
     expect(calls[0].body?.tier).toBe("gpu-fast");
-    expect((calls[0].body?.params as { pages: number[] }).pages).toEqual([2]);
+    expect(((calls[0].body?.arguments as Record<string, unknown>).options as { pages: number[] }).pages).toEqual([2]);
 
     await ocrPages({ fileId: "f1", url: "https://r2/x.pdf?sig2", pages: [3, 2, 2], tier: "gpu", lang: "en" }, { client });
-    const m = calls[1].body?.media as Record<string, unknown>;
+    const m = (calls[1].body?.arguments as Record<string, unknown>).media as Record<string, unknown>;
     expect(m.ref).toBe("sha256:abc");
     expect(m.get).toEqual({ url: "https://r2/x.pdf?sig2" });
-    expect((calls[1].body?.params as { pages: number[]; lang: string })).toEqual({ pages: [2, 3], lang: "en" });
+    expect((calls[1].body?.arguments as Record<string, unknown>).options).toEqual({ pages: [2, 3], lang: "en" });
   });
 
   it("计费真值只取 usage.compute_ms，不叠加 timings 或 wasted_ms；cached → 0", async () => {

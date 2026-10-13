@@ -16,16 +16,18 @@ export type AgentAttachment = {
   id: string; sessionId: string; r2Key: string; fileName: string; mimeType: string;
   mediaKind: string | null; fileSize: number; status: AgentAttachmentStatus;
   expiresAt?: string; absoluteExpiresAt?: string; releaseUntil?: string | null; promotedAssetId?: string | null;
-  sourceKind?: "web_fetch" | null; sourceRunId?: string | null; sourceToolCallId?: string | null;
+  sourceKind?: "web_fetch" | "mmp" | null; sourceRunId?: string | null; sourceToolCallId?: string | null;
   sourceUrl?: string | null; sourceFinalUrl?: string | null;
+  sourceOutputName?: string | null; sourceOutputIndex?: number | null; sourceMetadata?: Record<string, unknown> | null;
 };
 
 type Row = {
   id: string; session_id: string; r2_key: string; file_name: string; mime_type: string;
   media_kind: string | null; file_size: string | number; status: AgentAttachmentStatus;
   expires_at: Date; absolute_expires_at: Date; release_until: Date | null; promoted_asset_id: string | null;
-  source_kind: "web_fetch" | null; source_run_id: string | null; source_tool_call_id: string | null;
+  source_kind: "web_fetch" | "mmp" | null; source_run_id: string | null; source_tool_call_id: string | null;
   source_url: string | null; source_final_url: string | null;
+  source_output_name: string | null; source_output_index: number | null; source_metadata: Record<string, unknown> | null;
 };
 type UsageRow = { bytes: string | number; count: string | number };
 const ACTIVE_OBJECT_STATUSES = "('reserved', 'present', 'delete_pending', 'deleting')";
@@ -38,6 +40,7 @@ function mapRow(row: Row): AgentAttachment {
     releaseUntil: row.release_until?.toISOString() ?? null, promotedAssetId: row.promoted_asset_id,
     sourceKind: row.source_kind, sourceRunId: row.source_run_id, sourceToolCallId: row.source_tool_call_id,
     sourceUrl: row.source_url, sourceFinalUrl: row.source_final_url,
+    sourceOutputName: row.source_output_name, sourceOutputIndex: row.source_output_index, sourceMetadata: row.source_metadata,
   };
 }
 
@@ -71,9 +74,9 @@ export async function getAttachmentUsage(userId: string, sessionId: string) {
 /** 附件可能先于第一条消息上传，因此在这里按已签发 session key 建空会话。 */
 export async function createPendingAttachment(input: {
   sessionId: string; userId: string; fileName: string; mimeType: string; mediaKind?: string | null; fileSize: number;
-  source?: {
-    kind: "web_fetch"; runId: string; toolCallId: string; url: string; finalUrl: string;
-  };
+  source?:
+    | { kind: "web_fetch"; runId: string; toolCallId: string; url: string; finalUrl: string }
+    | { kind: "mmp"; runId: string; toolCallId: string; outputName: string; outputIndex: number; metadata: Record<string, unknown> };
 }): Promise<AgentAttachment> {
   const identity = parseSessionIdentity(input.sessionId);
   if (!identity || identity.userId !== input.userId) throw Object.assign(new Error("无权访问该会话"), { status: 403 });
@@ -101,15 +104,26 @@ export async function createPendingAttachment(input: {
         [input.source.runId, input.sessionId],
       );
       if (!run.rows[0]) throw Object.assign(new Error("运行上下文与会话不匹配"), { status: 403 });
-      const existing = await client.query<Row>(
-        `SELECT a.* FROM agent_session_attachment a
-         WHERE a.session_id = $1 AND a.source_kind = 'web_fetch'
-           AND a.source_run_id = $2 AND a.status IN ('pending', 'ready')
-           AND (a.source_tool_call_id = $3 OR a.source_final_url = $4)
-         ORDER BY CASE a.status WHEN 'ready' THEN 0 ELSE 1 END, a.created_at
-         LIMIT 1`,
-        [input.sessionId, input.source.runId, input.source.toolCallId, input.source.finalUrl],
-      );
+      const existing = input.source.kind === "web_fetch"
+        ? await client.query<Row>(
+          `SELECT a.* FROM agent_session_attachment a
+           WHERE a.session_id = $1 AND a.source_kind = 'web_fetch'
+             AND a.source_run_id = $2 AND a.status IN ('pending', 'ready')
+             AND (a.source_tool_call_id = $3 OR a.source_final_url = $4)
+           ORDER BY CASE a.status WHEN 'ready' THEN 0 ELSE 1 END, a.created_at
+           LIMIT 1`,
+          [input.sessionId, input.source.runId, input.source.toolCallId, input.source.finalUrl],
+        )
+        : await client.query<Row>(
+          `SELECT a.* FROM agent_session_attachment a
+           WHERE a.session_id = $1 AND a.source_kind = 'mmp'
+             AND a.source_run_id = $2 AND a.source_tool_call_id = $3
+             AND a.source_output_name = $4 AND a.source_output_index = $5
+             AND a.status IN ('pending', 'ready')
+           ORDER BY CASE a.status WHEN 'ready' THEN 0 ELSE 1 END, a.created_at
+           LIMIT 1`,
+          [input.sessionId, input.source.runId, input.source.toolCallId, input.source.outputName, input.source.outputIndex],
+        );
       if (existing.rows[0]) {
         await client.query("COMMIT");
         return mapRow(existing.rows[0]);
@@ -127,12 +141,17 @@ export async function createPendingAttachment(input: {
     const inserted = await client.query<Row>(
       `INSERT INTO agent_session_attachment
          (id, session_id, r2_key, file_name, mime_type, media_kind, file_size, expires_at, absolute_expires_at,
-          source_kind, source_run_id, source_tool_call_id, source_url, source_final_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,now() + interval '2 hours',now() + interval '30 days',$8,$9,$10,$11,$12)
+          source_kind, source_run_id, source_tool_call_id, source_url, source_final_url,
+          source_output_name, source_output_index, source_metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now() + interval '2 hours',now() + interval '30 days',$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
        RETURNING *`,
       [id, input.sessionId, r2Key, safeName, input.mimeType, input.mediaKind ?? null, input.fileSize,
         input.source?.kind ?? null, input.source?.runId ?? null, input.source?.toolCallId ?? null,
-        input.source?.url ?? null, input.source?.finalUrl ?? null],
+        input.source?.kind === "web_fetch" ? input.source.url : null,
+        input.source?.kind === "web_fetch" ? input.source.finalUrl : null,
+        input.source?.kind === "mmp" ? input.source.outputName : null,
+        input.source?.kind === "mmp" ? input.source.outputIndex : null,
+        input.source?.kind === "mmp" ? JSON.stringify(input.source.metadata) : null],
     );
     await client.query(
       `INSERT INTO agent_attachment_object
@@ -146,7 +165,13 @@ export async function createPendingAttachment(input: {
   finally { client.release(); }
 }
 
-export async function markAttachmentReady(attachmentId: string, sessionId: string, userId: string, verifiedSize: number): Promise<AgentAttachment | null> {
+export async function markAttachmentReady(
+  attachmentId: string,
+  sessionId: string,
+  userId: string,
+  verifiedSize: number,
+  sourceMetadata?: Record<string, unknown>,
+): Promise<AgentAttachment | null> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -170,10 +195,12 @@ export async function markAttachmentReady(attachmentId: string, sessionId: strin
     const r = await client.query<Row>(
       `UPDATE agent_session_attachment a
        SET status = 'ready', ready_at = now(), file_size = $4,
+           source_metadata = COALESCE($5::jsonb, source_metadata),
            expires_at = LEAST(now() + interval '24 hours', absolute_expires_at)
        FROM agent_session s
        WHERE a.id = $1 AND a.session_id = $2 AND s.id = a.session_id AND s.user_id = $3 AND a.status = 'pending'
-       RETURNING a.*`, [attachmentId, sessionId, userId, verifiedSize],
+       RETURNING a.*`, [attachmentId, sessionId, userId, verifiedSize,
+        sourceMetadata ? JSON.stringify(sourceMetadata) : null],
     );
     if (r.rows[0]) await client.query(
       `UPDATE agent_attachment_object SET status = 'present', byte_size = $2

@@ -1,4 +1,4 @@
-// MMP 2.1 的标准算力审计口径。usage.compute_ms 是唯一真值；旧 timings_ms 只在
+// MMP v3 的标准算力审计口径。usage.compute_ms 是唯一真值；旧 timings_ms 只在
 // 对端尚未升级时兜底，且必须打日志，避免把排队、下载或冷启动误算给用户。
 
 import type { JobDone } from "@mmp/client";

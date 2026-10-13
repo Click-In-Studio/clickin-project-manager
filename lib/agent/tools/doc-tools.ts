@@ -626,7 +626,7 @@ export async function attachmentFileOcr(
     billingNote = "，缓存命中不计费";
   } else {
     const credits = await recordMmpUsage({
-      userId, productionId, type: "ocr.structured", tier: out.tier, computeMs: out.computeMs,
+      userId, productionId, type: "ocr.structured", tier: out.tier, computeMs: out.computeMs, sourceId: out.jobId,
     }).catch((e) => { console.error("[doc_page_ocr] 记账失败（结果照常返回）:", e); return null; });
     billingNote = credits === null
       ? "，本次用量记账失败（已记日志）"

@@ -54,6 +54,19 @@ function toolResultForClient(result: unknown): unknown {
   return result;
 }
 
+function toolAttachmentsForClient(result: unknown): import("@/lib/agent/chat/types").ChatAttachment[] {
+  const details = (result as { details?: { attachments?: unknown } } | undefined)?.details;
+  if (!Array.isArray(details?.attachments)) return [];
+  return details.attachments.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const item = value as Record<string, unknown>;
+    if (typeof item.attachmentId !== "string" || typeof item.fileName !== "string" || typeof item.mimeType !== "string") return [];
+    return [{ id: item.attachmentId, fileName: item.fileName, mimeType: item.mimeType,
+      mediaKind: item.mimeType.startsWith("image/") ? "image" : null, status: "ready" as const,
+      sourceToolCallId: null }];
+  });
+}
+
 /**
  * 返回一个 harness 事件处理器；每个前端可见的变化以 StreamLine 形式经 emit 送出。
  * 用法：`harness.subscribe(createStreamLineAdapter(send))`。
@@ -100,9 +113,19 @@ export function createStreamLineAdapter(emit: (line: StreamLine) => void): (even
         lastThinking = null;
         return;
       }
+      case "tool_execution_update": {
+        const partial = event.partialResult as { progress?: { text?: unknown; visibility?: unknown; privacy?: unknown } } | undefined;
+        const progress = partial?.progress;
+        if (progress?.visibility === "channel" && progress.privacy === "public" && typeof progress.text === "string" && progress.text) {
+          emit({ type: "tool-progress", id: event.toolCallId, text: progress.text.slice(0, 300) });
+        }
+        return;
+      }
       case "tool_execution_end": {
         const result = boundPayload(toolResultForClient(event.result));
-        emit({ type: "tool-result", id: event.toolCallId, ...(result !== undefined ? { result } : {}), ...(event.isError ? { isError: true } : {}) });
+        const attachments = toolAttachmentsForClient(event.result);
+        emit({ type: "tool-result", id: event.toolCallId, ...(result !== undefined ? { result } : {}),
+          ...(attachments.length ? { attachments } : {}), ...(event.isError ? { isError: true } : {}) });
         emit({ type: "tool-end", id: event.toolCallId });
         return;
       }

@@ -3330,6 +3330,7 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   tokens         INTEGER     NOT NULL,
   billed_credits BIGINT      NOT NULL DEFAULT 0,
   paid_from      TEXT        NOT NULL DEFAULT 'quota',
+  source_id      TEXT        NULL,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (user_id IS NOT NULL OR production_id IS NOT NULL),
   CONSTRAINT ai_usage_paid_from_check CHECK (paid_from IN ('quota', 'extra', 'exempt'))
@@ -3338,6 +3339,9 @@ CREATE TABLE IF NOT EXISTS ai_usage (
 CREATE INDEX IF NOT EXISTS ai_usage_created_idx            ON ai_usage (created_at);
 CREATE INDEX IF NOT EXISTS ai_usage_user_created_idx       ON ai_usage (user_id, created_at);
 CREATE INDEX IF NOT EXISTS ai_usage_production_created_idx ON ai_usage (production_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_kind_source_idx ON ai_usage (kind, source_id) WHERE source_id IS NOT NULL;
+COMMENT ON COLUMN ai_usage.source_id IS
+  '外部计费事实的稳定身份；MMP 使用远端 job id，恢复或重放时据此只记一次。';
 
 -- ── 等级体系（#280，db/add-plan.sql，付费功能地基）─────────────────────────────
 -- user_plan 无行 = 普通用户（不能建项目）；production_plan 无行 = free 档。
@@ -3487,18 +3491,25 @@ CREATE TABLE IF NOT EXISTS agent_session_attachment (
   release_until TIMESTAMPTZ NULL,
   deleted_at  TIMESTAMPTZ NULL,
   promoted_asset_id TEXT NULL REFERENCES asset(id) ON DELETE SET NULL,
-  source_kind TEXT NULL CHECK (source_kind IS NULL OR source_kind = 'web_fetch'),
+  source_kind TEXT NULL CHECK (source_kind IS NULL OR source_kind IN ('web_fetch', 'mmp')),
   source_run_id TEXT NULL,
   source_tool_call_id TEXT NULL,
   source_url TEXT NULL,
   source_final_url TEXT NULL,
-  CONSTRAINT agent_session_attachment_web_fetch_source_check CHECK (
-    source_kind IS NULL OR (
-      source_run_id IS NOT NULL
-      AND source_tool_call_id IS NOT NULL
-      AND source_url IS NOT NULL
-      AND source_final_url IS NOT NULL
-    )
+  source_output_name TEXT NULL,
+  source_output_index INTEGER NULL CHECK (source_output_index IS NULL OR source_output_index >= 0),
+  source_metadata JSONB NULL,
+  CONSTRAINT agent_session_attachment_source_check CHECK (
+    source_kind IS NULL OR
+    (source_kind = 'web_fetch'
+      AND source_run_id IS NOT NULL AND source_tool_call_id IS NOT NULL
+      AND source_url IS NOT NULL AND source_final_url IS NOT NULL
+      AND source_output_name IS NULL AND source_output_index IS NULL) OR
+    (source_kind = 'mmp'
+      AND source_run_id IS NOT NULL AND source_tool_call_id IS NOT NULL
+      AND source_url IS NULL AND source_final_url IS NULL
+      AND source_output_name IS NOT NULL AND source_output_index IS NOT NULL
+      AND source_metadata IS NOT NULL)
   )
 );
 
@@ -3513,6 +3524,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_session_attachment_web_fetch_call_idx
 CREATE UNIQUE INDEX IF NOT EXISTS agent_session_attachment_web_fetch_url_idx
   ON agent_session_attachment (source_run_id, source_final_url)
   WHERE source_kind = 'web_fetch' AND status IN ('pending', 'ready');
+CREATE UNIQUE INDEX IF NOT EXISTS agent_session_attachment_mmp_output_idx
+  ON agent_session_attachment (source_run_id, source_tool_call_id, source_output_name, source_output_index)
+  WHERE source_kind = 'mmp' AND status IN ('pending', 'ready');
 
 COMMENT ON TABLE agent_session_attachment IS
   'AI 会话私有的临时附件；可提升为资产，逻辑墓碑与物理对象回收分离。';
@@ -3524,6 +3538,12 @@ COMMENT ON COLUMN agent_session_attachment.source_url IS
   'web.fetch 用户或模型请求的原始公开 URL。';
 COMMENT ON COLUMN agent_session_attachment.source_final_url IS
   'web.fetch 完成公开重定向后的最终 URL；同一 run 内据此去重。';
+COMMENT ON COLUMN agent_session_attachment.source_output_name IS
+  'MMP capability 的命名 media output；与 output_index 一起定位同一 tool call 的产物。';
+COMMENT ON COLUMN agent_session_attachment.source_output_index IS
+  'MMP media output 内的零基下标；单值输出固定为 0。';
+COMMENT ON COLUMN agent_session_attachment.source_metadata IS
+  '不含凭据的远端产物来源与校验元数据；当前用于 MMP job/capability/engine/digest。';
 
 CREATE TABLE IF NOT EXISTS agent_attachment_object (
   id              TEXT        PRIMARY KEY,

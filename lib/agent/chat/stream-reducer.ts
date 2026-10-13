@@ -53,7 +53,7 @@ export type Bubble =
   | { kind: "thinking"; text: string; streaming?: boolean; compactionPending?: boolean }
   // input/result：调用参数与结果（relay 超限时为 {truncated, preview} 包裹），
   // 供气泡点开看详情；历史回放只有 result 文本，input 恒缺席。
-  | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean; attachments?: import("./types").ChatAttachment[] }
+  | { kind: "tool"; name: string; id?: string; done: boolean; input?: unknown; result?: unknown; isError?: boolean; progress?: string; attachments?: import("./types").ChatAttachment[] }
   | { kind: "approval"; approval: ApprovalInfo; decision?: string; resolving?: boolean }
   // status：answered/cancelled/expired；未定 = 待答卡片
   | { kind: "question"; question: QuestionInfo; status?: string; resolving?: boolean }
@@ -67,7 +67,8 @@ export type StreamLine =
   | { type: "aborted"; text: string }
   | { type: "error"; error: string }
   | { type: "tool"; name?: string; id?: string; input?: unknown }
-  | { type: "tool-result"; id?: string; result?: unknown; isError?: boolean }
+  | { type: "tool-result"; id?: string; result?: unknown; isError?: boolean; attachments?: import("./types").ChatAttachment[] }
+  | { type: "tool-progress"; id?: string; text: string }
   | { type: "tool-end"; id?: string }
   | { type: "approval"; approval?: ApprovalInfo }
   | { type: "approval-resolved"; id?: string; decision?: string }
@@ -159,7 +160,19 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
             ...b,
             ...(line.result !== undefined ? { result: line.result } : {}),
             ...(line.isError ? { isError: true } : {}),
+            ...(line.attachments?.length ? { attachments: line.attachments } : {}),
           };
+          break;
+        }
+      }
+      return next;
+    }
+    case "tool-progress": {
+      if (!line.id) return next;
+      for (let i = next.length - 1; i >= 0; i--) {
+        const b = next[i];
+        if (b.kind === "tool" && b.id === line.id && !b.done) {
+          next[i] = { ...b, progress: line.text };
           break;
         }
       }
@@ -169,7 +182,7 @@ export function applyStreamLine(prev: Bubble[], line: StreamLine): Bubble[] {
       for (let i = next.length - 1; i >= 0; i--) {
         const b = next[i];
         if (b.kind === "tool" && !b.done && (!line.id || b.id === line.id)) {
-          next[i] = { ...b, done: true };
+          next[i] = { ...b, done: true, progress: undefined };
           break;
         }
       }

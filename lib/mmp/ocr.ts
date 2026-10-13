@@ -47,6 +47,7 @@ export type OcrOutcome =
       /** usage.compute_ms 缺失、按页估算的（打日志，不该是常态）。 */
       computeEstimated: boolean;
       mediaId: string;
+      jobId: string;
     }
   | {
       status: "error";
@@ -89,12 +90,14 @@ export async function ocrPages(
   const pages = [...new Set(input.pages.map((p) => Math.floor(p)).filter((p) => p >= 1))].sort((a, b) => a - b);
   try {
     const done = await admittedMmpRun(client,
-      { type: "ocr.structured", media: handle, tier: input.tier, params: { pages, lang: input.lang ?? "ch" } },
+      { type: "ocr.structured", arguments: { media: handle, options: { pages, lang: input.lang ?? "ch" } }, tier: input.tier },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
       input.fileId,
     );
-    rememberMmpMediaId(input.fileId, done.media_id);
-    const result = (done.result ?? {}) as {
+    const mediaId = done.media_ids.media;
+    if (typeof mediaId === "string") rememberMmpMediaId(input.fileId, mediaId);
+    const documentOutput = done.outputs.document;
+    const result = (documentOutput && !Array.isArray(documentOutput) && documentOutput.kind === "json" ? documentOutput.value : {}) as {
       page_count?: number;
       pages?: OcrPage[];
       suggest_upgrade_pages?: number[];
@@ -111,7 +114,8 @@ export async function ocrPages(
       engine: String((done.source as { engine?: string } | undefined)?.engine ?? ""),
       computeMs: billable.ms,
       computeEstimated: billable.estimated,
-      mediaId: done.media_id,
+      mediaId: typeof mediaId === "string" ? mediaId : "",
+      jobId: done.job_id,
     };
   } catch (e) {
     if (e instanceof MmpError) {

@@ -1,80 +1,62 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Capability } from "@mmp/client";
 
-const mocks = vi.hoisted(() => ({
-  getAttachment: vi.fn(),
-  getAnyAttachment: vi.fn(),
-  resolveAsset: vi.fn(),
-  run: vi.fn(),
-}));
-
+const mocks = vi.hoisted(() => ({ getAttachment: vi.fn(), getAnyAttachment: vi.fn(), resolveAsset: vi.fn(), run: vi.fn() }));
 vi.mock("@/lib/agent/attachment-db", () => ({
   getReadyAttachmentForSession: mocks.getAttachment,
   getAttachmentForSession: mocks.getAnyAttachment,
   recordAttachmentAccess: vi.fn(),
 }));
-vi.mock("@/lib/agent/tools/doc-tools", () => ({
-  resolveReadableAsset: mocks.resolveAsset,
-}));
-vi.mock("@/lib/mmp/capability-runner", () => ({
-  runMmpCapability: mocks.run,
-}));
+vi.mock("@/lib/agent/tools/doc-tools", () => ({ resolveReadableAsset: mocks.resolveAsset }));
+vi.mock("@/lib/mmp/capability-runner", () => ({ runMmpCapability: mocks.run }));
 
-import { runAssetCapability, runAttachmentCapability } from "@/lib/agent/tools/mmp-capability-tools";
+import { runCapability } from "@/lib/agent/tools/mmp-capability-tools";
 
 const capability: Capability = {
-  id: "pitch_transcribe",
-  purpose: "music.pitch_transcribe",
+  id: "pitch_transcribe", visibility: "public", purpose: "music.pitch_transcribe",
   tiers: [{ tier: "cpu", engine: "pitch", engine_version: "1", cost: "low" }],
-  input: { media: { presence: "required", accepts: ["audio/*"] } },
-  output: { schema: { type: "object" }, agent_context: "none" },
+  input: { fields: [{ name: "recording", kind: "media", required: true, accepts: ["audio/*"], cardinality: { min: 1, max: 1 } }] },
+  output: { fields: [{ name: "notes", kind: "json", required: true, schema: { type: "object" } }], agent_context: "none" },
 };
+
+const base = { userId: "u1", productionId: null, sessionId: "s1", runId: "r1", toolCallId: "c1", capability };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAnyAttachment.mockResolvedValue(null);
-  mocks.run.mockResolvedValue("ok");
+  mocks.run.mockImplementation(async (args: { resolveMedia: (name: string, raw: unknown, capability: Capability) => Promise<unknown>; rawArguments: Record<string, unknown> }) => {
+    await args.resolveMedia("recording", args.rawArguments.recording, capability);
+    return { text: "ok", attachments: [], media: [] };
+  });
 });
 
 describe("MMP 动态能力权限壳", () => {
   it("附件只按当前 session + 当前用户查询；伪造、跨会话或他人的 id 不会到达 MMP", async () => {
     mocks.getAttachment.mockResolvedValue(null);
-    await expect(runAttachmentCapability("u1", null, "s1", "att_forged", { capability }))
-      .resolves.toContain("不属于当前会话");
+    await expect(runCapability({ ...base, rawArguments: { recording: { attachmentId: "att_forged" } } }))
+      .rejects.toThrow("不属于当前会话");
     expect(mocks.getAttachment).toHaveBeenCalledWith("att_forged", "s1", "u1");
-    expect(mocks.run).not.toHaveBeenCalled();
   });
 
-  it("附件授权后只向执行器传服务端文件行，不接受模型提供 mediaId", async () => {
-    mocks.getAttachment.mockResolvedValue({
-      id: "att_1", sessionId: "s1", r2Key: "agent-attachments/att_1/a.wav",
-      fileName: "a.wav", mimeType: "audio/wav", mediaKind: "audio", fileSize: 12, status: "ready",
+  it("附件授权后只从服务端文件行构造句柄，不接受模型提供 mediaId", async () => {
+    mocks.getAttachment.mockResolvedValue({ id: "att_1", sessionId: "s1", r2Key: "agent-attachments/att_1/a.wav",
+      fileName: "a.wav", mimeType: "audio/wav", mediaKind: "audio", fileSize: 12, status: "ready" });
+    await expect(runCapability({ ...base, rawArguments: { recording: { attachmentId: "att_1", mediaId: "forged" } } })).resolves.toMatchObject({ text: "ok" });
+    const resolver = mocks.run.mock.calls[0][0].resolveMedia;
+    await expect(resolver("recording", { attachmentId: "att_1" }, capability)).resolves.toMatchObject({
+      value: { get: { url: expect.stringContaining("agent-attachments/att_1/a.wav") } }, cacheKeys: ["att_1"],
     });
-    await expect(runAttachmentCapability("u1", null, "s1", "att_1", { capability })).resolves.toBe("ok");
-    expect(mocks.run).toHaveBeenCalledWith(expect.objectContaining({
-      file: { fileId: "att_1", r2Key: "agent-attachments/att_1/a.wav", mimeType: "audio/wav" },
-      userId: "u1",
-    }), expect.anything());
   });
 
   it("资产复用预览权限门；无权时不把文件位置交给 MMP", async () => {
     mocks.resolveAsset.mockResolvedValue("你没有查看该资产的权限。");
-    await expect(runAssetCapability("u1", "p1", "asset_private", { capability }))
-      .resolves.toContain("没有查看该资产的权限");
+    await expect(runCapability({ ...base, productionId: "p1", rawArguments: { recording: { assetId: "asset_private" } } }))
+      .rejects.toThrow("没有查看该资产的权限");
     expect(mocks.resolveAsset).toHaveBeenCalledWith("u1", "p1", "asset_private");
-    expect(mocks.run).not.toHaveBeenCalled();
   });
 
-  it("资产通过预览权限门后，用服务端解析出的文件行执行同一 capability", async () => {
-    mocks.resolveAsset.mockResolvedValue({
-      asset: { id: "asset_1", mimeType: "audio/flac" },
-      file: { id: "file_1", r2Key: "assets/file_1/a.flac" },
-    });
-    await expect(runAssetCapability("u1", "p1", "asset_1", { capability })).resolves.toBe("ok");
-    expect(mocks.run).toHaveBeenCalledWith(expect.objectContaining({
-      file: { fileId: "file_1", r2Key: "assets/file_1/a.flac", mimeType: "audio/flac" },
-      userId: "u1",
-      productionId: "p1",
-    }), expect.anything());
+  it("资产通过预览权限门后，用服务端解析出的文件行构造同一命名字段", async () => {
+    mocks.resolveAsset.mockResolvedValue({ asset: { id: "asset_1", mimeType: "audio/flac" }, file: { id: "file_1", r2Key: "assets/file_1/a.flac" } });
+    await expect(runCapability({ ...base, productionId: "p1", rawArguments: { recording: { assetId: "asset_1" } } })).resolves.toMatchObject({ text: "ok" });
   });
 });

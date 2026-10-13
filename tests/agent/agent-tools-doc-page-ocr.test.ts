@@ -3,6 +3,7 @@
 // 真 OCR 往返在 tests/agent/mmp-ocr.test.ts 用假 fetch 钉；这里不打服务。
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { randomUUID } from "node:crypto";
 import { makeProduction, cleanupProduction, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
@@ -66,14 +67,15 @@ describe("doc_page_ocr：门", () => {
   it("成功路径（stub fetch）：图片多页请求按 [1] 处理并说明、识别文本与计费行都在、ai_usage 落行", async () => {
     process.env.MMP_BASE_URL = "https://mmp.test";
     process.env.MMP_API_KEY = "k";
+    const jobId = `gpu-lab-${randomUUID()}`;
     const realFetch = globalThis.fetch;
     const seen: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_url: string, init?: RequestInit) => {
       seen.push(init?.body ? JSON.parse(String(init.body)) : {});
       return new Response(JSON.stringify({
-        job_id: "gpu-lab-02", type: "ocr.structured", status: "done", media_id: "sha256:img", cached: false,
+        job_id: jobId, type: "ocr.structured", status: "done", media_ids: { media: "sha256:img" }, cached: false,
         source: { tier: "gpu-fast", engine: "pp-ocrv6", engine_version: "1", generated_at: "2026-09-21T00:00:00Z", degraded: false, params: {} },
-        result: { page_count: 1, pages: [{ page: 1, tier: "gpu-fast", text: "老周：信？什么信。", quality: { lines: 1, chars: 8, mean_score: 0.97 }, flags: ["low_confidence"] }], suggest_upgrade_pages: [1] },
+        outputs: { document: { kind: "json", value: { page_count: 1, pages: [{ page: 1, tier: "gpu-fast", text: "老周：信？什么信。", quality: { lines: 1, chars: 8, mean_score: 0.97 }, flags: ["low_confidence"] }], suggest_upgrade_pages: [1] } } },
         usage: { served_from: "compute", tier: "gpu-fast", engine: "pp-ocrv6", compute_ms: 400, wasted_ms: 700 },
         timings_ms: { fetch: 900, render: 0, ocr: 400, total: 1300 },
       }), { status: 200, headers: { "content-type": "application/json" } });
@@ -86,8 +88,8 @@ describe("doc_page_ocr：门", () => {
       expect(out).toContain("⚠ 低置信行偏多");
       expect(out).toContain("建议升慢档的页");
       expect(out).toMatch(/本次约 \d+ credit/);
-      expect((seen[0].params as { pages: number[] }).pages).toEqual([1]);
-      expect((seen[0].media as { get?: { url: string } }).get?.url).toMatch(/^https?:\/\//);
+      expect(((seen[0].arguments as Record<string, unknown>).options as { pages: number[] }).pages).toEqual([1]);
+      expect(((seen[0].arguments as Record<string, unknown>).media as { get?: { url: string } }).get?.url).toMatch(/^https?:\/\//);
       const { rows } = await getPool().query<{ tokens: number; billed_credits: string }>(
         `SELECT tokens, billed_credits::text FROM ai_usage WHERE production_id = $1 AND model = 'mmp:ocr.structured@gpu-fast'`, [prodId],
       );
@@ -142,19 +144,32 @@ describe("doc_page_ocr：注册点", () => {
 
 describe("recordMmpUsage（#618）", () => {
   it("落一行 ai_usage：kind=mmp_compute、model=mmp:<type>@<tier>、tokens=推理毫秒；cpu 档 0 credit 照记", async () => {
-    const gpu = await recordMmpUsage({ userId: ownerId, productionId: prodId, type: "ocr.structured", tier: "gpu", computeMs: 2547 });
+    const gpuSourceId = `mmp-job-${randomUUID()}`;
+    const cpuSourceId = `mmp-job-${randomUUID()}`;
+    const gpu = await recordMmpUsage({ userId: ownerId, productionId: prodId, type: "ocr.structured", tier: "gpu", computeMs: 2547, sourceId: gpuSourceId });
     expect(gpu).toBeGreaterThan(500);
-    const cpu = await recordMmpUsage({ userId: ownerId, productionId: prodId, type: "triage.audio", tier: "cpu", computeMs: 1500 });
+    const cpu = await recordMmpUsage({ userId: ownerId, productionId: prodId, type: "triage.audio", tier: "cpu", computeMs: 1500, sourceId: cpuSourceId });
     expect(cpu).toBe(0);
     const { rows } = await getPool().query<{ kind: string; model: string; tokens: number; billed_credits: string; paid_from: string }>(
       `SELECT kind, model, tokens, billed_credits::text, paid_from FROM ai_usage
-       WHERE production_id = $1 AND kind = 'mmp_compute' AND model IN ('mmp:ocr.structured@gpu', 'mmp:triage.audio@cpu') ORDER BY id`,
-      [prodId],
+       WHERE production_id = $1 AND kind = 'mmp_compute' AND source_id = ANY($2::text[]) ORDER BY id`,
+      [prodId, [gpuSourceId, cpuSourceId]],
     );
     expect(rows.map((r) => [r.kind, r.model, r.tokens, Number(r.billed_credits)])).toEqual([
       ["mmp_compute", "mmp:ocr.structured@gpu", 2547, gpu],
       ["mmp_compute", "mmp:triage.audio@cpu", 1500, 0],
     ]);
     expect(["quota", "extra", "exempt"]).toContain(rows[0].paid_from);
+  });
+
+  it("同一个远端 job 恢复或重放只记一次用量", async () => {
+    const sourceId = `mmp-job-${randomUUID()}`;
+    const args = { userId: ownerId, productionId: prodId, type: "image.generate", tier: "gpu", computeMs: 321, sourceId };
+    expect(await recordMmpUsage(args)).toBeGreaterThan(0);
+    expect(await recordMmpUsage(args)).toBe(0);
+    const count = await getPool().query<{ n: number }>(
+      "SELECT count(*)::int n FROM ai_usage WHERE kind='mmp_compute' AND source_id=$1", [sourceId],
+    );
+    expect(count.rows[0].n).toBe(1);
   });
 });
