@@ -412,3 +412,26 @@ it("写入失败立即提示，重读未返回时仍暂停排序", async () => {
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("已重新读取当前顺序");
   expect(visibleNames()[1]).toContain("第二章");
 });
+
+describe("排序保存必须收到真实顺序", () => {
+  it("会话过期后登录页的 HTTP 200 不能冒充保存成功", async () => {
+    fetchMock.mockImplementation(async () => ({ ok: true, status: 200, redirected: true,
+      url: "http://127.0.0.1:3000/login", json: async () => { throw new SyntaxError("HTML 登录页"); } }));
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("登录已失效");
+    expect(visibleNames()[1]).toContain("第一章");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')?.disabled).toBe(true);
+  });
+
+  it.each(["非 JSON 响应", "缺少顺序的 JSON"])("HTTP 200 的%s必须提示未保存确认", async (kind) => {
+    fetchMock.mockImplementation(async (_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+      ? { ok: true, status: 200, json: async () => { if (kind === "非 JSON 响应") throw new SyntaxError("HTML"); return { ok: true }; } }
+      : getResponse(SCENES));
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("服务端未返回章节和段落");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("已重新读取当前顺序");
+    expect(visibleNames()[1]).toContain("第一章");
+  });
+});
