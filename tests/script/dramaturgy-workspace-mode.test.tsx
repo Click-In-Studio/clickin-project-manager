@@ -33,6 +33,7 @@ function Harness({
     <div>
       <output data-testid="mode">{workspace.mode}</output>
       <output data-testid="error">{workspace.error ?? ""}</output>
+      <output data-testid="write-failed">{String(workspace.writeFailed)}</output>
       {workspace.mode === "edit" && (
         <input
           defaultValue="未保存草稿"
@@ -136,6 +137,7 @@ describe("构作工作区只读/编辑模式", () => {
       await Promise.resolve();
     });
     expect(text("error")).toContain("稍早的保存失败");
+    expect(text("write-failed")).toBe("true");
 
     await click("只读");
     expect(text("mode")).toBe("edit");
@@ -150,6 +152,7 @@ describe("构作工作区只读/编辑模式", () => {
     });
     await click("只读");
     expect(text("mode")).toBe("read");
+    expect(text("write-failed")).toBe("false");
   });
 
   it("新增表单仍有草稿时阻止切只读", async () => {
@@ -157,6 +160,7 @@ describe("构作工作区只读/编辑模式", () => {
     await click("只读");
     expect(text("mode")).toBe("edit");
     expect(text("error")).toBe("请先处理草稿");
+    expect(text("write-failed")).toBe("false");
   });
 
   it("角色详情真实字段保存失败时不切只读，并保留输入", async () => {

@@ -19,6 +19,8 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
   const [storedMode, setStoredMode] = useState<DramaturgyWorkspaceMode>(defaultMode);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [writeFailed, setWriteFailed] = useState(false);
+  const [errorRevision, setErrorRevision] = useState(0);
   const pendingRef = useRef(new Set<Promise<unknown>>());
   const writeSequenceRef = useRef(0);
   const failureRef = useRef<{ sequence: number; error: unknown } | null>(null);
@@ -47,11 +49,14 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
     const tracked = operation.then((value) => {
       if (!failureRef.current || failureRef.current.sequence < sequence) {
         failureRef.current = null;
+        setWriteFailed(false);
         setError(null);
       }
       return value;
     }).catch((caught) => {
       failureRef.current = { sequence, error: caught };
+      setWriteFailed(true);
+      setErrorRevision((revision) => revision + 1);
       setError(messageOf(caught));
       throw caught;
     }).finally(() => {
@@ -81,6 +86,7 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
       await Promise.allSettled([...pendingRef.current]);
     }
     if (failureRef.current) {
+      setErrorRevision((revision) => revision + 1);
       setError(messageOf(failureRef.current.error));
       setSwitching(false);
       return;
@@ -88,6 +94,8 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
 
     const dirty = document.querySelector<HTMLElement>("[data-dramaturgy-unsaved='true']");
     if (dirty) {
+      setWriteFailed(false);
+      setErrorRevision((revision) => revision + 1);
       setError(dirty.dataset.dramaturgyUnsavedMessage ?? "请先保存或取消当前输入，再切换只读");
       dirty.querySelector<HTMLElement>("input,textarea,button")?.focus();
       setSwitching(false);
@@ -102,6 +110,8 @@ export function useDramaturgyWorkspaceMode(productionId: string, hasWritePermiss
     mode: hasWritePermission ? storedMode : "read" as DramaturgyWorkspaceMode,
     switching,
     error,
+    errorRevision,
+    writeFailed,
     requestMode,
     trackWrite,
   };

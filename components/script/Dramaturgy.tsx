@@ -23,6 +23,7 @@ import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import { useListTableViewPreference } from "./use-list-table-view-preference";
+import DramaturgyFailureNotice from "./DramaturgyFailureNotice";
 import DramaturgyModePicker from "./DramaturgyModePicker";
 import { useDramaturgyWorkspaceMode } from "./use-dramaturgy-workspace-mode";
 
@@ -57,7 +58,13 @@ export default function Dramaturgy({
   const [sceneViewMode, setSceneViewMode] = useListTableViewPreference("dramaturgy");
   const workspaceMode = useDramaturgyWorkspaceMode(productionId, canEdit);
   const contentEditable = workspaceMode.mode === "edit";
-  const trackWorkspaceWrite = workspaceMode.trackWrite;
+  const trackModeWrite = workspaceMode.trackWrite;
+  const [failedView, setFailedView] = useState<"list" | "table" | null>(null);
+  const trackWorkspaceWrite = useCallback(<T,>(operation: Promise<T>): Promise<T> =>
+    trackModeWrite(operation).catch((caught) => {
+      setFailedView(sceneViewMode);
+      throw caught;
+    }), [trackModeWrite, sceneViewMode]);
 
   // AI 写工具改了场次（lib/agent/runtime/tools.ts 的 scene mutates）→ 重拉一次。列表模式
   // 的 ScenesManager 自己订阅 markers SSE 会刷，但表格模式用的是这里的 scenes state。
@@ -284,7 +291,7 @@ export default function Dramaturgy({
         mode={workspaceMode.mode}
         canEdit={canEdit}
         switching={workspaceMode.switching}
-        error={workspaceMode.error}
+        error={null}
         onChange={(mode) => { void workspaceMode.requestMode(mode); }}
       />
     </div>
@@ -312,7 +319,7 @@ export default function Dramaturgy({
               mode={workspaceMode.mode}
               canEdit={canEdit}
               switching={workspaceMode.switching}
-              error={workspaceMode.error}
+              error={null}
               onChange={(mode) => { void workspaceMode.requestMode(mode); }}
             />
             <ProductionTopMenuDivider />
@@ -371,8 +378,18 @@ export default function Dramaturgy({
         className="flex-1 overflow-y-auto"
         style={sceneViewMode === null ? undefined : { padding: "24px clamp(18px, 3vw, 52px) 60px" }}
       >
-        {sceneViewMode === null ? <PageSkeleton instant /> : sceneViewMode === "list" ? (
+        <DramaturgyFailureNotice error={workspaceMode.error} revision={workspaceMode.errorRevision} context={`${productionId}:${sceneViewMode}`} />
+        {workspaceMode.writeFailed && workspaceMode.error && failedView && failedView !== sceneViewMode && (
+          <p role="status" className="mb-3 break-words text-xs leading-relaxed text-red-700">
+            仍有未完成的{failedView === "table" ? "表格" : "列表"}操作。请在原视图核对结果：字段在原输入处重新保存，结构操作按错误说明恢复；持续失败请保留输入并联系项目负责人。
+          </p>
+        )}
+        {sceneViewMode === null ? <PageSkeleton instant /> : (
+          <>
+          {/* 切换看法只隐藏内容，保留失败草稿及结构恢复状态。 */}
+          <div hidden={sceneViewMode !== "list"}>
           <ScenesManager
+            active={sceneViewMode === "list"}
             key={versionId ?? ""}
             productionId={productionId}
             productionName={productionName}
@@ -385,8 +402,10 @@ export default function Dramaturgy({
             initialExpandedId={initialSceneId}
             embedded
           />
-        ) : (
+          </div>
+          <div hidden={sceneViewMode !== "table"}>
           <SceneTableView
+            active={sceneViewMode === "table"}
             key={versionId ?? ""}
             productionId={productionId}
             scenes={scenes}
@@ -401,6 +420,8 @@ export default function Dramaturgy({
             onScenesChange={setScenes}
             trackWrite={trackWorkspaceWrite}
           />
+          </div>
+          </>
         )}
       </div>
     </div>

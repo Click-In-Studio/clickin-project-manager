@@ -82,6 +82,7 @@ export function normalizeTableViewConfig(value: unknown): TableViewConfigData {
 }
 
 export type SceneTableViewProps = {
+  active?: boolean;
   productionId: string;
   scenes: MarkerProjection[];
   canEdit: boolean;
@@ -111,6 +112,7 @@ function MetaCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -131,14 +133,15 @@ function MetaCell({
   const commit = async () => {
     if (draft === value) { setEditing(false); return; }
     setSaving(true);
-    try { await onSave(draft); setEditing(false); }
-    catch { /* keep editing open so user can retry */ }
+    try { await onSave(draft); setSaveError(null); setEditing(false); }
+    catch (caught) { setSaveError(caught instanceof Error ? caught.message : "保存失败"); }
     finally { setSaving(false); }
   };
 
   if (editing) {
     if (multiline) {
       return (
+        <div data-dramaturgy-unsaved={saveError ? "true" : undefined}>
         <textarea
           autoFocus
           enterKeyHint="enter"
@@ -154,15 +157,18 @@ function MetaCell({
               e.preventDefault();
               void commit();
             }
-            if (e.key === "Escape") { setDraft(value); setEditing(false); }
+            if (e.key === "Escape") { setDraft(value); setSaveError(null); setEditing(false); }
           }}
           disabled={saving}
           rows={1}
           className="block min-h-6 w-full overflow-hidden rounded border border-zinc-300 px-2 py-1 text-xs leading-relaxed outline-none resize-none focus:border-zinc-500 disabled:opacity-50"
         />
+        {saveError && <p role="alert" className="mt-1 break-words text-xs text-red-700">{saveError}。输入尚未保存；重新编辑后移开焦点重试，Esc 取消。</p>}
+        </div>
       );
     }
     return (
+      <div data-dramaturgy-unsaved={saveError ? "true" : undefined}>
       <input
         autoFocus
         value={draft}
@@ -173,11 +179,13 @@ function MetaCell({
         onKeyDown={(e) => {
           if (isComposing) return;
           if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+          if (e.key === "Escape") { setDraft(value); setSaveError(null); setEditing(false); }
         }}
         disabled={saving}
         className="w-full rounded border border-zinc-300 px-2 py-1 text-xs outline-none focus:border-zinc-500 disabled:opacity-50"
       />
+      {saveError && <p role="alert" className="mt-1 break-words text-xs text-red-700">{saveError}。输入尚未保存；按 Enter 或移开焦点重试，Esc 取消。</p>}
+      </div>
     );
   }
 
@@ -204,6 +212,7 @@ function DurationCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
 
   const displayValue = useMemo(() => {
@@ -212,7 +221,7 @@ function DurationCell({
   }, [value]);
 
   useEffect(() => {
-    if (editing) setDraft(displayValue);
+    if (!editing) setDraft(displayValue);
   }, [editing, displayValue]);
 
   const commit = async () => {
@@ -228,13 +237,14 @@ function DurationCell({
     const origSeconds = parseDuration(value);
     if (seconds === origSeconds) { setEditing(false); return; }
     setSaving(true);
-    try { await onSave(seconds); setEditing(false); }
-    catch { /* keep editing open so user can retry */ }
+    try { await onSave(seconds); setSaveError(null); setEditing(false); }
+    catch (caught) { setSaveError(caught instanceof Error ? caught.message : "保存失败"); }
     finally { setSaving(false); }
   };
 
   if (editing) {
     return (
+      <div data-dramaturgy-unsaved={saveError ? "true" : undefined}>
       <input
         autoFocus
         value={draft}
@@ -245,12 +255,14 @@ function DurationCell({
         onKeyDown={(e) => {
           if (isComposing) return;
           if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setEditing(false); }
+          if (e.key === "Escape") { setSaveError(null); setEditing(false); }
         }}
         disabled={saving}
         className="w-full rounded border border-zinc-300 px-2 py-1 text-xs outline-none focus:border-zinc-500 disabled:opacity-50"
         placeholder="如 1:30"
       />
+      {saveError && <p role="alert" className="mt-1 break-words text-xs text-red-700">{saveError}。输入尚未保存；按 Enter 或移开焦点重试，Esc 取消。</p>}
+      </div>
     );
   }
 
@@ -277,6 +289,7 @@ function SceneNameCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(scene.name ?? "");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
 
   useEffect(() => {
@@ -287,13 +300,14 @@ function SceneNameCell({
     const trimmed = draft.trim();
     if (trimmed === (scene.name ?? "")) { setEditing(false); return; }
     setSaving(true);
-    try { await onUpdate(trimmed); setEditing(false); }
-    catch { /* keep editing open so user can retry */ }
+    try { await onUpdate(trimmed); setSaveError(null); setEditing(false); }
+    catch (caught) { setSaveError(caught instanceof Error ? caught.message : "保存失败"); }
     finally { setSaving(false); }
   };
 
   if (editing) {
     return (
+      <div data-dramaturgy-unsaved={saveError ? "true" : undefined}>
       <input
         autoFocus
         value={draft}
@@ -304,11 +318,13 @@ function SceneNameCell({
         onKeyDown={(e) => {
           if (isComposing) return;
           if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setDraft(scene.name ?? ""); setEditing(false); }
+          if (e.key === "Escape") { setDraft(scene.name ?? ""); setSaveError(null); setEditing(false); }
         }}
         disabled={saving}
         className="w-full border-b border-zinc-400 text-xs text-zinc-800 outline-none disabled:opacity-50 bg-transparent"
       />
+      {saveError && <p role="alert" className="mt-1 break-words text-xs text-red-700">{saveError}。输入尚未保存；按 Enter 或移开焦点重试，Esc 取消。</p>}
+      </div>
     );
   }
 
@@ -324,6 +340,7 @@ function SceneNameCell({
 }
 
 export default function SceneTableView({
+  active = true,
   productionId,
   scenes,
   canEdit,
@@ -342,7 +359,8 @@ export default function SceneTableView({
   const resizingRef = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const structure = useSceneTableStructure({ productionId, versionId, scenes, openingChapterMarkerId, onScenesChange, trackWrite });
+  const structure = useSceneTableStructure({
+    active, productionId, versionId, scenes, openingChapterMarkerId, onScenesChange, trackWrite });
   const [actionMarker, setActionMarker] = useState<MarkerProjection | "new" | null>(null);
   const [dragging, setDragging] = useState<MarkerProjection | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
@@ -646,7 +664,7 @@ export default function SceneTableView({
         {structure.writeBlocked && <span role="status" className="text-xs text-red-700">结构状态未同步，已暂停新增、删除和排序</span>}
         {structure.busy && <span role="status" className="text-xs text-zinc-500">正在保存…</span>}
       </div>}
-      {structure.error && <div role="alert" className="mb-2 flex items-center gap-2 text-xs text-red-700">{structure.error}<button type="button" disabled={structure.busy} onClick={structure.refreshWithNotice} className="underline">重试同步</button></div>}
+      {structure.error && <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 break-words text-xs text-red-700"><span>{structure.error}。本次操作未确认完成；同步只核对当前章节和段落，不会重新提交。</span><button type="button" disabled={structure.busy} onClick={structure.refreshWithNotice} className="underline">重试同步</button></div>}
     <div className="max-h-[calc(100dvh-9rem)] overflow-auto overscroll-contain rounded-2xl bg-white shadow-sm">
       <table
         ref={tableRef}
