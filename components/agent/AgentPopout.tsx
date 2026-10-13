@@ -265,9 +265,13 @@ export default function AgentPopout({
     };
   }, [open, onClose]);
 
-  useEffect(() => {
+  const pinChatToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [bubbles, streaming]);
+  }, []);
+
+  useEffect(() => {
+    pinChatToBottom();
+  }, [bubbles, streaming, pinChatToBottom]);
 
   // 输入框随内容平滑长高（ChatGPT 等主流 webchat 的惯例），封顶后转内部滚动。
   useEffect(() => {
@@ -996,7 +1000,7 @@ export default function AgentPopout({
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
                       {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
                         <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" onLoad={pinChatToBottom} />
                         </button>
                       )}
                       <div className="flex items-center gap-1">
@@ -1031,7 +1035,7 @@ export default function AgentPopout({
                       return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">图片附件 {ref.id} 当前不可显示{ref.alt ? `：${ref.alt}` : ""}</p>;
                     }
                     return <button key={ref.key} type="button" className="mt-1.5 block max-w-full" onClick={() => setPreviewAttachment(attachment)}>
-                      <img src={attachmentPreviewUrl(activeKey!, attachment.id)} alt={ref.alt || attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                      <img src={attachmentPreviewUrl(activeKey!, attachment.id)} alt={ref.alt || attachment.fileName} className="max-h-72 max-w-full rounded object-contain" onLoad={pinChatToBottom} />
                     </button>;
                   })}
                   {b.streaming && !compacting && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
@@ -1063,7 +1067,7 @@ export default function AgentPopout({
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
                       {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
                         <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" onLoad={pinChatToBottom} />
                         </button>
                       )}
                       <div className="flex items-center gap-1">
