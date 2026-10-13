@@ -151,6 +151,18 @@ describe("applyStreamLine", () => {
     expect(b[1]).toEqual({ kind: "tool", name: "b", id: "t2", done: false });
   });
 
+  it("MMP 等长任务的进度按 toolCallId 原位更新，完成时清掉；生成附件随结果立即关联", () => {
+    let b: Bubble[] = applyStreamLine([], { type: "tool", name: "clickin__mmp-image-generate", id: "m1" });
+    b = applyStreamLine(b, { type: "tool-progress", id: "m1", text: "排队中（前方 1 个任务）" });
+    expect(b[0]).toMatchObject({ kind: "tool", id: "m1", done: false, progress: "排队中（前方 1 个任务）" });
+    b = applyStreamLine(b, { type: "tool-result", id: "m1", result: "完成", attachments: [
+      { id: "aat_1", fileName: "image.png", mimeType: "image/png", mediaKind: "image", status: "ready" },
+    ] });
+    b = applyStreamLine(b, { type: "tool-end", id: "m1" });
+    expect(b[0]).toMatchObject({ kind: "tool", done: true, progress: undefined,
+      attachments: [{ id: "aat_1", mimeType: "image/png" }] });
+  });
+
   it("tool-result without id is dropped (never guessed onto a bubble); unmatched id is a no-op", () => {
     // 并发多调用下"猜最后一个未完成气泡"会张冠李戴——无 id 宁缺毋滥。
     const prev: Bubble[] = [

@@ -139,6 +139,7 @@ async function runOcr(file: RecognitionFile, pages: number[]): Promise<Extract<O
       type: "ocr.structured",
       tier: out.tier,
       computeMs: out.computeMs,
+      sourceId: out.jobId,
     }).catch(error => console.error("[expense-recognition] MMP 用量记账失败:", error));
   }
   return out;

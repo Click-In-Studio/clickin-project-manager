@@ -21,11 +21,12 @@ const capability = (
   agentContext: "required" | "optional" | "none" = "required",
 ): Capability => ({
   id,
+  visibility: "public",
   purpose,
   description: `${id} test`,
   tiers: [{ tier: "cpu", engine: `${id}-test`, engine_version: "1", cost: "low" }],
-  input: { media: { presence: "required", accepts } },
-  output: { schema: "urn:mmp:protocol:2:digest", agent_context: agentContext },
+  input: { fields: [{ name: "media", kind: "media", required: true, accepts: accepts as [string, ...string[]], cardinality: { min: 1, max: 1 } }] },
+  output: { fields: [{ name: "digest", kind: "json", required: true, schema: { type: "object" } }], agent_context: agentContext },
 });
 
 const AUDIO_TRIAGE = capability("triage.audio", "triage", ["audio/*"]);
@@ -35,7 +36,7 @@ const OCR = capability("ocr.structured", "ocr", ["image/*", "application/pdf"], 
 
 function registry(capabilities: Capability[] = [AUDIO_TRIAGE, IMAGE_TRIAGE, OCR]): CapabilitiesResponse {
   return {
-    protocol_version: "2.0",
+    protocol_version: "3.0",
     capabilities: capabilities.map((entry) => ({ capability: entry, nodes: ["test-node"] })),
   };
 }
@@ -52,8 +53,8 @@ function fakeClient(capabilities: Capability[] = [AUDIO_TRIAGE, IMAGE_TRIAGE, OC
       degraded: false, params: {},
     };
     return Response.json({
-      job_id: "test-node-01", type: task, status: "done", media_id: `sha256:${task}`, cached: false, source,
-      result: { kind: task === "triage.audio" ? "audio" : "image" },
+      job_id: "test-node-01", type: task, status: "done", media_ids: { media: `sha256:${task}` }, cached: false, source,
+      outputs: { digest: { kind: "json", value: { kind: task === "triage.audio" ? "audio" : "image" } } },
       usage: { served_from: "compute", tier: "cpu", engine: `${task}-test`, compute_ms: 17, wasted_ms: 99 },
       timings_ms: { vad: 3, tagging: 4, asr: 5 },
       agent_context: {
@@ -71,7 +72,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("MMP 2.0 自动预检能力发现", () => {
+describe("MMP v3 自动预检能力发现", () => {
   it("只用 purpose + Content-Type 解析唯一能力，不解释任务 id 或本地模态", () => {
     const available = registry();
     expect(resolveTriageCapability(available, "audio/mp4")?.id).toBe("triage.audio");
@@ -96,7 +97,7 @@ describe("MMP 2.0 自动预检能力发现", () => {
     expect(result.contextText).toBe("[mmp:agent-context start]\ntriage.audio：测试内容\n[mmp:agent-context end]");
     const job = calls.find((call) => call.url.endsWith("/jobs"))?.body;
     expect(job?.type).toBe("triage.audio");
-    expect(job?.media).toMatchObject({ get: { url: expect.stringContaining("attachments/audio.mp4") }, content_type: "video/mp4" });
+    expect((job?.arguments as Record<string, unknown>)?.media).toMatchObject({ get: { url: expect.stringContaining("attachments/audio.mp4") }, content_type: "video/mp4" });
   });
 
   it("预检记账只取 usage.compute_ms，不叠加 wasted_ms 或旧 timings", async () => {
@@ -105,7 +106,7 @@ describe("MMP 2.0 自动预检能力发现", () => {
       attachmentId: "aat_usage", mediaKind: "audio", mimeType: "audio/mp4", r2Key: "attachments/usage.mp4",
     }, { client, usage: { userId: "u1", productionId: null } });
     expect(usageMocks.record).toHaveBeenCalledWith({
-      userId: "u1", productionId: null, type: "triage.audio", tier: "cpu", computeMs: 17,
+      userId: "u1", productionId: null, type: "triage.audio", tier: "cpu", computeMs: 17, sourceId: "test-node-01",
     });
   });
 

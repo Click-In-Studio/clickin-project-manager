@@ -167,6 +167,30 @@ describe("判据④：harness 事件 → StreamLine → 现有 reducer", () => {
     ]);
   });
 
+  it("长任务进度与生成附件从 harness 进入同一个工具气泡", async () => {
+    const generated: RuntimeTool = {
+      name: "clickin__mmp-image-generate", label: "生成图片", description: "test", readOnly: true,
+      parameters: Type.Object({ prompt: Type.String() }),
+      execute: async (_id, _args, _signal, update) => {
+        update?.({ content: [], details: { status: "queued" }, progress: { text: "排队中", visibility: "channel", privacy: "public" } });
+        update?.({ content: [], details: { status: "running" }, progress: { text: "生成中（预计 12 秒）", visibility: "channel", privacy: "public" } });
+        return { content: [{ type: "text", text: "完成" }], details: { attachments: [
+          { attachmentId: "aat_generated", fileName: "image.png", mimeType: "image/png", fileSize: 24 },
+        ] } };
+      },
+    };
+    const call: ToolCall = { type: "toolCall", id: "m1", name: generated.name, arguments: { prompt: "鲸鱼" } };
+    const { lines, bubbles } = await collect(scriptedStream([{ calls: [call] }, { text: "生成好了" }]), [generated], "生成图片");
+    expect(lines.filter((line) => line.type === "tool-progress")).toEqual([
+      { type: "tool-progress", id: "m1", text: "排队中" },
+      { type: "tool-progress", id: "m1", text: "生成中（预计 12 秒）" },
+    ]);
+    expect(lines.find((line) => line.type === "tool-result")).toMatchObject({ attachments: [
+      { id: "aat_generated", fileName: "image.png", mimeType: "image/png", status: "ready" },
+    ] });
+    expect(bubbles[0]).toMatchObject({ kind: "tool", id: "m1", done: true, attachments: [{ id: "aat_generated" }] });
+  });
+
   it("工具被 tool_call 钩子 block：tool-result 带 isError，前端照常渲染为出错的工具气泡", async () => {
     const call: ToolCall = { type: "toolCall", id: "c3", name: "echo", arguments: { q: "no" } };
     const lines: StreamLine[] = [];

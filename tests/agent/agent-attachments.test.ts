@@ -6,17 +6,22 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
 import { runAttachmentGcBatch } from "@/lib/agent/attachment-db";
+import { createPendingAttachment } from "@/lib/agent/attachment-db";
+import { newRunId } from "@/lib/agent/runtime/ids";
+import { RUNNER_OWNER } from "@/lib/agent/runtime/config";
 
-const { presignMock, headMock, deleteMock } = vi.hoisted(() => ({
+const { presignMock, headMock, deleteMock, streamMock } = vi.hoisted(() => ({
   presignMock: vi.fn(),
   headMock: vi.fn(),
   deleteMock: vi.fn(),
+  streamMock: vi.fn(),
 }));
 vi.mock("@/lib/r2", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/r2")>(),
   presignedPut: presignMock,
   headR2Object: headMock,
   deleteR2Object: deleteMock,
+  getR2Stream: streamMock,
 }));
 
 let userId: string;
@@ -47,6 +52,9 @@ beforeEach(() => {
   presignMock.mockReset().mockReturnValue({ url: "https://r2.example/upload", contentType: "video/mp4" });
   headMock.mockReset().mockResolvedValue({ size: 12, contentType: "video/mp4" });
   deleteMock.mockReset().mockResolvedValue(undefined);
+  streamMock.mockReset().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), {
+    headers: { "content-type": "image/png", "content-length": "3" },
+  }));
 });
 
 afterAll(async () => {
@@ -87,6 +95,45 @@ describe("会话临时附件路由（#704）", () => {
     const completed = await PATCH(req("PATCH", { sessionKey: key, attachmentId: first.attachment.id }));
     expect(completed.status).toBe(200);
     expect((await completed.json()).attachment).toMatchObject({ mediaKind: "audio", status: "ready" });
+  });
+
+  it("附件预览流逐次核对登录、会话归属与 ready 状态，不签发 R2 URL", async () => {
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    const { POST, PATCH } = await import("@/app/api/agent/attachments/route");
+    const first = await (await POST(req("POST", { sessionKey: key, fileName: "generated.png", mimeType: "image/png", mediaKind: "image", fileSize: 3 }))).json();
+    headMock.mockResolvedValueOnce({ size: 3, contentType: "image/png" });
+    await PATCH(req("PATCH", { sessionKey: key, attachmentId: first.attachment.id }));
+    const { GET } = await import("@/app/api/agent/attachments/[id]/route");
+    const ctx = { params: Promise.resolve({ id: first.attachment.id }) };
+    expect((await GET(new NextRequest(`http://localhost/api/agent/attachments/${first.attachment.id}?sessionKey=${encodeURIComponent(key)}`), ctx)).status).toBe(401);
+    expect((await GET(new NextRequest(`http://localhost/api/agent/attachments/${first.attachment.id}?sessionKey=${encodeURIComponent(key)}`, {
+      headers: { cookie: outsiderCookie },
+    }), ctx)).status).toBe(403);
+    const response = await GET(new NextRequest(`http://localhost/api/agent/attachments/${first.attachment.id}?sessionKey=${encodeURIComponent(key)}`, {
+      headers: { cookie },
+    }), ctx);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(streamMock).toHaveBeenCalledWith(first.attachment.r2Key, null);
+  });
+
+  it("MMP 产物按 run/tool/output 原子占位并幂等复用，不借用 web_fetch URL 字段", async () => {
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    const runId = newRunId();
+    await getPool().query("INSERT INTO agent_session(id,user_id) VALUES($1,$2)", [key, userId]);
+    await getPool().query("INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at) VALUES($1,$2,'running',$3,now())", [runId, key, RUNNER_OWNER]);
+    const input = { sessionId: key, userId, fileName: "image.png", mimeType: "image/png", mediaKind: "image", fileSize: 1024,
+      source: { kind: "mmp" as const, runId, toolCallId: "call-1", outputName: "image", outputIndex: 0,
+        metadata: { capabilityId: "image.generate" } } };
+    const first = await createPendingAttachment(input);
+    const replay = await createPendingAttachment(input);
+    expect(replay.id).toBe(first.id);
+    expect(first).toMatchObject({ sourceKind: "mmp", sourceRunId: runId, sourceToolCallId: "call-1",
+      sourceOutputName: "image", sourceOutputIndex: 0, sourceUrl: null, sourceFinalUrl: null,
+      sourceMetadata: { capabilityId: "image.generate" } });
   });
 
   it("上传完成后按 R2 HEAD 实际大小校准预占", async () => {

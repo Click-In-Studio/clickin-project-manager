@@ -17,10 +17,10 @@ vi.mock("@/lib/agent/tools/doc-tools", () => ({
 import { focusedMmpToolNames, MMP_FOCUS_USER_TURNS } from "@/lib/agent/runtime/mmp-tool-focus";
 
 const capability = (id: string, accepts: string[]): Capability => ({
-  id, purpose: id, description: id,
+  id, visibility: "public", purpose: id, description: id,
   tiers: [{ tier: "cpu", engine: id, engine_version: "1", cost: "low" }],
-  input: { media: { presence: "required", accepts } },
-  output: { schema: { type: "object" }, agent_context: "none" },
+  input: { fields: [{ name: "media", kind: "media", required: true, accepts: accepts as [string, ...string[]], cardinality: { min: 1, max: 1 } }] },
+  output: { fields: [{ name: "result", kind: "json", required: true, schema: { type: "object" } }], agent_context: "none" },
 });
 const CAPS = [capability("audio_analyze", ["audio/*"]), capability("image_analyze", ["image/*"])];
 
@@ -37,8 +37,8 @@ describe("MMP 最近资源温层", () => {
       currentAttachmentIds: ["new_audio"],
       sessionId: "s", userId: "u", productionId: "p", capabilities: CAPS,
     });
-    expect(names).toContain("mmp.attachment.audio_analyze");
-    expect(names).not.toContain("mmp.attachment.image_analyze");
+    expect(names).toContain("mmp.audio_analyze");
+    expect(names).not.toContain("mmp.image_analyze");
   });
 
   it("当前 UI asset 与模型成功读取过的 asset 都进入资产温层；失败调用不算看过", async () => {
@@ -58,7 +58,7 @@ describe("MMP 最近资源温层", () => {
     const names = await focusedMmpToolNames({
       messages, sessionId: "s", userId: "u", productionId: "p", capabilities: CAPS,
     });
-    expect(names).toContain("mmp.asset.audio_analyze");
-    expect(names).toContain("mmp.asset.image_analyze");
+    expect(names).toContain("mmp.audio_analyze");
+    expect(names).toContain("mmp.image_analyze");
   });
 });

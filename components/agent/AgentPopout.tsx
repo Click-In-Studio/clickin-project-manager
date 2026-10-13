@@ -116,6 +116,7 @@ export default function AgentPopout({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previewToolCallId, setPreviewToolCallId] = useState<string | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(null);
   const [currentDocTitle, setCurrentDocTitle] = useState<string | null>(null);
   const [currentDocTags, setCurrentDocTags] = useState<string[]>([]);
   const [docAttached, setDocAttached] = useState(true);
@@ -129,6 +130,7 @@ export default function AgentPopout({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceRetryFile, setVoiceRetryFile] = useState<File | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -264,9 +266,21 @@ export default function AgentPopout({
     };
   }, [open, onClose]);
 
-  useEffect(() => {
+  const pinChatToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [bubbles, streaming]);
+  }, []);
+
+  useEffect(() => {
+    pinChatToBottom();
+  }, [bubbles, streaming, pinChatToBottom]);
+
+  useEffect(() => {
+    const content = scrollContentRef.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(pinChatToBottom);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [pinChatToBottom]);
 
   // 输入框随内容平滑长高（ChatGPT 等主流 webchat 的惯例），封顶后转内部滚动。
   useEffect(() => {
@@ -976,7 +990,8 @@ export default function AgentPopout({
       )}
 
       {/* 聊天区 */}
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div ref={scrollContentRef} className="min-h-full space-y-3">
         {loadingHistory && <p className="text-center text-sm text-zinc-400">加载中…</p>}
         {!loadingHistory && bubbles.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-center">
@@ -992,7 +1007,13 @@ export default function AgentPopout({
                 <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-zinc-900 px-3.5 py-2 text-sm text-white">
                   {b.text}
                   {b.attachments?.map((attachment) => (
-                    <div key={attachment.id} className="mt-1.5 flex max-w-full items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
+                    <div key={attachment.id} className="mt-1.5 max-w-full rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
+                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
+                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
+                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                        </button>
+                      )}
+                      <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>
                         <span className="shrink-0 text-amber-200">待释放</span>
@@ -1001,6 +1022,7 @@ export default function AgentPopout({
                       {(attachment.status === "deleting" || attachment.status === "expired") && <span className="shrink-0 text-zinc-400">已过期</span>}
                       {attachment.status === "promoted" && <span className="shrink-0 text-emerald-200">已存为资产</span>}
                       {(!attachment.status || attachment.status === "ready") && <button type="button" className="shrink-0 text-zinc-300 hover:text-white" title="立即删除" onClick={() => void updateHistoricalAttachment(attachment, "delete")}>✕</button>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1008,10 +1030,24 @@ export default function AgentPopout({
             );
           }
           if (b.kind === "assistant") {
+            const refs = attachmentReferences(b.text);
+            const known = new Map(bubbles.flatMap((item) => item.kind === "user" || item.kind === "tool" ? item.attachments ?? [] : []).map((item) => [item.id, item]));
+            const previous = i > 0 ? bubbles[i - 1] : undefined;
+            const previousIds = new Set(previous?.kind === "tool" ? previous.attachments?.map((item) => item.id) ?? [] : []);
             return (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-100 px-3.5 py-2 text-sm">
-                  <Markdown content={b.text} size="sm" />
+                  <Markdown content={refs.text} size="sm" />
+                  {refs.items.map((ref) => {
+                    const attachment = known.get(ref.id);
+                    if (previousIds.has(ref.id)) return null;
+                    if (!attachment || !attachment.mimeType.startsWith("image/") || attachment.status && attachment.status !== "ready") {
+                      return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">图片附件 {ref.id} 当前不可显示{ref.alt ? `：${ref.alt}` : ""}</p>;
+                    }
+                    return <button key={ref.key} type="button" className="mt-1.5 block max-w-full" onClick={() => setPreviewAttachment(attachment)}>
+                      <img src={attachmentPreviewUrl(activeKey!, attachment.id)} alt={ref.alt || attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                    </button>;
+                  })}
                   {b.streaming && !compacting && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
                 </div>
               </div>
@@ -1035,9 +1071,16 @@ export default function AgentPopout({
             return (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%]">
-                  <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} />
+                  <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} progress={b.progress}
+                    onCancel={!b.done && b.name.startsWith("clickin__mmp-") ? abort : undefined} />
                   {b.attachments?.map((attachment) => (
-                    <div key={attachment.id} className="mt-1.5 flex max-w-full items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
+                    <div key={attachment.id} className="mt-1.5 max-w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
+                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
+                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
+                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
+                        </button>
+                      )}
+                      <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>
                         <span className="shrink-0 text-amber-700">待释放</span>
@@ -1046,6 +1089,7 @@ export default function AgentPopout({
                       {(attachment.status === "deleting" || attachment.status === "expired") && <span className="shrink-0 text-zinc-400">已过期</span>}
                       {attachment.status === "promoted" && <span className="shrink-0 text-emerald-700">已存为资产</span>}
                       {(!attachment.status || attachment.status === "ready") && <button type="button" className="shrink-0 text-zinc-400 hover:text-zinc-700" title="立即删除" onClick={() => void updateHistoricalAttachment(attachment, "delete")}>✕</button>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1201,6 +1245,7 @@ export default function AgentPopout({
               </div>
             );
           })()}
+        </div>
       </div>
 
       {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
@@ -1398,6 +1443,19 @@ export default function AgentPopout({
         />
       )}
 
+      {previewAttachment && activeKey && createPortal(
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4" onClick={() => setPreviewAttachment(null)}>
+          <div className="flex max-h-full max-w-full flex-col gap-2" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-end gap-2 text-sm text-white">
+              <a className="rounded border border-white/40 px-2 py-1 hover:bg-white/10" href={`${attachmentPreviewUrl(activeKey, previewAttachment.id)}&download=1`}>下载</a>
+              <button type="button" className="rounded border border-white/40 px-2 py-1 hover:bg-white/10" onClick={() => setPreviewAttachment(null)}>关闭</button>
+            </div>
+            <img src={attachmentPreviewUrl(activeKey, previewAttachment.id)} alt={previewAttachment.fileName} className="max-h-[calc(100dvh-5rem)] max-w-[calc(100vw-2rem)] object-contain" />
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {/* portal 到 body：popout 容器带 transition-transform，transform 祖先会成为
           fixed 子孙的 containing block——不传送的话这个 modal 会被困在 440px
           侧栏里看不全（WikiProposalPreviewModal 同款问题同款修法）。 */}
@@ -1447,6 +1505,19 @@ export default function AgentPopout({
       )}
     </div>
   );
+}
+
+function attachmentPreviewUrl(sessionKey: string, attachmentId: string): string {
+  return `/api/agent/attachments/${encodeURIComponent(attachmentId)}?sessionKey=${encodeURIComponent(sessionKey)}`;
+}
+
+function attachmentReferences(text: string): { text: string; items: Array<{ id: string; alt: string; key: string }> } {
+  const items: Array<{ id: string; alt: string; key: string }> = [];
+  const cleaned = text.replace(/\[\[attachment:([a-z0-9_]+)(?:\|([^\]\r\n]{0,200}))?\]\]/gi, (_all, id: string, alt?: string) => {
+    items.push({ id, alt: alt?.trim() ?? "", key: `${id}:${items.length}` });
+    return "";
+  });
+  return { text: cleaned.trim(), items };
 }
 
 /** 调用参数里插件注入的调用者身份字段（_caller_user_id 等）——对模型是
@@ -1501,12 +1572,16 @@ function ToolCallBubble({
   isError,
   input,
   result,
+  progress,
+  onCancel,
 }: {
   name: string;
   done: boolean;
   isError?: boolean;
   input?: unknown;
   result?: unknown;
+  progress?: string;
+  onCancel?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const inputText = formatToolPayload(stripCallerFields(input));
@@ -1524,20 +1599,26 @@ function ToolCallBubble({
 
   return (
     <div className="max-w-[92%]">
-      <button
-        type="button"
-        disabled={!hasDetail}
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
-          failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
-        } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
-      >
-        {statusIcon}
-        {toolLabel(name)}
-        {hasDetail && <ChevronIcon direction={expanded ? "up" : "down"} size={10} />}
-      </button>
+      <div className="flex items-start gap-1.5">
+        <button
+          type="button"
+          disabled={!hasDetail}
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
+          className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-xl border px-3 py-1 text-left text-xs ${
+            failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
+          } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
+        >
+          <span className="mt-0.5 shrink-0">{statusIcon}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block break-words">{toolLabel(name)}</span>
+            {!done && progress && <span className="block break-words text-zinc-400">{progress}</span>}
+          </span>
+          {hasDetail && <span className="mt-0.5 shrink-0"><ChevronIcon direction={expanded ? "up" : "down"} size={10} /></span>}
+        </button>
+        {onCancel && <button type="button" onClick={onCancel} className="shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-500 hover:text-red-600">取消</button>}
+      </div>
       {expanded && hasDetail && (
         <div className="mt-1 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
           <p className="font-mono text-[10px] text-zinc-400">{name}</p>

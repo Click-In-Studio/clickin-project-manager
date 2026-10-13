@@ -54,7 +54,7 @@ export async function readSessionAttachment(
     fileSize: attachment.fileSize,
     fileName: attachment.fileName,
   };
-  // preflight 是通用 MMP 入口：不要先按宿主认识的文件种类分流。MMP 2.0
+  // preflight 是通用 MMP 入口：不要先按宿主认识的文件种类分流。MMP v3
   // 会用 purpose + Content-Type 决定当前和未来的媒体能力。
   if (input.mode === "preflight") {
     const preflight = await preflightAttachment({

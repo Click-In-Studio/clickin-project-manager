@@ -21,9 +21,9 @@ async function run(): Promise<string> {
   await getPool().query("INSERT INTO agent_run(id,session_id,status,owner,heartbeat_at) VALUES($1,$2,'running',$3,now()+interval '1 day')", [id,session,RUNNER_OWNER]);
   return id;
 }
-const job = { type: "ocr.structured", media: media.get("https://example.invalid/page.png") } as Parameters<MmpClient["run"]>[0];
+const job = { type: "ocr.structured", arguments: { media: media.get("https://example.invalid/page.png") } } satisfies Parameters<MmpClient["run"]>[0];
 function fake() {
-  const done={ job_id: "remote-test", status: "done", type: job.type, cached: false, media_id: "media-test", result: { text: "识别结果" }, source: { tier: "cpu",engine:"test",engine_version:"1",degraded:false } };
+  const done={ job_id: "remote-test", status: "done", type: job.type, cached: false, media_ids: { media: "media-test" }, outputs: { document: { kind: "json", value: { text: "识别结果" } } }, source: { tier: "cpu",engine:"test",engine_version:"1",generated_at:"2026-10-13T00:00:00Z",degraded:false } };
   const submit=vi.fn(async () => ({ job_id: "remote-test",status:"queued" }));
   const get=vi.fn(async () => done);
   const cancel=vi.fn(async () => ({ job_id:"remote-test",status:"cancelled" }));
@@ -32,7 +32,7 @@ function fake() {
 describe("MMP 持久操作与取消", () => {
   it("恢复使用原 job 身份和已保存结果，不再次提交或重复执行工具", async () => {
     const id=await run(), f=fake(); const abort=new AbortController();
-    const execute=vi.fn(async () => ({ content:[{type:"text" as const,text:await admittedMmpRun(f.client,job,{},"file-1").then((r)=>JSON.stringify(r.result))}],details:undefined }));
+    const execute=vi.fn(async () => ({ content:[{type:"text" as const,text:await admittedMmpRun(f.client,job,{},"file-1").then((r)=>JSON.stringify(r.outputs))}],details:undefined }));
     const tool=wrapTools([{ mcpName:"test",name:"test",label:"test",description:"test",parameters:{type:"object"},readOnly:true,execute }])[0];
     const first=await runInAdmission(id,abort.signal,()=>{},()=>tool.execute("call-1",{},abort.signal));
     const restored=await runInAdmission(id,abort.signal,()=>{},()=>tool.execute("call-1",{},abort.signal));
@@ -40,7 +40,8 @@ describe("MMP 持久操作与取消", () => {
     expect(f.get).toHaveBeenCalledWith("remote-test",expect.any(Number));
   });
   it("取消未确认保持占用，查到远程终态后才释放", async () => {
-    admissionLimits.mmp=1;
+    // 测试库可能保留其他用例故意制造的 unknown 远端任务；本例只验证自身终态收敛。
+    admissionLimits.mmp=100;
     const id=await run(), f=fake(), abort=new AbortController();
     f.get.mockImplementationOnce(async () => { abort.abort(); return {job_id:"remote-test",status:"running"} as typeof f.done; });
     f.cancel.mockImplementationOnce(async () => ({job_id:"remote-test",status:"running"}));
@@ -50,7 +51,7 @@ describe("MMP 持久操作与取消", () => {
     await reconcileMmpAdmissions(f.client);
     expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1", [id])).rows[0].state).toBe("done");
   });
-  it("提交响应丢失且无 job_id 时，不盲目再提交", async () => {
+  it("提交响应丢失且无 job_id 时不盲目再提交；父 run 终止并超过总超时后释放名额", async () => {
     const id=await run(), f=fake(), signal=new AbortController().signal;
     f.submit.mockRejectedValue(new MmpError("network","响应丢失"));
     await expect(runInAdmission(id,signal,()=>{},()=>admittedMmpRun(f.client,job,{},"file-3"))).rejects.toBeDefined();
@@ -58,7 +59,12 @@ describe("MMP 持久操作与取消", () => {
     expect(f.submit).toHaveBeenCalledTimes(1);
     const ticket=(await getPool().query("SELECT state,remote_id FROM agent_admission WHERE run_id=$1", [id])).rows[0];
     expect(ticket).toEqual({state:"unknown",remote_id:null});
-    await getPool().query("DELETE FROM agent_admission WHERE run_id=$1", [id]);
+    await getPool().query("UPDATE agent_run SET status='failed',ended_at=now() WHERE id=$1",[id]);
+    await getPool().query("UPDATE agent_admission SET started_at=now()-interval '11 minutes' WHERE run_id=$1 AND resource='mmp'",[id]);
+    await reconcileMmpAdmissions(f.client);
+    expect((await getPool().query("SELECT state FROM agent_admission WHERE run_id=$1",[id])).rows[0].state).toBe("failed");
+    expect(f.submit).toHaveBeenCalledTimes(1);
+    expect(f.get).not.toHaveBeenCalled();
   });
   it("失联任务已知 job_id 时，主任务停止后的对账继续请求远端取消并等待确认", async () => {
     const id=await run(),f=fake(),signal=new AbortController().signal;

@@ -17,14 +17,18 @@ export async function recordMmpUsage(args: {
   type: string;
   tier: string;
   computeMs: number;
+  sourceId?: string;
 }): Promise<number> {
   const credits = creditsFromMmpCompute(args.tier, args.computeMs);
   const paid = paidFromOf(await getQuotaStatus({ userId: args.userId, productionId: args.productionId }));
-  await getPool().query(
-    `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
-     VALUES ($1, $2, 'mmp_compute', $3, $4, $5, $6)`,
-    [args.userId, args.productionId, `mmp:${args.type}@${args.tier}`, Math.max(0, Math.round(args.computeMs)), credits, paid],
+  const inserted = await getPool().query(
+    `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from, source_id)
+     VALUES ($1, $2, 'mmp_compute', $3, $4, $5, $6, $7)
+     ON CONFLICT (kind, source_id) WHERE source_id IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [args.userId, args.productionId, `mmp:${args.type}@${args.tier}`, Math.max(0, Math.round(args.computeMs)), credits, paid, args.sourceId ?? null],
   );
+  if (!inserted.rowCount) return 0;
   if (paid === "extra" && credits > 0) {
     await chargeExtraCredits(await quotaOwnerOf(args.userId, args.productionId), credits).catch((e) =>
       console.error("[mmp] 额外额度扣款失败（用量已记）:", e),
