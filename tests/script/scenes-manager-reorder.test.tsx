@@ -399,3 +399,16 @@ describe("排序与 SSE 读取竞态", () => {
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')?.disabled).toBe(false);
   });
 });
+
+it("写入失败立即提示，重读未返回时仍暂停排序", async () => {
+  let resolveRead!: (value: unknown) => void;
+  fetchMock.mockImplementation((_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+    ? Promise.reject(new Error("断线")) : new Promise(resolve => { resolveRead = resolve; }));
+  await clickButton("调整顺序：第二章");
+  await clickButton("上移：第二章");
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("断线");
+  expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')?.disabled).toBe(true);
+  await act(async () => { resolveRead(getResponse(NEW_ORDER)); });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("已重新读取当前顺序");
+  expect(visibleNames()[1]).toContain("第二章");
+});
