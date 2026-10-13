@@ -6,7 +6,7 @@ import {
   quotaOwnerOf,
   chargeExtraCredits,
 } from "@/lib/agent/ai-quota";
-import { CHAT_MODEL } from "./config";
+import { resolveModel } from "./config";
 import { usdOfUsage } from "./billing";
 import type { SubagentJob } from "./subagent-db";
 import type { AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
@@ -60,7 +60,7 @@ export async function recordChildUsage(
             job.user_id,
             job.production_id,
             kind,
-            CHAT_MODEL.id,
+            job.model,
             tokens,
             billed,
             paid,
@@ -119,7 +119,7 @@ export async function checkpointChildUsage(job: SubagentJob): Promise<boolean> {
         input: u.input,
         output: u.output,
         cacheRead: u.cacheRead,
-        usd: usdOfUsage(u, CHAT_MODEL),
+        usd: usdOfUsage(u, resolveModel(job.model_selection.modelKey)),
       }))
     )
       allowed = false;

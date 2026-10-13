@@ -1,5 +1,6 @@
 export interface ChatSessionSummary {
   key: string;
+  modelSelection?: import("../model-types").ModelSelection;
   title: string;
   lastMessagePreview?: string;
   updatedAt?: number;

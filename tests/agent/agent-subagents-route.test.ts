@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/agent/subagents/route";
 import { GET as events } from "@/app/api/agent/subagents/events/route";
@@ -30,6 +30,7 @@ let parent: string;
 let outsiderParent: string;
 let child: string;
 beforeAll(async () => {
+  vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
   owner = (
     await upsertFeishuUser(`sa-route-${shortId()}`, "委托者", null, false)
   ).userId;
@@ -72,6 +73,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
+  vi.unstubAllEnvs();
 });
 function req(
   userId: string | null,

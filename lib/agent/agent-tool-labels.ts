@@ -5,6 +5,7 @@
 const MCP_TOOL_PREFIX = "clickin__";
 
 export const TOOL_LABELS: Record<string, string> = {
+  "model_list": "查看可用模型",
   "subagent-spawn": "委托子助理",
   "subagent-list": "查看子助理状态",
   "subagent-read": "核对子助理证据",

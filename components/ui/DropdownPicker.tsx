@@ -7,7 +7,7 @@
  * 不受模态/容器 overflow 裁剪。大列表友好（限高内滚 + 搜索）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export type DropdownPickerItem = {
@@ -36,6 +36,14 @@ type Props = {
   clearLabel?: string;
   searchPlaceholder?: string;
   disabled?: boolean;
+  /** 输入工具栏使用无边框的文字入口。 */
+  appearance?: "field" | "text";
+  /** 小列表不必常驻搜索框；缺省保留已有搜索行为。 */
+  searchableAfter?: number;
+  ariaLabel?: string;
+  showIndicator?: boolean;
+  triggerContent?: ReactNode;
+  footer?: ReactNode;
   /** 多选触发按钮文案（缺省"已选 N 人"） */
   multiCountLabel?: (n: number) => string;
   /** 单选：选中即回调并收起；清除回调 null。多选：切换项逐个回调 onToggle */
@@ -53,11 +61,12 @@ const POP_MAX_H = 300;
 
 export default function DropdownPicker({
   items, value, values, multi, placeholder, clearLabel, searchPlaceholder, disabled,
-  multiCountLabel, onChange, onToggle,
+  multiCountLabel, onChange, onToggle, appearance = "field", searchableAfter = 0, ariaLabel,
+  showIndicator = true, triggerContent, footer,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; up: boolean; maxHeight: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -68,11 +77,13 @@ export default function DropdownPicker({
     const r = el.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom;
     const up = spaceBelow < POP_MAX_H + 60 && r.top > spaceBelow;
+    const width = Math.min(Math.max(r.width, 240), window.innerWidth - 20);
     setPos({
       top: up ? r.top - 4 : r.bottom + 4,
-      left: r.left,
-      width: r.width,
+      left: Math.max(10, Math.min(r.left, window.innerWidth - width - 10)),
+      width,
       up,
+      maxHeight: Math.max(48, Math.min(POP_MAX_H, (up ? r.top : spaceBelow) - 14)),
     });
   }, []);
 
@@ -166,37 +177,45 @@ export default function DropdownPicker({
       <button
         ref={triggerRef}
         type="button"
+        aria-label={ariaLabel}
         disabled={disabled}
+        className={appearance === "text" ? "dropdown-picker-text" : undefined}
         aria-expanded={open}
+        data-dropdown-picker-open={open ? "true" : undefined}
         onClick={() => setOpen(o => !o)}
         style={{
-          ...FIELD,
-          fontWeight: selectedLabel || selectedCount ? 700 : 400,
+          ...(appearance === "field" ? {
+            ...FIELD,
+            fontWeight: selectedLabel || selectedCount ? 700 : 400,
+            display: "flex", alignItems: "center", gap: 8,
+          } : {}),
           color: selectedLabel || selectedCount ? "var(--ink)" : "var(--muted)",
           opacity: disabled ? 0.5 : 1,
-          display: "flex", alignItems: "center", gap: 8,
         }}
       >
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selectedLabel
-            ?? (selectedCount > 0 ? (multiCountLabel?.(selectedCount) ?? `已选 ${selectedCount} 人`) : placeholder)}
-        </span>
-        <span style={{ fontSize: 9, color: "var(--muted)", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
+        {triggerContent ?? (
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {selectedLabel
+              ?? (selectedCount > 0 ? (multiCountLabel?.(selectedCount) ?? `已选 ${selectedCount} 人`) : placeholder)}
+          </span>
+        )}
+        {showIndicator && <span style={{ fontSize: 9, color: "var(--muted)", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>}
       </button>
 
       {open && pos && typeof document !== "undefined" && createPortal(
         <div
           ref={popRef}
+          data-dropdown-picker-menu
           style={{
             position: "fixed", zIndex: 120,
-            left: pos.left, width: Math.max(pos.width, 240),
+            left: pos.left, width: pos.width, maxHeight: pos.maxHeight,
             ...(pos.up ? { bottom: window.innerHeight - pos.top } : { top: pos.top }),
             background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 10,
             boxShadow: "0 12px 32px rgba(24,42,42,.2)", overflow: "hidden",
             display: "flex", flexDirection: "column",
           }}
         >
-          <div style={{ padding: 8, borderBottom: "1px solid var(--line)" }}>
+          {items.filter((item) => !item.header).length > searchableAfter && <div style={{ padding: 8, borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
             <input
               ref={searchRef}
               value={query}
@@ -204,8 +223,8 @@ export default function DropdownPicker({
               placeholder={searchPlaceholder ?? "搜索…"}
               style={{ ...FIELD, cursor: "text", padding: "7px 10px" }}
             />
-          </div>
-          <div style={{ maxHeight: POP_MAX_H - 50, overflowY: "auto", padding: 4 }}>
+          </div>}
+          <div style={{ minHeight: 0, overflowY: "auto", padding: 4 }}>
             {!multi && clearLabel && (
               <button
                 type="button"
@@ -280,6 +299,7 @@ export default function DropdownPicker({
                 无匹配项
               </p>
             )}
+            {footer}
           </div>
         </div>,
         document.body,

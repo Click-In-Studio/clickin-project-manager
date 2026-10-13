@@ -1,3 +1,6 @@
+import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
+import type { ModelKey } from "../model-types";
 import { setToolObservationSources } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools, type PrepareAdmittedRequest } from "./admission";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
@@ -12,8 +15,6 @@ import type {
 import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import { PgSessionStorage } from "./pg-session-storage";
 import {
-  CHAT_MODEL,
-  deepseekApiKey,
   llmRuntime,
   HEARTBEAT_INTERVAL_MS,
   ORPHAN_AFTER_MS,
@@ -79,6 +80,8 @@ export async function spawnSubagent(
     context?: string;
     completionCriteria?: string;
     sources?: SubagentSource[];
+    modelKey?: ModelKey;
+    attachmentIds?: string[];
   },
   callId?: string,
 ): Promise<string> {
@@ -90,6 +93,7 @@ export async function spawnSubagent(
     task: input.task,
     criteria: input.completionCriteria,
     sources: input.sources,
+    modelKey: input.modelKey, attachmentIds: input.attachmentIds,
     delegationKey: callId ? `${parent.runId}:${callId}` : undefined,
     message: JSON.stringify({
       task: input.task,
@@ -108,6 +112,7 @@ export async function sendSubagent(
   message: string,
   sources: SubagentSource[] = [],
   callId?: string,
+  attachmentIds: string[] = [],
 ): Promise<string> {
   await db.ownSubagent(parent.sessionId, id);
   validateSources(sources);
@@ -116,7 +121,7 @@ export async function sendSubagent(
     parentRunId: parent.runId,
     id,
     message,
-    sources,
+    sources, attachmentIds,
     delegationKey: callId ? `${parent.runId}:${callId}` : undefined,
   });
   await drainQueuedSubagents();
@@ -206,6 +211,9 @@ async function executeBody(
   let error: string | null = null;
   let costTail = Promise.resolve();
   const sources = await db.subagentSources(job.subagent_id);
+  const selection = job.model_selection;
+  const selectedModel = resolveModel(selection.modelKey);
+  const mediaInput = { sessionId: job.parent_session_id, userId: job.user_id, productionId: job.production_id, runId: job.id, model: selectedModel, signal: abort.signal };
   const tools: RuntimeToolDef[] = [
     {
       mcpName: "material_read",
@@ -261,17 +269,28 @@ async function executeBody(
       },
     },
   ];
+  if (job.attachment_ids.length) tools.push({ mcpName: "my.attachment_read", name: exposedName("my.attachment_read"), label: "重读交接原件", readOnly: true,
+    description: "重新读取此次子任务交接的原生媒体。仅接受明确交接的 attachmentId，缺少其他材料请 need_context。",
+    parameters: Type.Object({ attachmentId: Type.String() }),
+    execute: async (_call, args) => {
+      const id = String((args as { attachmentId: string }).attachmentId);
+      if (!job.attachment_ids.includes(id)) throw new Error("附件不在此次交接范围内");
+      const prepared = await prepareModelAttachments("重读交接原件", [id], mediaInput);
+      return { content: [{ type: "text" as const, text: prepared.text }, ...prepared.media], details: undefined };
+    } });
   setToolObservationSources({ resident: tools.map(t => t.name) });
-  const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal }) => {
+  const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal, calibration }) => {
     const serviceRuntime = (await import("./service")).runtimeOverrides;
     return compactRequestContext({
       session,
       context,
       model,
-      apiKey: serviceRuntime.apiKey ?? deepseekApiKey(),
+      apiKey: serviceRuntime.apiKey ?? modelApiKey(selectedModel),
       signal,
       trigger,
       maxTokens: options?.maxTokens,
+      streamOptions: options, calibration,
+      prepareMessages: (messages) => restoreModelMedia(messages, mediaInput),
       completeSimple: llmRuntime().completeSimple,
       compactFn: serviceRuntime.compactFn,
       shouldCompact: serviceRuntime.shouldCompactFn,
@@ -299,14 +318,15 @@ async function executeBody(
     tools: wrapTools(tools),
     activeToolNames: tools.map((t) => t.name),
     systemPrompt: SYSTEM,
-    model: CHAT_MODEL,
-    thinkingLevel: "low",
+    model: selectedModel,
+    thinkingLevel: selection.thinkingLevel,
+    streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
     getApiKeyAndHeaders: async () => {
       // harness 在异步准备期间尚未建立自己的取消控制器，外部停止必须在请求前再检查。
       if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
       return {
         apiKey:
-          (await import("./service")).runtimeOverrides.apiKey ?? deepseekApiKey(),
+          (await import("./service")).runtimeOverrides.apiKey ?? modelApiKey(selectedModel),
       };
     },
     runtime: {
@@ -315,6 +335,7 @@ async function executeBody(
       completeSimple: llmRuntime().completeSimple,
     },
   });
+  harness.on("context", async ({ messages }) => ({ messages: await restoreModelMedia(messages, mediaInput) }));
   ready({
     stop: async () => {
       abort.abort();
@@ -399,8 +420,11 @@ async function executeBody(
           (e) => e.type === "message" && e.message.role === "toolResult",
         ).length;
     if (!present) {
+      const ready = await (await import("../attachment-db")).getReadyAttachments(job.attachment_ids, job.parent_session_id, job.user_id);
+      const missing = job.attachment_ids.filter(id => !ready.some(item => item.id === id));
+      const prepared = await prepareModelAttachments(missing.length ? `交接原件当前不可读：${missing.join("、")}。历史分析仍可参考，不得声称本次读到原件。\n` : "", ready.map(item => item.id), mediaInput);
       await harness.prompt(
-        neutralizeInjectionTags(job.initial_message) +
+        neutralizeInjectionTags(job.initial_message) + prepared.text +
           "\n\n交接材料目录（正文按需读取）：\n" +
           neutralizeInjectionTags(
             JSON.stringify(
@@ -412,7 +436,7 @@ async function executeBody(
               })),
             ),
           ),
-        { entryId },
+        { entryId, media: prepared.media },
       );
     } else {
       const decision = await repairAndClassify(

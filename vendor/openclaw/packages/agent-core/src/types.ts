@@ -3,7 +3,7 @@ import type { Static, TSchema } from "typebox";
 import type {
   AssistantMessage,
   AssistantMessageEvent,
-  ImageContent,
+  MediaContent,
   Message,
   Model,
   SimpleStreamOptions,
@@ -78,7 +78,7 @@ export interface DeferredToolCallContext {
  * There is no deep merge for `content` or `details`.
  */
 export interface AfterToolCallResult {
-  content?: (TextContent | ImageContent)[];
+  content?: (TextContent | MediaContent)[];
   details?: unknown;
   isError?: boolean;
   /**
@@ -337,7 +337,7 @@ export interface CustomMessage<T = unknown> {
   /** Application-defined discriminator for rendering or handling this message. */
   customType: string;
   /** Content replayed into model context when this message is included. */
-  content: string | (TextContent | ImageContent)[];
+  content: string | (TextContent | MediaContent)[];
   /** Whether UI surfaces should display this message. */
   display: boolean;
   /** Optional application-specific metadata. */
@@ -440,7 +440,7 @@ export interface AgentToolProgress {
 /** Final or partial result produced by a tool. */
 export interface AgentToolResult<T> {
   /** Text or image content returned to the model. */
-  content: (TextContent | ImageContent)[];
+  content: (TextContent | MediaContent)[];
   /** Arbitrary structured details for logs or UI rendering. */
   details: T;
   /** Optional public progress hint for partial tool updates; never model content. */

@@ -247,6 +247,35 @@ export interface ImageContent {
   mimeType: string; // e.g., "image/jpeg", "image/png"
 }
 
+export type MediaKind = "image" | "audio" | "video" | "file";
+/** 轨迹恢复保留媒体身份；原件字节只为实际请求准备。 */
+export interface MediaContent {
+  type: MediaKind;
+  mimeType: string;
+  data?: string;
+  attachmentId?: string;
+  fileName?: string;
+  source?: { kind: "attachment"; sha256: string };
+  budget?: {
+    bytes: number; base64Chars: number; estimatedTokens: number; basis: string;
+    width?: number; height?: number; pages?: number; durationSeconds?: number;
+  };
+}
+
+export interface NativeMediaCapability {
+  kind: MediaKind;
+  mimeTypes: string[];
+  transports: "inline"[];
+  maxBytes: number;
+  maxRequestBytes: number;
+  maxRequestBase64Chars: number;
+  maxCount: number;
+  maxPixels?: number;
+  maxPages?: number;
+  maxDurationSeconds?: number;
+  tokenEstimate: { perMegapixel?: number; perPage?: number; perSecond?: number; minimum: number };
+}
+
 /** Normalized assistant tool call emitted by providers or repaired from text. */
 export interface ToolCall {
   type: "toolCall";
@@ -285,7 +314,7 @@ export type StopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 /** User turn in a text-model conversation. */
 export interface UserMessage {
   role: "user";
-  content: string | (TextContent | ImageContent)[];
+  content: string | (TextContent | MediaContent)[];
   timestamp: number; // Unix timestamp in milliseconds
   /**
    * Marks a user message that carries transient current-turn runtime context
@@ -322,7 +351,7 @@ export interface ToolResultMessage<TDetails = unknown> {
   role: "toolResult";
   toolCallId: string;
   toolName: string;
-  content: (TextContent | ImageContent)[]; // Supports text and images
+  content: (TextContent | MediaContent)[];
   details?: TDetails;
   isError: boolean;
   timestamp: number; // Unix timestamp in milliseconds
@@ -608,7 +637,8 @@ export interface Model<TApi extends Api = Api> {
    * Missing keys use provider defaults. null marks a level as unsupported.
    */
   thinkingLevelMap?: ThinkingLevelMap;
-  input: ("text" | "image")[];
+  input: ("text" | MediaKind)[];
+  nativeMedia?: NativeMediaCapability[];
   cost: {
     input: number; // $/million tokens
     output: number; // $/million tokens
@@ -665,7 +695,7 @@ export type StreamFn = (
 
 export type CompleteSimpleFn = (
   model: Model,
-  context: Pick<Context, "systemPrompt" | "messages">,
+  context: Context,
   options?: SimpleStreamOptions,
 ) => Promise<AssistantMessage>;
 

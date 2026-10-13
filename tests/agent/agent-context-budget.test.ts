@@ -48,23 +48,23 @@ describe("模型请求上下文预算", () => {
     expect(withTool.estimatedInputTokens).toBeGreaterThan(withSystem.estimatedInputTokens);
     expect(withTransient.estimatedInputTokens).toBeGreaterThan(withTool.estimatedInputTokens);
     expect(withTransient.effectiveContextWindow).toBe(900);
-    expect(withTransient.outputReserveTokens).toBe(300);
-    expect(withTransient.pressureThreshold).toBe(600);
+    expect(withTransient.outputReserveTokens).toBe(200);
+    expect(withTransient.pressureThreshold).toBe(700);
     expect(withTransient.pressured).toBe(true);
   });
 
   it("摘要余量和近期原文按有效窗口与本次输出预算派生，不沿用 Harness 默认值", () => {
     expect(compactionSettingsFor(MODEL, { maxTokens: 300 })).toEqual({
       enabled: true,
-      reserveTokens: 300,
-      keepRecentTokens: 300,
+      reserveTokens: 200,
+      keepRecentTokens: 180,
     });
     expect(compactionSettingsFor(MODEL, { maxTokens: 300 }, true)).toEqual({
       enabled: true,
-      reserveTokens: 300,
+      reserveTokens: 200,
       keepRecentTokens: 0,
     });
-    expect(compactionSettingsFor({ ...MODEL, contextTokens: 2_000 }, { maxTokens: 300 }).keepRecentTokens).toBe(400);
+    expect(compactionSettingsFor({ ...MODEL, contextTokens: 2_000 }, { maxTokens: 300 }).keepRecentTokens).toBe(200);
   });
 });
 
@@ -166,6 +166,6 @@ describe("压缩结果护栏", () => {
     expect(request).toContain("[b:block-middle]");
     expect(request).toContain("第37行预算=65000");
     expect(request).toContain("p12.8 / ¶41");
-    expect(request).toContain("newly read material");
+    expect(request).toContain("structured context checkpoint");
   });
 });

@@ -13,12 +13,14 @@ import { toolRecall } from "@/lib/agent/tools/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [
+  "model_list",
   ...SUBAGENT_TOOL_NAMES,
   "my.productions", "my.memory_search", "my.attachment_read", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
 const HOT_PRODUCTION = [
+  "model_list",
   ...SUBAGENT_TOOL_NAMES,
   "my.productions", "my.memory_search", "my.attachment_read", "my.call_times",
   "production.info", "production.my_role", "production.notifications",

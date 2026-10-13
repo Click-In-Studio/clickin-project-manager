@@ -1,3 +1,4 @@
+import { saveModelSelection } from "@/lib/agent/runtime/model-settings-db";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
 import { deleteSession, renameSession } from "@/lib/agent/runtime/client";
@@ -11,11 +12,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ke
   const denied = requireOwnership(key, auth.userId);
   if (denied) return denied;
 
-  let body: { title?: unknown };
+  let body: { title?: unknown; modelSelection?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (body.modelSelection !== undefined) {
+    try { await saveModelSelection(key, auth.userId, body.modelSelection); return NextResponse.json({ ok: true }); }
+    catch (err) { return toErrorResponse(err); }
   }
   const { title } = body;
   if (!title || typeof title !== "string") {

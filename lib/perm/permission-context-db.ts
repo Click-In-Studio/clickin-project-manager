@@ -10,6 +10,7 @@
  * member-status.ts；本文件只读它们写下的行。
  */
 import { getPool } from "../pg";
+import type { PoolClient } from "pg";
 import type { PermissionContext } from "./permissions";
 
 type AtomicPermission = string;
@@ -70,10 +71,11 @@ export async function getProductionPermissionContext(
   userId: string,
   isAdmin: boolean,
   productionId: string,
+  client?: PoolClient,
 ): Promise<ProductionAccess | null> {
-  const pool = getPool();
+  const pool = client ?? getPool();
 
-  const [memberRow, dbPermsRow, deptRow, productionRow] = await Promise.all([
+  const reads = [
     // Is user a member? And what are their role strings?
     //
     // status = 'active' 是访问闸门（#141）。suspended / exited 的成员行还在——
@@ -81,12 +83,12 @@ export async function getProductionPermissionContext(
     // 「停用」就只是名册上的一条删除线：人照样拿角色权限、部门权限与 resource grant。
     // 注意闸门只管 isMember：owner 走下面的 isOwner 分支，不受影响（owner 退出
     // 必须先转移 owner，见 #141）。
-    pool.query<{ roles: string[] }>(
+    () => pool.query<{ roles: string[] }>(
       "SELECT roles FROM production_member WHERE user_id = $1 AND production_id = $2 AND status = 'active'",
       [userId, productionId],
     ),
     // Try FK-backed permissions first (production_member_role populated after migration/setMemberRoles)
-    pool.query<{ permission_key: string }>(
+    () => pool.query<{ permission_key: string }>(
       `SELECT DISTINCT prp.permission_key
        FROM production_member_role pmr
        JOIN production_role_permission prp ON prp.role_id = pmr.role_id
@@ -94,17 +96,21 @@ export async function getProductionPermissionContext(
       [userId, productionId],
     ),
     // Department memberships（并表后单一 production_dept 数据源）
-    pool.query<{ dept_id: string; is_poc: boolean }>(
+    () => pool.query<{ dept_id: string; is_poc: boolean }>(
       `SELECT pdm.dept_id, pdm.is_poc
        FROM production_dept_member pdm
        WHERE pdm.user_id = $1 AND pdm.production_id = $2`,
       [userId, productionId],
     ),
-    pool.query<{ archived_at: Date | null; owner_id: string | null }>(
+    () => pool.query<{ archived_at: Date | null; owner_id: string | null }>(
       "SELECT archived_at, owner_id FROM production WHERE id = $1",
       [productionId],
     ),
-  ]);
+  ] as const;
+  // 单一事务连接按序读；普通请求继续并行借用连接池。
+  const [memberRow, dbPermsRow, deptRow, productionRow] = client
+    ? [await reads[0](), await reads[1](), await reads[2](), await reads[3]()]
+    : await Promise.all([reads[0](), reads[1](), reads[2](), reads[3]()]);
 
   const prodRow = productionRow.rows[0];
   const isOwner = prodRow?.owner_id != null && prodRow.owner_id === userId;

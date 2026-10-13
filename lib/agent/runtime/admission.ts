@@ -212,11 +212,13 @@ export type PrepareAdmittedRequest = (input: {
   context: Context;
   options: SimpleStreamOptions | undefined;
   trigger: "pressure" | "context-overflow";
+  calibration?: number;
   signal: AbortSignal;
 }) => Promise<Context>;
 
 /** 资源准入内完成请求前预算控制；超窗只有在上下文确实缩减后才有限重试。 */
 export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmittedRequest): StreamFn {
+  let calibration = 1;
   return (model, context, options) => {
     const scope = scopeStorage.getStore();
     if (!scope) return streamFn(model, context, options);
@@ -237,17 +239,22 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
         }
         signal.throwIfAborted();
         let requestContext = prepareRequest
-          ? await prepareRequest({ model, context, options, trigger: "pressure", signal })
+          ? await prepareRequest({ model, context, options, trigger: "pressure", signal, calibration })
           : context;
         let overflowRetries = 0;
         for (;;) {
           signal.throwIfAborted();
+          if (prepareRequest && !estimateRequestBudget(model, requestContext, options, calibration).fits) throw new Error("完整请求超过运行预算，请缩小任务或附件范围");
           observation = await observeModelRequest(model, requestContext, "chat", performance.now() - queuedAt, options?.maxTokens);
           const stream = await streamFn(model, requestContext, {...options,signal});
           let retry = false;
           let emitted = false;
           for await (const event of stream) {
-            if (event.type === "done") { result = event.message; observedResult = event.message; }
+            if (event.type === "done") {
+              result = event.message; observedResult = event.message;
+              const estimate = estimateRequestBudget(model, requestContext, options).heuristicTokens;
+              if (estimate > 0) calibration = Math.max(calibration, (result.usage.input + result.usage.cacheRead + result.usage.cacheWrite) / estimate);
+            }
             if (event.type === "error") observedResult = event.error;
             if (event.type === "done" || event.type === "error") {
               const contextOverflow = event.type === "error"
@@ -272,7 +279,7 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
                 context: requestContext,
                 options,
                 trigger: "context-overflow",
-                signal,
+                signal, calibration,
               });
               const after = estimateRequestBudget(model, recovered, options).estimatedInputTokens;
               if (!signal.aborted && after < before) {
@@ -284,7 +291,7 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
               }
             }
             out.push(event);
-            emitted = true;
+            emitted ||= event.type !== "start";
           }
           if (!retry) break;
         }

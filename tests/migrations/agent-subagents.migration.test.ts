@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { getPool } from "@/lib/pg";
 import {
   makeProduction,
+  setProductionTier,
   cleanupProduction,
   shortId,
 } from "../_support/factories";
@@ -20,8 +21,11 @@ beforeAll(async () => {
     false,
   ));
   ({ prodId } = await makeProduction(userId));
+  await setProductionTier(prodId, "pro");
+  vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
 });
 afterAll(async () => {
+  vi.unstubAllEnvs();
   await cleanupProduction(prodId).catch(() => {});
 });
 describe("子 Agent schema 与完整性", () => {

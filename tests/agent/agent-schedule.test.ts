@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
@@ -78,6 +78,7 @@ describe("定时任务", () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `sched-${shortId()}`, null, false));
     ({ prodId } = await makeProduction(userId));
     await setProductionTier(prodId, "pro");
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
   });
   afterAll(async () => {
@@ -87,6 +88,7 @@ describe("定时任务", () => {
     await getPool().query(`DELETE FROM agent_session WHERE user_id = $1`, [userId]).catch(() => {});
     await getPool().query(`DELETE FROM user_notification WHERE user_id = $1`, [userId]).catch(() => {});
     await cleanupProduction(prodId).catch(() => {});
+    vi.unstubAllEnvs();
   });
 
   it("注册表：只有 wiki 新建/更新可无人值守；删除类永不", () => {

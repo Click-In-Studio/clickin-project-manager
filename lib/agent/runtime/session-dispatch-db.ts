@@ -51,6 +51,7 @@ export async function claimPendingSession(
   runId: string,
   owner: string,
   model: string,
+  selection?: import("../model-types").ModelSelection,
 ): Promise<InboxRow[] | null> {
   const client = await getPool().connect();
   try {
@@ -99,6 +100,8 @@ export async function claimPendingSession(
       "UPDATE agent_session_inbox SET claimed_run_id=$2 WHERE id=ANY($1::text[])",
       [pending.rows.map((r) => r.id), runId],
     );
+    await client.query(`UPDATE agent_run SET model=COALESCE((SELECT model FROM agent_run WHERE id=$3),model), model_selection=COALESCE(
+      (SELECT model_selection FROM agent_run WHERE id=$3),$2::jsonb) WHERE id=$1`, [runId, JSON.stringify(selection ?? (await import("./config")).defaultModelSelection()), budget]);
     await client.query("COMMIT");
     return pending.rows;
   } catch (error) {

@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
-import { makeProduction, cleanupProduction, makeScene, shortId } from "../_support/factories";
+import { makeProduction, setProductionTier, cleanupProduction, makeScene, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
@@ -13,6 +13,8 @@ import {
 } from "@/lib/agent/runtime/service";
 import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/events";
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
+import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
+import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { CHAT_MODEL, llmRuntime } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
@@ -102,6 +104,7 @@ describe("agent-runtime service", () => {
     ({ userId: pendingUserId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-perm-${shortId()}`, null, false));
     ({ userId: denyingUserId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deny-${shortId()}`, null, false));
     const made = await makeProduction(userId);
+    await setProductionTier(made.prodId, "pro");
     prodId = made.prodId;
     pendingSceneId = await makeScene(prodId, made.versionId, { number: "1", name: "待改场次" });
     await addProductionMember(prodId, pendingUserId);
@@ -123,6 +126,7 @@ describe("agent-runtime service", () => {
       "INSERT INTO production_member_role (production_id, user_id, role_id) VALUES ($1, $2, $3)",
       [prodId, denyingUserId, roleId],
     );
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     // 与 MMP 无关的 runtime 用例不碰 .env.local 指向的真实服务；媒体用例单独开启。
     runtimeOverrides.mmpClient = null;
@@ -130,11 +134,12 @@ describe("agent-runtime service", () => {
 
   afterAll(async () => {
     delete runtimeOverrides.streamFn;
-    delete runtimeOverrides.apiKey;
     delete runtimeOverrides.mmpClient;
     delete runtimeOverrides.compactFn;
     delete runtimeOverrides.shouldCompactFn;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
     await cleanupProduction(prodId).catch(() => {});
   });
 
@@ -142,6 +147,15 @@ describe("agent-runtime service", () => {
     const key = createNewSessionKey(userId, withProduction ? prodId : undefined);
     sessions.push(key);
     return key;
+  }
+
+  async function seedHistory(key: string) {
+    const storage = await PgSessionStorage.create({ id: key, userId, productionId: prodId });
+    const session = new Session(storage);
+    for (let i = 0; i < 4; i++) {
+      await session.appendMessage({ role: "user", content: "旧历史".repeat(3_000), timestamp: i });
+      await session.appendMessage({ ...base(), content: [{ type: "text", text: "已处理这批资料" }], stopReason: "stop" });
+    }
   }
 
   it("纯文本一轮：会话行自动建立并带关联；事件落表（delta 合并、final 收尾）→ 现有 reducer；历史投影；记账", async () => {
@@ -178,8 +192,8 @@ describe("agent-runtime service", () => {
     // 限流的账（#383）：整轮的钱记在 chat_input 一行上，其余行 0（token 记三行、
     // 钱记一行，聚合才不会重复计）。这一条断言的是**真 run 全链路**——
     // usage → Model.cost → 美元 → credit → 落库；单价表填 0 或折算断链会红。
-    // 数值 = 7×$0.44/1M + 3×$1.32/1M 折成 credit = 7 + 9 = 16。
-    expect(Number(usage.rows[0].billed_credits)).toBe(16);
+    // 数值 = 7×$0.3/1M + 3×$1.2/1M，按当前汇率折成 credit = 13。
+    expect(Number(usage.rows[0].billed_credits)).toBe(13);
     expect(Number(usage.rows[1].billed_credits)).toBe(0);
     expect(usage.rows.every((r) => r.paid_from === "quota")).toBe(true);
 
@@ -441,7 +455,7 @@ describe("agent-runtime service", () => {
       const { runId } = await startRun({
         sessionId: key,
         userId,
-        message: `把这条个人指令写入一次。背景材料：${"旧上下文".repeat(30_000)}`,
+        message: `把这条个人指令写入一次。背景材料：${"旧上下文".repeat(15_000)}`,
       });
       let approvalId: string | undefined;
       for (let i = 0; i < 200 && !approvalId; i++) {
@@ -601,35 +615,35 @@ describe("agent-runtime service", () => {
     if (steered) expect(texts.some((t) => t.includes("补一句"))).toBe(true);
   });
 
-  it("分割回合压缩的历史和前缀各自请求，并沿用原请求头", async () => {
-    const complete=vi.spyOn(llmRuntime(),"completeSimple").mockImplementation(async(_model,ctx)=>({...base(),content:[{type:"text",text:ctx.systemPrompt!}],stopReason:"stop"}));
-    let checks=0;
-    runtimeOverrides.shouldCompactFn=()=>checks++===0;
-    runtimeOverrides.compactFn=async(...args)=>{
-      const rt=args[9]!;
-      const history=await rt.completeSimple(args[2],{messages:[],systemPrompt:args[1].systemPrompt});
-      const prefix=await rt.completeSimple(args[2],{messages:[],systemPrompt:args[1].systemPrompt});
-      return {ok:true,value:{summary:JSON.stringify([history.content,prefix.content]),firstKeptEntryId:args[0].firstKeptEntryId,tokensBefore:args[0].tokensBefore}};
-    };
-    runtimeOverrides.streamFn=scripted([{text:"执行完毕"}]).streamFn;
-    const key=newKey();
+  it("完整历史压缩只请求一次摘要，沿用原请求头并独立记账", async () => {
+    const complete = vi.spyOn(llmRuntime(), "completeSimple").mockResolvedValue({
+      ...base(), content: [{ type: "text", text: "旧材料已经处理，保留当前用户目标。" }], stopReason: "stop",
+    });
+    let checks = 0;
+    runtimeOverrides.shouldCompactFn = () => checks++ === 0;
+    runtimeOverrides.streamFn = scripted([{ text: "执行完毕" }]).streamFn;
+    const key = newKey();
+    await seedHistory(key);
     try {
       const usageCursor = Number((await getPool().query("SELECT COALESCE(max(id),0) AS id FROM ai_usage")).rows[0].id);
-      const started=await startRun({sessionId:key,userId,message:"旧上下文".repeat(60_000)});
-      await collectUntilTerminal(key);await waitForIdle(key);
-      expect(complete).toHaveBeenCalledTimes(2);
-      expect(complete.mock.calls.every(([, context]) => context.systemPrompt?.includes("Click-In"))).toBe(true);
+      const started = await startRun({ sessionId: key, userId, message: "继续处理新材料" });
+      const lines = await collectUntilTerminal(key); await waitForIdle(key);
+      expect(lines.at(-1)).toEqual({ type: "final", text: "执行完毕" });
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(complete.mock.calls[0][1].systemPrompt).toContain("Click-In");
+      expect(JSON.stringify(complete.mock.calls[0][1].messages)).toContain("旧历史");
       const observations = (await getPool().query("SELECT data,ended_at FROM agent_observation WHERE run_id=$1 ORDER BY started_at", [started.runId])).rows;
       const requests = observations.filter(row => row.data.purpose === "compaction");
-      expect(requests).toHaveLength(2);
-      expect(requests.every(row => row.ended_at && row.data.stopReason === "stop")).toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].ended_at).toBeTruthy();
+      expect(requests[0].data.stopReason).toBe("stop");
       expect(observations.some(row => row.data.triggered === true && row.data.status === "ok")).toBe(true);
       expect((await getPool().query(
         "SELECT kind,model,tokens FROM ai_usage WHERE id>$1 AND user_id=$2 AND kind='chat_compaction'",
         [usageCursor, userId],
-      )).rows).toEqual([{ kind: "chat_compaction", model: CHAT_MODEL.id, tokens: 20 }]);
+      )).rows).toEqual([{ kind: "chat_compaction", model: CHAT_MODEL.id, tokens: 10 }]);
       expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [started.runId])).rows[0].task_credits)).toBeGreaterThan(0);
-    }finally{complete.mockRestore();delete runtimeOverrides.compactFn;delete runtimeOverrides.shouldCompactFn;}
+    } finally { complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; }
   });
 
   it("连续工具调用在下一次模型请求前压缩，并保留调用与结果配对", async () => {
@@ -652,8 +666,9 @@ describe("agent-runtime service", () => {
     const { streamFn, seen } = scripted([{ calls: [readCall] }, { text: "读取完成" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
+    await seedHistory(key);
     try {
-      await startRun({ sessionId: key, userId, message: `请读取我的项目。${"历史说明".repeat(30_000)}` });
+      await startRun({ sessionId: key, userId, message: `请读取我的项目。${"历史说明".repeat(15_000)}` });
       const lines = await collectUntilTerminal(key);
       await waitForIdle(key);
       expect(lines.at(-1)).toEqual({ type: "final", text: "读取完成" });
@@ -693,9 +708,10 @@ describe("agent-runtime service", () => {
     const { streamFn, seen } = scripted([{ text: "第一段正文" }, { text: "压缩后收到补充" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
+    await seedHistory(key);
 
     try {
-      await startRun({ sessionId: key, userId, message: `旧上下文${"很长".repeat(90_000)}` });
+      await startRun({ sessionId: key, userId, message: "继续处理这条" });
       await started;
       expect((await getPool().query(`SELECT status FROM agent_run WHERE session_id = $1`, [key])).rows[0].status).toBe("compacting");
       expect((await readEventsSince(key, 0)).map((row) => row.line.type)).not.toContain("final");
@@ -749,8 +765,9 @@ describe("agent-runtime service", () => {
     });
     runtimeOverrides.streamFn = scripted([{ text: "正文仍然有效" }]).streamFn;
     const key = newKey();
+    await seedHistory(key);
     try {
-      const { runId } = await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      const { runId } = await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(20_000)}` });
       await collectUntilTerminal(key);
       await waitForIdle(key);
       const lines = (await readEventsSince(key, 0)).map((row) => row.line);
@@ -781,8 +798,9 @@ describe("agent-runtime service", () => {
     };
     runtimeOverrides.streamFn = scripted([{ text: "不应发送" }]).streamFn;
     const key = newKey();
+    await seedHistory(key);
     try {
-      const { runId } = await startRun({ sessionId: key, userId, message: `等待压缩${"内容".repeat(90_000)}` });
+      const { runId } = await startRun({ sessionId: key, userId, message: "等待这次压缩" });
       await started;
       expect(await abortRun(key)).toBe(true);
       const lines = await collectUntilTerminal(key);
@@ -821,7 +839,7 @@ describe("agent-runtime service", () => {
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
     try {
-      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(20_000)}` });
       await collectUntilTerminal(key);
       await waitForIdle(key);
       const cursor = (await readEventsSince(key, 0)).at(-1)?.seq ?? 0;
@@ -857,7 +875,7 @@ describe("agent-runtime service", () => {
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
     try {
-      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(20_000)}` });
       const lines = await collectUntilTerminal(key);
       await waitForIdle(key);
       expect(seen).toHaveLength(1);
@@ -886,7 +904,7 @@ describe("agent-runtime service", () => {
     runtimeOverrides.streamFn = streamFn;
     const key = newKey();
     try {
-      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(90_000)}` });
+      await startRun({ sessionId: key, userId, message: `长会话${"内容".repeat(20_000)}` });
       await collectUntilTerminal(key);
       await waitForIdle(key);
       const cursor = (await readEventsSince(key, 0)).at(-1)?.seq ?? 0;
@@ -992,6 +1010,7 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-ask-${shortId()}`, null, false));
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -999,6 +1018,8 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
   });
 
   it("等待输入卸载上下文，单个驻留名额仍能推进其他对话并恢复原任务", async () => {
@@ -1223,6 +1244,7 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-detach-${shortId()}`, null, false));
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1230,6 +1252,8 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
   });
 
   it("等提问时脱离 → transcript 无 aborted、run 仍 awaiting_answer、无 aborted 事件；接管后复用同一问题并续跑", async () => {
@@ -1316,6 +1340,8 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deferred-${shortId()}`, null, false));
     ({ prodId } = await makeProduction(userId));
+    await setProductionTier(prodId, "pro");
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1323,6 +1349,8 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     delete runtimeOverrides.streamFn;
     delete runtimeOverrides.mmpClient;
     for (const id of sessions) await getPool().query(`DELETE FROM agent_session WHERE id = $1`, [id]).catch(() => {});
+    delete runtimeOverrides.apiKey;
+    vi.unstubAllEnvs();
     await cleanupProduction(prodId).catch(() => {});
   });
 

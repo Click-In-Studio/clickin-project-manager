@@ -5,7 +5,7 @@ import {
   voiceFileName,
 } from "@/components/agent/VoiceRecordButton";
 
-describe("移动端语音录制", () => {
+describe("语音录制", () => {
   it("优先选择 Safari 可用的 audio/mp4，再退回 Opus 容器", () => {
     expect(pickVoiceMimeType({ isTypeSupported: (type) => type === "audio/mp4" })).toBe("audio/mp4");
     expect(pickVoiceMimeType({ isTypeSupported: (type) => type === "audio/webm;codecs=opus" })).toBe("audio/webm;codecs=opus");
