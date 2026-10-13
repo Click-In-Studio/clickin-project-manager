@@ -6,8 +6,8 @@ import type { PoolClient } from "pg";
 // tier → limit 的映射只在这里：库里只存档名，改上限/加档位＝改代码＝走 PR。
 //
 // 消费面约定（改动前先读）：
-//   · 用户等级全站只在「建项目」一处被消费（app/api/productions POST）。
-//     功能跟项目走——人的等级不影响他在项目里能用什么。
+//   · 用户等级用于建项目与个人 AI 模型资格；项目功能跟项目档位走，
+//     人的等级不影响他在项目里能用什么。
 //   · 项目功能门（requireProductionFeature）独立于 grant/policy 两层：它挡的是
 //     「这个档位没开这个功能」，不否决任何已存在的 grant 行（policy-keys.ts 铁律）。
 //   · 计费豁免两来源正交：owner 级（internal 档，按**当前** owner 实时推导，任何
@@ -193,8 +193,8 @@ export function normalizeProductionTier(raw: string | null | undefined): Product
 // ─── 读取 ─────────────────────────────────────────────────────────────────────
 
 /** 无行 = null（普通用户）。库里出现未知档名视同无行（常量表回滚过的防御）。 */
-export async function getUserTier(userId: string): Promise<UserTier | null> {
-  const { rows } = await getPool().query<{ tier: string }>(
+export async function getUserTier(userId: string, client?: PoolClient): Promise<UserTier | null> {
+  const { rows } = await (client ?? getPool()).query<{ tier: string }>(
     "SELECT tier FROM user_plan WHERE user_id = $1",
     [userId],
   );

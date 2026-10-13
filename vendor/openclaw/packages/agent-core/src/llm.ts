@@ -1,2 +1,2 @@
-// AI contract compatibility barrel for agent-core consumers.
-export * from "@openclaw/ai";
+// AI contracts used by the local agent runtime.
+export * from "../../llm-core/src/index";

@@ -1,3 +1,4 @@
+import { createMediaRuntime } from "@/lib/agent/runtime/media-provider";
 import { describe, it, expect } from "vitest";
 import { Type } from "typebox";
 import { createApiRegistry, createLlmRuntime } from "@openclaw/ai";
@@ -41,7 +42,7 @@ const PRO = deepseekModel("deepseek-v4-pro", true);
 
 const registry = createApiRegistry();
 registerBuiltInApiProviders(registry);
-const llm = createLlmRuntime(registry);
+const llm = createMediaRuntime(createLlmRuntime(registry));
 const NO_ENV = {} as ExecutionEnv;
 
 function echoTool(log: string[]): RuntimeTool {
@@ -97,7 +98,7 @@ describe("判据①：@openclaw/ai 接 DeepSeek 真流式（经 vendor harness�
     // compat.maxTokensField="max_tokens" 覆盖后才真截断。S2 的 DeepSeek Model 定义
     // **必须**带这个 compat 覆盖，否则输出长度永远不受控。
     const autoCompatModel = { ...FLASH, compat: undefined };
-    const stream = llm.streamSimple(autoCompatModel, {
+    const stream = await llm.streamSimple(autoCompatModel, {
       systemPrompt: "你是测试助手。",
       messages: [{ role: "user", content: [{ type: "text", text: "请写一篇 500 字的短文介绍舞台灯光设计。" }], timestamp: Date.now() }],
     }, { apiKey: API_KEY!, maxTokens: 16 });
@@ -111,7 +112,7 @@ describe("判据①：@openclaw/ai 接 DeepSeek 真流式（经 vendor harness�
     // 自动探测给 deepseek 的字段是 max_completion_tokens；若 DeepSeek 忽略它，
     // 输出永远不封顶——这条用 compat 覆盖成 max_tokens 做对照。
     const model: Model = { ...FLASH, compat: { maxTokensField: "max_tokens" } as Model["compat"] };
-    const stream = llm.streamSimple(model, {
+    const stream = await llm.streamSimple(model, {
       systemPrompt: "你是测试助手。",
       messages: [{ role: "user", content: [{ type: "text", text: "请写一篇 500 字的短文介绍舞台灯光设计。" }], timestamp: Date.now() }],
     }, { apiKey: API_KEY!, maxTokens: 16 });

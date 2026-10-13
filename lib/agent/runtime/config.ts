@@ -1,69 +1,261 @@
-// 自建运行时的模型与开关（#367 S2）。
-//
-// 模型事实（线上）：对话与 transcript compaction 使用同一个 DeepSeek 模型，
-// 让摘要请求复用相同前缀与 provider 缓存。
-//
-// ⚠ Model.cost 不再是装饰（#383）：限流的 credit 折算就从 provider 层算出的
-// usage.cost 来。加新模型必须同时登记单价，否则它的用量记 0 credit = 白嫖。
-//
-// ⚠ compat.maxTokensField 必须显式 "max_tokens"：@openclaw/ai 2026.7.1-2 对 deepseek
-// 自动选 max_completion_tokens，DeepSeek API 忽略它 → 输出永不封顶（S1 实测：上限 16
-// 照样产出 600 字）。见 tests/agent/agent-runtime-live.test.ts。
-
-import { createApiRegistry, createLlmRuntime, type LlmRuntime } from "@openclaw/ai";
+import { createApiRegistry, createLlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
-import type { Model } from "../../../vendor/openclaw/packages/llm-core/src/types";
+import type {
+  Model,
+  NativeMediaCapability,
+} from "../../../vendor/openclaw/packages/llm-core/src/types";
+import {
+  DEFAULT_MODEL_SELECTION,
+  type AgentModelInfo,
+  type ModelSelection,
+} from "../model-types";
+import { createMediaRuntime } from "./media-provider";
 
-const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
-
-// DeepSeek 官方价目（$/1M token，**peak 价**）。off-peak 是半价，我们一律按 peak
-// 记——保守，实际账单只会比记的低。限流的 credit 折算就吃这张表：provider 层
-// （@openclaw/ai model-utils）用 Model.cost 逐条算出 usage.cost，service.ts 把
-// 美元数交给 lib/account/plan.ts 折成 credit。**填 0 等于所有 chat 用量记 0 credit**。
-const PRICES = {
-  "v4-flash": { input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
-  "v4-pro":   { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
-} as const;
-
-/** 未登记的模型 id 按 pro 价记（贵的那档）：宁可高估也不要静默记 0。 */
-function priceOf(id: string): Model["cost"] {
-  return id.includes("flash") ? { ...PRICES["v4-flash"] } : { ...PRICES["v4-pro"] };
+export const COMPACTION_TOKEN_BUDGET = 128_000;
+export const REQUEST_OUTPUT_TOKENS = 8_192;
+const image: NativeMediaCapability = {
+  kind: "image",
+  mimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  transports: ["inline"],
+  maxBytes: 20 * 1024 * 1024,
+  maxRequestBytes: 20 * 1024 * 1024,
+  maxRequestBase64Chars: 28_000_000,
+  maxCount: 8,
+  maxPixels: 12_000_000,
+  tokenEstimate: { minimum: 1200, perMegapixel: 1600 },
+};
+const pdf: NativeMediaCapability = {
+  ...image,
+  kind: "file",
+  mimeTypes: ["application/pdf"],
+  maxPages: 100,
+  tokenEstimate: { minimum: 3000, perPage: 3000 },
+};
+const audio: NativeMediaCapability = {
+  ...image,
+  kind: "audio",
+  mimeTypes: [
+    "audio/wav",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/webm",
+    "audio/ogg",
+    "audio/flac",
+  ],
+  maxDurationSeconds: 1200,
+  tokenEstimate: { minimum: 1200, perSecond: 32 },
+};
+const video: NativeMediaCapability = {
+  ...audio,
+  kind: "video",
+  mimeTypes: ["video/mp4", "video/webm", "video/quicktime"],
+  maxDurationSeconds: 600,
+  tokenEstimate: { minimum: 1200, perSecond: 400 },
+};
+// Qwen 音视频 inline base64 必须小于 10 MB，不能沿用图片的 20 MiB 上限。
+const omniAudio = {
+  ...audio,
+  maxBytes: 7 * 1024 * 1024,
+  maxRequestBytes: 7 * 1024 * 1024,
+  maxRequestBase64Chars: 9_999_999,
+};
+const omniVideo = {
+  ...video,
+  maxBytes: omniAudio.maxBytes,
+  maxRequestBytes: omniAudio.maxRequestBytes,
+  maxRequestBase64Chars: omniAudio.maxRequestBase64Chars,
+};
+const googleMedia = [image, pdf, audio, video].map((capability) => ({
+  ...capability,
+  maxBytes: 14 * 1024 * 1024,
+  maxRequestBytes: 14 * 1024 * 1024,
+  maxRequestBase64Chars: 19_000_000,
+  mimeTypes:
+    capability.kind === "image"
+      ? ["image/png", "image/jpeg", "image/webp"]
+      : capability.mimeTypes,
+}));
+interface Entry {
+  info: Omit<AgentModelInfo, "available" | "unavailableReason">;
+  credential: string;
+  model: Model;
 }
-
-function deepseekModel(id: string, reasoning: boolean): Model {
+const entries: Entry[] = [
+  {
+    info: {
+      key: "deepseek-flash",
+      name: "DeepSeek Flash",
+      description: "低成本文本与图片理解，默认模型。",
+      costTier: "low",
+      input: ["text", "image"],
+      thinkingLevels: ["off", "low", "high", "max"],
+    },
+    credential: "DEEPSEEK_API_KEY",
+    model: {
+      id: "deepseek-flash",
+      name: "DeepSeek Flash",
+      provider: "deepseek",
+      api: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: true,
+      input: ["text", "image"],
+      nativeMedia: [image],
+      contextWindow: 1_000_000,
+      contextTokens: COMPACTION_TOKEN_BUDGET,
+      maxTokens: 384_000,
+      cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
+      compat: { maxTokensField: "max_tokens" },
+      thinkingLevelMap: { max: "max" },
+    },
+  },
+  {
+    info: {
+      key: "deepseek-pro",
+      name: "DeepSeek Pro",
+      description: "文本分析与复核，仅支持文本。",
+      costTier: "medium",
+      input: ["text"],
+      thinkingLevels: ["off", "low", "high", "max"],
+    },
+    credential: "DEEPSEEK_API_KEY",
+    model: {
+      id: "deepseek-v4-pro",
+      name: "DeepSeek Pro",
+      provider: "deepseek",
+      api: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 1_000_000,
+      contextTokens: COMPACTION_TOKEN_BUDGET,
+      maxTokens: 384_000,
+      cost: { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
+      compat: { maxTokensField: "max_tokens" },
+      thinkingLevelMap: { max: "max" },
+    },
+  },
+  {
+    info: {
+      key: "resonance",
+      name: "共鸣",
+      description: "文本、图片与音视频联合理解，适合声音和画面材料。",
+      costTier: "low",
+      input: ["text", "image", "audio", "video"],
+      thinkingLevels: ["off", "low", "medium", "high"],
+    },
+    credential: "EMBEDDING_API_KEY",
+    model: {
+      id: "qwen3.8-omni-flash",
+      name: "共鸣",
+      provider: "qwen",
+      api: "openai-completions",
+      baseUrl:
+        process.env.EMBEDDING_BASE_URL ??
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      reasoning: true,
+      input: ["text", "image", "audio", "video"],
+      nativeMedia: [image, omniAudio, omniVideo],
+      contextWindow: 1_000_000,
+      contextTokens: COMPACTION_TOKEN_BUDGET,
+      maxTokens: 131_072,
+      cost: { input: 0.113, output: 0.382, cacheRead: 0.014, cacheWrite: 0 },
+      compat: { maxTokensField: "max_tokens", supportsDeveloperRole: false },
+    },
+  },
+  {
+    info: {
+      key: "inspiration",
+      name: "灵光",
+      description: "文本、图片、PDF 与音视频理解，适合跨材料讨论和发散。",
+      costTier: "medium",
+      input: ["text", "image", "file", "audio", "video"],
+      thinkingLevels: ["low", "medium", "high"],
+    },
+    credential: "GEMINI_API_KEY",
+    model: {
+      id: "gemini-3.8-flash",
+      name: "灵光",
+      provider: "google",
+      api: "google-generative-ai",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      reasoning: true,
+      input: ["text", "image", "file", "audio", "video"],
+      nativeMedia: googleMedia,
+      contextWindow: 1_048_576,
+      contextTokens: COMPACTION_TOKEN_BUDGET,
+      maxTokens: 65_536,
+      // 优惠结束后按正式价格登记，不移动历史计价与 credit 锚点。
+      cost:
+        new Date() < new Date("2027-01-01T00:00:00Z")
+          ? { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 }
+          : { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
+    },
+  },
+];
+export function modelEntry(key: string): Entry {
+  const entry = entries.find((item) => item.info.key === key);
+  if (!entry) throw Object.assign(new Error("模型未登记"), { status: 400 });
+  return entry;
+}
+export function validateModelSelection(value: unknown): ModelSelection {
+  const selection = value as ModelSelection | null;
+  if (
+    !selection ||
+    typeof selection !== "object" ||
+    !Array.isArray(selection.disabledSubagentModels) ||
+    new Set(selection.disabledSubagentModels).size !==
+      selection.disabledSubagentModels.length ||
+    !modelEntry(selection.modelKey).info.thinkingLevels.includes(
+      selection.thinkingLevel,
+    )
+  )
+    throw Object.assign(new Error("模型选择或思考强度不合法"), { status: 400 });
+  for (const key of selection.disabledSubagentModels) modelEntry(key);
   return {
-    id, name: id, api: "openai-completions", provider: "deepseek",
-    baseUrl: DEEPSEEK_BASE_URL, reasoning, input: ["text"],
-    cost: priceOf(id),
-    contextWindow: 128_000,
-    maxTokens: 8_192,
-    compat: { maxTokensField: "max_tokens" } as Model["compat"],
+    modelKey: selection.modelKey,
+    thinkingLevel: selection.thinkingLevel,
+    disabledSubagentModels: [...selection.disabledSubagentModels],
   };
 }
-
-export const CHAT_MODEL: Model = deepseekModel(process.env.AGENT_CHAT_MODEL ?? "deepseek-v4-flash", true);
-
-export function deepseekApiKey(): string {
-  const key = process.env.DEEPSEEK_API_KEY;
-  if (!key) throw Object.assign(new Error("DEEPSEEK_API_KEY 未配置"), { status: 503 });
+export function defaultModelSelection(): ModelSelection {
+  return { ...DEFAULT_MODEL_SELECTION, disabledSubagentModels: [] };
+}
+export function configuredModels(): AgentModelInfo[] {
+  return entries.map(({ info, credential }) => ({
+    ...info,
+    available: Boolean(process.env[credential]),
+    unavailableReason: process.env[credential] ? null : "服务端未配置模型",
+  }));
+}
+export function resolveModel(key: string): Model {
+  return modelEntry(key).model;
+}
+export function modelApiKey(model: Model): string {
+  const entry = entries.find((item) => item.model.id === model.id);
+  const key = entry && process.env[entry.credential];
+  if (!key)
+    throw Object.assign(new Error("服务端未配置所选模型"), { status: 503 });
   return key;
 }
-
-let runtime: LlmRuntime | undefined;
-/** 进程级单例：provider 注册表 + streamSimple/completeSimple。 */
-export function llmRuntime(): LlmRuntime {
+export const CHAT_MODEL = resolveModel(
+  defaultModelSelection().modelKey,
+) as Model & { input: Array<"text" | "image"> };
+let runtime: ReturnType<typeof createMediaRuntime> | undefined;
+export function llmRuntime() {
   if (!runtime) {
     const registry = createApiRegistry();
     registerBuiltInApiProviders(registry);
-    runtime = createLlmRuntime(registry);
+    runtime = createMediaRuntime(createLlmRuntime(registry));
   }
   return runtime;
 }
-
-// ── 灰度开关（§4.5：按 production）───────────────────────────────────────────
-
-/** 执行者标识（agent_run.owner）：主机 + pid，重启后自然变化。 */
 export const RUNNER_OWNER = `${process.env.HOSTNAME ?? "local"}:${process.pid}`;
-export const HEARTBEAT_INTERVAL_MS = Number(process.env.AGENT_HEARTBEAT_MS ?? 5_000);
-export const ORPHAN_AFTER_MS = Number(process.env.AGENT_ORPHAN_AFTER_MS ?? 30_000);
-export const APPROVAL_TTL_MS = Number(process.env.AGENT_APPROVAL_TTL_MS ?? 600_000);
+export const HEARTBEAT_INTERVAL_MS = Number(
+  process.env.AGENT_HEARTBEAT_MS ?? 5_000,
+);
+export const ORPHAN_AFTER_MS = Number(
+  process.env.AGENT_ORPHAN_AFTER_MS ?? 30_000,
+);
+export const APPROVAL_TTL_MS = Number(
+  process.env.AGENT_APPROVAL_TTL_MS ?? 600_000,
+);

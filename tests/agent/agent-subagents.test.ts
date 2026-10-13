@@ -1,4 +1,5 @@
 import {
+  vi,
   describe,
   it,
   expect,
@@ -17,6 +18,7 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import {
   makeProduction,
+  setProductionTier,
   cleanupProduction,
   shortId,
 } from "../_support/factories";
@@ -155,6 +157,9 @@ describe("持久子 Agent 基建", () => {
       false,
     ));
     ({ prodId } = await makeProduction(userId));
+    await setProductionTier(prodId, "pro");
+    vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("EMBEDDING_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
     runtimeOverrides.streamFn = model([]);
@@ -170,6 +175,7 @@ describe("持久子 Agent 基建", () => {
     runtimeOverrides.streamFn = model([]);
   });
   afterAll(async () => {
+    vi.unstubAllEnvs();
     for (const parent of parents) {
       await waitForIdle(parent.sessionId);
       await getPool().query(
@@ -226,6 +232,26 @@ describe("持久子 Agent 基建", () => {
         ).rowCount,
     );
   }
+
+  it("子任务继承父选择，显式专家选型单独存快照和实际模型；禁用不可绕过", async () => {
+    const p = await parent();
+    await getPool().query("UPDATE agent_run SET model_selection=$2::jsonb WHERE id=$1", [p.runId, JSON.stringify({ modelKey: "deepseek-pro", thinkingLevel: "high", disabledSubagentModels: [] })]);
+    const calls: string[] = [];
+    const fake = model(["已完成", "已完成"]);
+    subagentRuntimeOverrides.streamFn = (actual, context, options) => { calls.push(actual.id); return fake(actual, context, options); };
+    const inherited = await spawnSubagent(p, { task: "继承父模型" });
+    const inheritedId = inherited.match(/子 Agent (\S+)/)![1];
+    await completed(p, inheritedId);
+    const expert = await spawnSubagent(p, { task: "音视频专家", modelKey: "resonance" });
+    const expertId = expert.match(/子 Agent (\S+)/)![1];
+    await completed(p, expertId);
+    expect(calls).toEqual(["deepseek-v4-pro", "qwen3.8-omni-flash"]);
+    const snapshots = (await getPool().query("SELECT r.model,r.model_selection,s.model_selection AS session_selection FROM agent_run r JOIN agent_session s ON s.id=r.session_id WHERE r.subagent_id=ANY($1::text[]) ORDER BY r.started_at", [[inheritedId, expertId]])).rows;
+    expect(snapshots.map(row => row.model_selection.modelKey)).toEqual(["deepseek-pro", "resonance"]);
+    expect(snapshots.every(row => row.model_selection.thinkingLevel === "high" && row.session_selection.modelKey === row.model_selection.modelKey)).toBe(true);
+    await getPool().query("UPDATE agent_run SET model_selection=jsonb_set(model_selection,'{disabledSubagentModels}',$2::jsonb) WHERE id=$1", [p.runId, JSON.stringify(["resonance"])]);
+    await expect(spawnSubagent(p, { task: "被禁用专家", modelKey: "resonance" })).rejects.toThrow("用户已禁用");
+  });
 
   it("六个工具仅热层常驻；个人/制作会话无页面与召回信号也可见，目录不收录", () => {
     for (const name of SUBAGENT_TOOL_NAMES) {

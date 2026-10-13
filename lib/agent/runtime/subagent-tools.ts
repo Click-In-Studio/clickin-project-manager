@@ -29,18 +29,35 @@ export const SUBAGENT_DEFS: ToolDefinition[] = [
       context: Type.Optional(Type.String({ maxLength: 24000 })),
       completionCriteria: Type.Optional(Type.String({ maxLength: 4000 })),
       sources: Type.Optional(Type.Array(sourceSchema, { maxItems: 30 })),
+      modelKey: Type.Optional(Type.String({ description: "显式选型前先查 model_list；省略则继承父模型" })),
+      attachmentIds: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
     }),
-    execute: async (ctx, args, callId) =>
-      (await import("./subagents")).spawnSubagent(
+    execute: async (ctx, args, callId) => {
+      const run = requireRun(ctx);
+      if (args.modelKey) {
+        const messages = await run.modelContext?.() ?? [];
+        const found = messages.some((message) => {
+          if (message.role !== "toolResult" || message.toolName !== "clickin__model_list" || message.isError) return false;
+          try {
+            const data = JSON.parse(message.content.filter((part) => part.type === "text").map((part) => part.text).join(""));
+            return data.runId === run.runId && data.models.some((model: { key: string }) => model.key === args.modelKey);
+          } catch { return false; }
+        });
+        if (!found) throw new Error("显式选型前必须先查 model_list，且所选模型仍在当前上下文的可用目录中");
+      }
+      return (await import("./subagents")).spawnSubagent(
         requireRun(ctx),
         args as unknown as {
           task: string;
           context?: string;
           completionCriteria?: string;
           sources?: SubagentSource[];
+          modelKey?: import("../model-types").ModelKey;
+          attachmentIds?: string[];
         },
         callId,
-      ),
+      );
+    },
   },
   {
     mcpName: SUBAGENT_TOOL_NAMES[1],
@@ -84,6 +101,7 @@ export const SUBAGENT_DEFS: ToolDefinition[] = [
       subagentId: Type.String({ minLength: 1 }),
       message: Type.String({ minLength: 1, maxLength: 24000 }),
       sources: Type.Optional(Type.Array(sourceSchema, { maxItems: 30 })),
+      attachmentIds: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })),
     }),
     execute: async (ctx, args, callId) =>
       (await import("./subagents")).sendSubagent(
@@ -92,6 +110,7 @@ export const SUBAGENT_DEFS: ToolDefinition[] = [
         String(args.message),
         args.sources as SubagentSource[] | undefined,
         callId,
+        args.attachmentIds as string[] | undefined,
       ),
   },
   {

@@ -3446,6 +3446,7 @@ CREATE TABLE IF NOT EXISTS registration_email (
 
 -- ── 会话 ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_session (
+  model_selection JSONB NOT NULL DEFAULT '{"modelKey":"deepseek-flash","thinkingLevel":"low","disabledSubagentModels":[]}'::jsonb,
   id              TEXT        PRIMARY KEY,
   user_id         UUID        NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   -- NULL = 个人会话（跨全部制作的 my.* 语义）；非 NULL = 关联制作的会话
@@ -3574,6 +3575,8 @@ COMMENT ON TABLE agent_session_entry IS
 
 -- ── run：一轮执行的生命周期与执行者租约 ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_run (
+  model_selection JSONB NOT NULL DEFAULT '{"modelKey":"deepseek-flash","thinkingLevel":"low","disabledSubagentModels":[]}'::jsonb,
+  attachment_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   id                TEXT        PRIMARY KEY,
   session_id        TEXT        NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
   status            TEXT        NOT NULL DEFAULT 'queued'

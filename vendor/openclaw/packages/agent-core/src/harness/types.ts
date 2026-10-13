@@ -1,6 +1,6 @@
 // Agent Core type module defines shared TypeScript contracts.
 import type {
-  ImageContent,
+  MediaContent,
   Model,
   SimpleStreamOptions,
   StreamFn,
@@ -97,6 +97,8 @@ export interface AgentHarnessStreamOptions {
   metadata?: SimpleStreamOptions["metadata"];
   /** Provider cache retention hint. */
   cacheRetention?: SimpleStreamOptions["cacheRetention"];
+  /** 宿主显式限定本次输出预算，独立于模型目录上限。 */
+  maxTokens?: number;
 }
 
 /** Per-request stream option patch returned by provider hooks. */
@@ -415,7 +417,7 @@ export interface CustomEntry<T = unknown> extends SessionTreeEntryBase {
 export interface CustomMessageEntry<T = unknown> extends SessionTreeEntryBase {
   type: "custom_message";
   customType: string;
-  content: string | (TextContent | ImageContent)[];
+  content: string | (TextContent | MediaContent)[];
   details?: T;
   display: boolean;
 }
@@ -528,7 +530,7 @@ export interface BeforeAgentStartEvent<
 > {
   type: "before_agent_start";
   prompt: string;
-  images?: ImageContent[];
+  media?: MediaContent[];
   systemPrompt: string;
   resources: AgentHarnessResources<TSkill, TPromptTemplate>;
 }
@@ -569,7 +571,7 @@ export interface ToolResultEvent {
   toolCallId: string;
   toolName: string;
   input: Record<string, unknown>;
-  content: Array<TextContent | ImageContent>;
+  content: Array<TextContent | MediaContent>;
   details: unknown;
   isError: boolean;
 }
@@ -683,7 +685,7 @@ export interface ToolCallResult {
 
 /** Hook patch for a completed tool result before it is persisted/emitted. */
 export interface ToolResultPatch {
-  content?: Array<TextContent | ImageContent>;
+  content?: Array<TextContent | MediaContent>;
   details?: unknown;
   isError?: boolean;
   terminate?: boolean;

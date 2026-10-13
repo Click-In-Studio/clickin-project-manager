@@ -173,7 +173,7 @@ export default function SubagentPanel({
               className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-2"
             >
               <div className="flex items-start gap-2">
-                <span className="min-w-0 flex-1 break-words">{child.task}</span>
+                <span className="min-w-0 flex-1 break-words">{child.task}{child.modelName && <small className="ml-2 text-[var(--muted)]">{child.modelName}</small>}</span>
                 <span className="shrink-0 text-[var(--muted)]">
                   {STATUS[child.status] ?? child.status}
                 </span>

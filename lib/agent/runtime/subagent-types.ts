@@ -16,6 +16,7 @@ export const SUBAGENT_TOOL_NAMES = [
 export interface SubagentView {
   id: string;
   task: string;
+  modelName?: string;
   status: string;
   result: string | null;
   error: string | null;

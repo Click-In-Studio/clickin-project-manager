@@ -1,6 +1,9 @@
+import type { ModelSelection, ModelKey } from "../model-types";
+import { assertModelSelection } from "./model-settings-db";
+import { resolveModel } from "./config";
 import { getPool } from "@/lib/pg";
 import { newRunId, newSessionId } from "./ids";
-import { CHAT_MODEL, RUNNER_OWNER } from "./config";
+import { RUNNER_OWNER } from "./config";
 import { RUN_CREDIT_HARD_CAP, creditsFromUsd } from "@/lib/account/plan";
 import type { SubagentSource, SubagentView } from "./subagent-types";
 
@@ -24,6 +27,9 @@ export interface SubagentJob {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  model_selection: ModelSelection;
+  attachment_ids: string[];
+  model: string;
   result: string | null;
   context_request: string | null;
 }
@@ -38,6 +44,8 @@ export async function queueSubagent(input: {
   criteria?: string;
   sources?: SubagentSource[];
   delegationKey?: string;
+  modelKey?: ModelKey;
+  attachmentIds?: string[];
 }): Promise<string> {
   const client = await getPool().connect();
   const id = input.id ?? newSessionId();
@@ -60,8 +68,9 @@ export async function queueSubagent(input: {
       user_id: string;
       production_id: string | null;
       budget: string;
+      model_selection: ModelSelection;
     }>(
-      `SELECT s.user_id, s.production_id, COALESCE(r.budget_run_id,r.id) AS budget
+      `SELECT s.user_id, s.production_id, COALESCE(r.budget_run_id,r.id) AS budget, r.model_selection
        FROM agent_run r JOIN agent_session s ON s.id=r.session_id
        WHERE r.id=$1 AND r.session_id=$2 AND r.status IN ${ACTIVE}
          AND r.subagent_id IS NULL AND r.schedule_id IS NULL`,
@@ -69,6 +78,24 @@ export async function queueSubagent(input: {
     );
     const owner = parent.rows[0];
     if (!owner) throw new Error("只有活动中的交互主 Agent 可以委托子任务");
+    let selection = owner.model_selection;
+    let attachmentIds = [...new Set(input.attachmentIds ?? [])];
+    if (input.id) {
+      const previous = (await client.query<{ model_selection: ModelSelection; attachment_ids: string[] }>(
+        "SELECT model_selection,attachment_ids FROM agent_run WHERE session_id=$1 ORDER BY started_at DESC,id DESC LIMIT 1", [id])).rows[0];
+      if (previous) { selection = previous.model_selection; attachmentIds = [...new Set([...previous.attachment_ids, ...attachmentIds])]; }
+    }
+    if (input.modelKey) {
+      if (owner.model_selection.disabledSubagentModels.includes(input.modelKey)) throw new Error("用户已禁用子任务主动选择此模型");
+      const entry = (await import("./config")).modelEntry(input.modelKey);
+      selection = { ...selection, modelKey: input.modelKey, thinkingLevel: entry.info.thinkingLevels.includes(selection.thinkingLevel) ? selection.thinkingLevel : entry.info.thinkingLevels[0] };
+    }
+    await assertModelSelection(owner.user_id, owner.production_id, selection, client);
+    if (attachmentIds.length > 8) throw new Error("子任务最多交接 8 个附件");
+    if (input.attachmentIds?.length) {
+      const access = await client.query("SELECT DISTINCT attachment_id FROM agent_run_attachment_access WHERE run_id=$1 AND attachment_id=ANY($2::text[])", [input.parentRunId, input.attachmentIds]);
+      if (access.rowCount !== new Set(input.attachmentIds).size) throw new Error("子任务只能接收父任务实际接触过的附件");
+    }
     const queued = await client.query<{ n: string }>(
       `SELECT count(*)::text n FROM agent_run r JOIN agent_subagent c ON c.id=r.subagent_id
        WHERE c.id IN(SELECT id FROM agent_session WHERE parent_session_id=$1) AND r.status='queued'`,
@@ -97,13 +124,14 @@ export async function queueSubagent(input: {
       );
     } else {
       await client.query(
-        `INSERT INTO agent_session(id,user_id,production_id,title,parent_session_id) VALUES($1,$2,$3,$4,$5)`,
+        `INSERT INTO agent_session(id,user_id,production_id,title,parent_session_id,model_selection) VALUES($1,$2,$3,$4,$5,$6::jsonb)`,
         [
           id,
           owner.user_id,
           owner.production_id,
           input.task,
           input.parentSessionId,
+          JSON.stringify(selection),
         ],
       );
       await client.query(
@@ -118,15 +146,16 @@ export async function queueSubagent(input: {
       );
     }
     await client.query(
-      `INSERT INTO agent_run(id,session_id,subagent_id,budget_run_id,status,model,initial_message,delegation_key,admission_class)
-       VALUES($1,$2,$2,$3,'queued',$4,$5,$6,'subagent')`,
+      `INSERT INTO agent_run(id,session_id,subagent_id,budget_run_id,status,model,initial_message,delegation_key,admission_class,model_selection,attachment_ids)
+       VALUES($1,$2,$2,$3,'queued',$4,$5,$6,'subagent',$7::jsonb,$8::jsonb)`,
       [
         newRunId(),
         id,
         owner.budget,
-        CHAT_MODEL.id,
+        resolveModel(selection.modelKey).id,
         input.message,
         input.delegationKey ?? null,
+        JSON.stringify(selection), JSON.stringify(attachmentIds),
       ],
     );
     await client.query("COMMIT");
@@ -206,8 +235,8 @@ export async function claimSubagents(): Promise<SubagentJob[]> {
 export async function listSubagents(
   parentSessionId: string,
 ): Promise<SubagentView[]> {
-  const result = await getPool().query<SubagentView>(
-    `SELECT c.id,c.task,CASE WHEN c.stopped THEN 'stopped' WHEN c.context_request IS NOT NULL THEN 'awaiting_context'
+  const result = await getPool().query<SubagentView & { model_selection: ModelSelection }>(
+    `SELECT c.id,c.task,r.model_selection,CASE WHEN c.stopped THEN 'stopped' WHEN c.context_request IS NOT NULL THEN 'awaiting_context'
        ELSE COALESCE(r.status,'completed') END AS status,r.result,r.error,c.context_request AS "contextRequest",
        r.id AS "runId",(SELECT e.payload->'message'->>'toolName' FROM agent_session_entry e
          WHERE e.session_id=c.id AND e.type='message' ORDER BY e.seq DESC LIMIT 1) AS progress
@@ -216,7 +245,7 @@ export async function listSubagents(
      WHERE c.id IN(SELECT id FROM agent_session WHERE parent_session_id=$1) ORDER BY c.created_at,c.id`,
     [parentSessionId],
   );
-  return result.rows;
+  return result.rows.map((row) => ({ ...row, modelName: row.model_selection ? resolveModel(row.model_selection.modelKey).name : undefined }));
 }
 
 export async function ownSubagent(

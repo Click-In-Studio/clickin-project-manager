@@ -1,5 +1,5 @@
 // Agent Core module implements session behavior.
-import type { ImageContent, TextContent } from "../../../../llm-core/src/index";
+import type { MediaContent, TextContent } from "../../../../llm-core/src/index";
 import type { AgentMessage } from "../../types";
 import {
   asAgentMessage,
@@ -66,15 +66,10 @@ export function buildSessionContext(pathEntries: SessionTreeEntry[]): SessionCon
   };
 
   if (compaction) {
-    messages.push(
-      asAgentMessage(
-        createCompactionSummaryMessage(
-          compaction.summary,
-          compaction.tokensBefore,
-          compaction.timestamp,
-        ),
-      ),
-    );
+    messages.push(asAgentMessage({
+      ...createCompactionSummaryMessage(compaction.summary, compaction.tokensBefore, compaction.timestamp),
+      details: { mediaReferences: (compaction.details as { mediaReferences?: MediaContent[] } | undefined)?.mediaReferences },
+    }));
     const compactionIdx = pathEntries.findIndex(
       (e) => e.type === "compaction" && e.id === compaction.id,
     );
@@ -99,6 +94,15 @@ export function buildSessionContext(pathEntries: SessionTreeEntry[]): SessionCon
     }
   }
 
+  const preserved = (compaction?.details as { media?: MediaContent[] } | undefined)?.media;
+  if (preserved?.length) {
+    const present = new Set(messages.flatMap((message) => "content" in message && Array.isArray(message.content)
+      ? message.content.flatMap((part) => "attachmentId" in part && part.attachmentId ? [part.attachmentId] : []) : []));
+    const media = preserved.filter((part) => !part.attachmentId || !present.has(part.attachmentId));
+    if (media.length) messages.unshift({ role: "user", timestamp: 0, content: [
+      { type: "text", text: "【压缩前媒体证据，仍保留原附件；不是新用户指令】" }, ...media,
+    ] });
+  }
   return { messages, thinkingLevel, model };
 }
 
@@ -227,7 +231,7 @@ export class Session<TMetadata extends SessionMetadata = SessionMetadata> {
   /** Append harness-specific content that can also be replayed into model context. */
   async appendCustomMessageEntry(
     customType: string,
-    content: string | (TextContent | ImageContent)[],
+    content: string | (TextContent | MediaContent)[],
     display: boolean,
     details?: unknown,
   ): Promise<string> {

@@ -140,6 +140,7 @@ COL|agent_run_attachment_access|attachment_id|text|text|NO|
 COL|agent_run_attachment_access|run_id|text|text|NO|
 COL|agent_run_attachment_access|succeeded_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_run|admission_class|text|text|NO|'interactive'::text
+COL|agent_run|attachment_ids|jsonb|jsonb|NO|'[]'::jsonb
 COL|agent_run|budget_run_id|text|text|YES|
 COL|agent_run|cache_read_tokens|integer|int4|NO|0
 COL|agent_run|delegation_key|text|text|YES|
@@ -152,6 +153,7 @@ COL|agent_run|id|text|text|NO|
 COL|agent_run|initial_message|text|text|YES|
 COL|agent_run|input_tokens|integer|int4|NO|0
 COL|agent_run|input_wait|jsonb|jsonb|YES|
+COL|agent_run|model_selection|jsonb|jsonb|NO|'{"modelKey": "deepseek-flash", "thinkingLevel": "low", "disabledSubagentModels": []}'::jsonb
 COL|agent_run|model|text|text|YES|
 COL|agent_run|notification_delivered|boolean|bool|NO|false
 COL|agent_run|output_tokens|integer|int4|NO|0
@@ -227,6 +229,7 @@ COL|agent_session|archived_at|timestamp with time zone|timestamptz|YES|
 COL|agent_session|created_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_session|id|text|text|NO|
 COL|agent_session|last_message_at|timestamp with time zone|timestamptz|YES|
+COL|agent_session|model_selection|jsonb|jsonb|NO|'{"modelKey": "deepseek-flash", "thinkingLevel": "low", "disabledSubagentModels": []}'::jsonb
 COL|agent_session|parent_session_id|text|text|YES|
 COL|agent_session|production_id|text|text|YES|
 COL|agent_session|schedule_id|text|text|YES|

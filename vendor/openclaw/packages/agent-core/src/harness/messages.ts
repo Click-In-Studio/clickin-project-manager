@@ -1,5 +1,5 @@
 // Agent Core module implements messages behavior.
-import type { ImageContent, Message, TextContent } from "../../../llm-core/src/index";
+import type { MediaContent, Message, TextContent } from "../../../llm-core/src/index";
 import type {
   AgentMessage,
   BashExecutionMessage,
@@ -104,7 +104,7 @@ export function createCompactionSummaryMessage(
 /** Build a custom transcript message that can be shown and replayed into context. */
 export function createCustomMessage(
   customType: string,
-  content: string | (TextContent | ImageContent)[],
+  content: string | (TextContent | MediaContent)[],
   display: boolean,
   details: unknown,
   timestamp: string,

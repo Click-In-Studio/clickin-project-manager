@@ -1,7 +1,7 @@
 // Agent Core module implements agent harness behavior.
 import type {
   AssistantMessage,
-  ImageContent,
+  MediaContent,
   Model,
   UserMessage,
 } from "../../../llm-core/src/index";
@@ -57,10 +57,10 @@ import {
 
 // CoreAgentHarness coordinates session state, resources, tools, compaction, and
 // streaming callbacks around the lower-level agent loop.
-function createUserMessage(text: string, images?: ImageContent[]): UserMessage {
-  const content: Array<{ type: "text"; text: string } | ImageContent> = [{ type: "text", text }];
-  if (images) {
-    content.push(...images);
+function createUserMessage(text: string, media?: MediaContent[]): UserMessage {
+  const content: Array<{ type: "text"; text: string } | MediaContent> = [{ type: "text", text }];
+  if (media) {
+    content.push(...media);
   }
   return { role: "user", content, timestamp: Date.now() };
 }
@@ -453,6 +453,7 @@ export class CoreAgentHarness<
       return resolveAgentCoreStreamFn(this.runtime)(model, context, {
         cacheRetention: requestOptions.cacheRetention,
         headers: requestOptions.headers,
+        maxTokens: requestOptions.maxTokens,
         maxRetries: requestOptions.maxRetries,
         maxRetryDelayMs: requestOptions.maxRetryDelayMs,
         metadata: requestOptions.metadata,
@@ -653,10 +654,10 @@ export class CoreAgentHarness<
   private async executeTurn(
     turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
     text: string,
-    options?: { images?: ImageContent[]; entryId?: string; metadata?: Record<string, unknown> },
+    options?: { media?: MediaContent[]; entryId?: string; metadata?: Record<string, unknown> },
   ): Promise<AssistantMessage> {
     let activeTurnState = turnState;
-    const userMessage = createUserMessage(text, options?.images);
+    const userMessage = createUserMessage(text, options?.media);
     if (options?.entryId || options?.metadata) {
       this.messagePersistence.set(userMessage, {
         ...(options.entryId ? { entryId: options.entryId } : {}),
@@ -677,7 +678,7 @@ export class CoreAgentHarness<
     const beforeResult = await this.emitHook({
       type: "before_agent_start",
       prompt: text,
-      images: options?.images,
+      media: options?.media,
       systemPrompt: turnState.systemPrompt,
       resources: turnState.resources,
     });
@@ -741,7 +742,7 @@ export class CoreAgentHarness<
 
   async prompt(
     text: string,
-    options?: { images?: ImageContent[]; entryId?: string; metadata?: Record<string, unknown> },
+    options?: { media?: MediaContent[]; entryId?: string; metadata?: Record<string, unknown> },
   ): Promise<AssistantMessage> {
     if (this.phase !== "idle") {
       throw new AgentHarnessError("busy", "AgentHarness is busy");
@@ -896,7 +897,7 @@ export class CoreAgentHarness<
   async steer(
     text: string,
     options?: {
-      images?: ImageContent[];
+      media?: MediaContent[];
       entryId?: string;
       metadata?: Record<string, unknown>;
       onConsumed?: () => void;
@@ -905,7 +906,7 @@ export class CoreAgentHarness<
     if (this.phase === "idle") {
       throw new AgentHarnessError("invalid_state", "Cannot steer while idle");
     }
-    const message = createUserMessage(text, options?.images);
+    const message = createUserMessage(text, options?.media);
     if (options?.entryId || options?.metadata) {
       this.messagePersistence.set(message, {
         ...(options.entryId ? { entryId: options.entryId } : {}),
@@ -917,16 +918,16 @@ export class CoreAgentHarness<
     await this.emitQueueUpdate();
   }
 
-  async followUp(text: string, options?: { images?: ImageContent[] }): Promise<void> {
+  async followUp(text: string, options?: { media?: MediaContent[] }): Promise<void> {
     if (this.phase === "idle") {
       throw new AgentHarnessError("invalid_state", "Cannot follow up while idle");
     }
-    this.followUpQueue.push(createUserMessage(text, options?.images));
+    this.followUpQueue.push(createUserMessage(text, options?.media));
     await this.emitQueueUpdate();
   }
 
-  async nextTurn(text: string, options?: { images?: ImageContent[] }): Promise<void> {
-    this.nextTurnQueue.push(createUserMessage(text, options?.images));
+  async nextTurn(text: string, options?: { media?: MediaContent[] }): Promise<void> {
+    this.nextTurnQueue.push(createUserMessage(text, options?.media));
     await this.emitQueueUpdate();
   }
 

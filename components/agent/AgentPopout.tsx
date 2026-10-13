@@ -19,6 +19,7 @@ import { derivePageKey, pageLabelFor, pageSuggestionsFor } from "@/lib/agent/age
 import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import { dispatchAgentMutation } from "@/lib/agent/agent-mutations";
 import WikiProposalPreviewModal from "@/components/agent/WikiProposalPreviewModal";
+import AgentModelPicker from "@/components/agent/AgentModelPicker";
 import SubagentPanel from "@/components/agent/SubagentPanel";
 import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
@@ -108,6 +109,8 @@ export default function AgentPopout({
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [pendingModelSaves, setPendingModelSaves] = useState(0);
+  const modelSettingsBusy = pendingModelSaves > 0 && !streaming;
   const [compacting, setCompacting] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -648,7 +651,7 @@ export default function AgentPopout({
 
   const send = useCallback(async () => {
     const raw = input.trim();
-    if (!raw && attachments.length === 0) return;
+    if (modelSettingsBusy || (!raw && attachments.length === 0)) return;
     const key = await ensureSession();
     if (!key) return;
     const selectedAttachments = attachments;
@@ -657,9 +660,14 @@ export default function AgentPopout({
       const sentIds = new Set(selectedAttachments.map((item) => item.id));
       setAttachments((prev) => prev.filter((item) => !sentIds.has(item.id)));
     }
-  }, [input, attachments, ensureSession, dispatchMessage]);
+  }, [input, attachments, ensureSession, dispatchMessage, modelSettingsBusy]);
 
   const sendVoiceFile = useCallback(async (file: File) => {
+    if (modelSettingsBusy) {
+      setVoiceRetryFile(file);
+      setAttachmentError("模型设置正在保存；录音已保留，保存后可以重试。");
+      return;
+    }
     setVoiceBusy(true);
     setVoiceRetryFile(null);
     setAttachmentError(null);
@@ -684,7 +692,7 @@ export default function AgentPopout({
     } finally {
       setVoiceBusy(false);
     }
-  }, [dispatchMessage, ensureSession, uploadOneAttachment]);
+  }, [dispatchMessage, ensureSession, uploadOneAttachment, modelSettingsBusy]);
 
   const abort = useCallback(async () => {
     if (!activeKey) return;
@@ -1297,7 +1305,7 @@ export default function AgentPopout({
             {voiceRetryFile && (
               <span className="flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
                 <span>🎤 录音待重试</span>
-                <button type="button" disabled={voiceBusy} onClick={() => void sendVoiceFile(voiceRetryFile)} className="font-medium underline disabled:opacity-40">重试</button>
+                <button type="button" disabled={voiceBusy || modelSettingsBusy} onClick={() => void sendVoiceFile(voiceRetryFile)} className="font-medium underline disabled:opacity-40">重试</button>
                 <button type="button" disabled={voiceBusy} onClick={() => { setVoiceRetryFile(null); setAttachmentError(null); }} title="放弃这段录音" className="disabled:opacity-40">✕</button>
               </span>
             )}
@@ -1323,7 +1331,7 @@ export default function AgentPopout({
             📎
           </button>
           <VoiceRecordButton
-            disabled={attachmentBusy || voiceBusy}
+            disabled={attachmentBusy || voiceBusy || modelSettingsBusy}
             cancelKey={`${open ? "open" : "closed"}:${activeKey ?? "none"}`}
             onRecorded={sendVoiceFile}
             onError={setAttachmentError}
@@ -1355,12 +1363,13 @@ export default function AgentPopout({
           ) : null}
           <button
             onClick={send}
-            disabled={(!input.trim() && attachments.length === 0) || attachmentBusy || voiceBusy}
+            disabled={(!input.trim() && attachments.length === 0) || attachmentBusy || voiceBusy || modelSettingsBusy}
             className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             发送
           </button>
         </div>
+        {open && <AgentModelPicker sessionKey={activeKey} productionId={productionId} running={streaming} ensureSession={ensureSession} onSavingChange={(saving) => setPendingModelSaves(count => count + (saving ? 1 : -1))} />}
         <p className="mt-1 text-[10px] text-[var(--muted)]">临时附件：单个 50 MB · 每条 8 个 · 当前对话 1 GiB/128 个 · 个人 5 GiB/512 个</p>
       </div>
 

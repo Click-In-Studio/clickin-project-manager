@@ -58,6 +58,7 @@ export interface RunHandle {
   /** 本 agent_run 从外部 registry 生成的检索目录；find_tools 与主动召回共用。 */
   runtimeToolCatalog?: ToolCatalogEntry[];
   /** run 中途出现新附件后，按 MIME 把匹配的动态 MMP 工具加入下一轮工具面。 */
+  modelContext?: () => Promise<import("../../../vendor/openclaw/packages/agent-core/src/types").AgentMessage[]>;
   warmAttachments?: (attachmentIds: string[]) => Promise<void>;
 }
 
@@ -149,6 +150,17 @@ const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_se
 
 /** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
 export const DEFS: ToolDefinition[] = [
+  {
+    mcpName: "model_list", description: "查询本轮配置与可用于子任务的模型、模态、思考强度和成本档位。显式选型前先查询，不凭名称猜能力。用户的禁用设置不可修改。",
+    parameters: Type.Object({}), readOnly: true,
+    execute: async (ctx) => {
+      if (!ctx.run) throw new Error("没有活动轮次");
+      const { runModelSelection, modelCatalog } = await import("./model-settings-db");
+      const selection = await runModelSelection(ctx.run.runId);
+      const models = (await modelCatalog(ctx.userId, ctx.productionId || null)).filter((item) => item.available && !selection.disabledSubagentModels.includes(item.key));
+      return JSON.stringify({ runId: ctx.run.runId, selection, models });
+    },
+  },
   ...SUBAGENT_DEFS,
   ...MEMORY_DEFS,
   // ── my.* ────────────────────────────────────────────────────────────────
@@ -1127,7 +1139,7 @@ async function proposalBody(productionId: string, toolCallId: string, userId: st
 
 export const TOOL_MCP_NAMES: readonly string[] = DEFS.map((d) => d.mcpName);
 /** 只存在于运行时、不进 tool-catalog 的工具（常驻热层，不走召回；schedule.finish 只在定时任务 run 里注入）：目录 = 注册表 − 这几个 */
-export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "web.search", "web.fetch", "schedule.finish", ...SUBAGENT_TOOL_NAMES]);
+export const RUNTIME_ONLY_TOOLS: ReadonlySet<string> = new Set(["ask_user", "find_tools", "model_list", "web.search", "web.fetch", "schedule.finish", ...SUBAGENT_TOOL_NAMES]);
 /** 允许无人值守直接写的工具（注册表 unattended=allow）；定时任务的 allowed_tools 只能从这里选 */
 export const UNATTENDED_ALLOWED_TOOLS: ReadonlySet<string> = new Set(DEFS.filter((d) => d.unattended === "allow").map((d) => d.mcpName));
 registerUnattendedAllowed(UNATTENDED_ALLOWED_TOOLS);
@@ -1169,6 +1181,17 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
       if (audit) {
         const records = await audit.commit();
         if (records.length > 0) ctx.run?.noteMutations?.(toolCallId, records);
+      }
+      if (d.mcpName === "my.attachment_read" && ctx.run && (!args.mode || args.mode === "read") && !args.ranges) {
+        const { runModelSelection } = await import("./model-settings-db");
+        const { prepareModelAttachments } = await import("./model-attachments");
+        const { resolveModel } = await import("./config");
+        const model = resolveModel((await runModelSelection(ctx.run.runId)).modelKey);
+        const ready = await (await import("../attachment-db")).getReadyAttachments([String(args.attachmentId)], ctx.run.sessionId, ctx.userId);
+        if (!ready.length || !model.nativeMedia?.some((capability) => capability.mimeTypes.includes(ready[0].mimeType))) return text(out);
+        const prepared = await prepareModelAttachments("", [String(args.attachmentId)], { sessionId: ctx.run.sessionId, userId: ctx.userId,
+          productionId: ctx.productionId, runId: ctx.run.runId, model, signal: ctx.run.signal });
+        return { content: [{ type: "text" as const, text: out }, ...prepared.media], details: undefined };
       }
       return text(out);
     },

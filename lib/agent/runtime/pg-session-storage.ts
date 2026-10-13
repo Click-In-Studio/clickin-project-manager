@@ -8,6 +8,7 @@
 
 import type { Pool, PoolClient } from "pg";
 import { getPool } from "@/lib/pg";
+import { durableMediaEntry } from "./media-transcript";
 import { RUNNER_OWNER } from "./config";
 import { BaseSessionStorage } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/storage-base";
 import type {
@@ -96,7 +97,7 @@ export class PgSessionStorage extends BaseSessionStorage<PgSessionMetadata> {
        SELECT $1, COALESCE(MAX(seq), 0) + 1, $2, $3, $4, $5::jsonb
        FROM agent_session_entry WHERE session_id = $1
        HAVING $6::text IS NULL OR EXISTS(SELECT 1 FROM agent_run WHERE id=$6 AND execution_epoch=$7 AND owner=$8)`,
-      [meta.id, entry.id, entry.parentId, entry.type, JSON.stringify(entry), this.fence?.runId ?? null, this.fence?.epoch ?? 0, RUNNER_OWNER],
+      [meta.id, entry.id, entry.parentId, entry.type, JSON.stringify(durableMediaEntry(entry)), this.fence?.runId ?? null, this.fence?.epoch ?? 0, RUNNER_OWNER],
     );
     if (!inserted.rowCount) throw new Error("会话执行租约已失效");
     // 会话活跃时间：只有消息类条目算"最后一条消息"

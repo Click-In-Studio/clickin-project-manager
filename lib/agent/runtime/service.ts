@@ -1,3 +1,6 @@
+import { assertModelSelection, sessionModelSelection, runModelSelection } from "./model-settings-db";
+import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
 import { setToolObservationSources, addObservationTools } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait, type PrepareAdmittedRequest } from "./admission";
 import { cancelAdmissions, inputWaitReady, recoverAdmissions, completedChatMessages } from "./admission-db";
@@ -20,7 +23,7 @@ import { getPool } from "@/lib/pg";
 import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { appendRunRecord } from "@/lib/agent/memory/store";
-import { attachmentIdsFromContext, attachTrustedAttachmentContext, stripUiContext } from "@/lib/agent/agent-ui-context";
+import { attachmentIdsFromContext, stripUiContext } from "@/lib/agent/agent-ui-context";
 import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent/chat/types";
 import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
 import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
@@ -55,7 +58,7 @@ import {
   reconcileConsumedInputs,
 } from "./session-inbox";
 import {
-  CHAT_MODEL, deepseekApiKey, llmRuntime,
+  llmRuntime,
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
 import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
@@ -63,11 +66,9 @@ import { activatePendingPermissions } from "@/lib/perm/permission-activation-db"
 import {
   getReadyAttachments,
   listAttachmentsForSession,
-  recordAttachmentAccess,
   scheduleSessionAttachmentDeletionInTx,
   type AgentAttachment,
 } from "@/lib/agent/attachment-db";
-import { preflightAttachments } from "@/lib/mmp/attachment-preflight";
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
@@ -168,6 +169,8 @@ export async function startRun(
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
       input.sessionId,
     ]);
+    const selection = await assertModelSelection(input.userId, meta.productionId, await sessionModelSelection(input.sessionId, client), client);
+    const selectedModel = resolveModel(selection.modelKey);
     const busy = await client.query(
       `SELECT 1 FROM agent_run WHERE session_id=$1
       AND status IN ('queued','running','compacting','awaiting_approval','awaiting_answer')`,
@@ -175,17 +178,18 @@ export async function startRun(
     );
     if (busy.rowCount) throw new SessionBusyError();
     await client.query(
-      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from,admission_class)
-      VALUES($1,$2,'queued',$3,now(),$4,$5,$6,$7,$8)`,
+      `INSERT INTO agent_run (id,session_id,status,owner,heartbeat_at,page_key,model,schedule_id,paid_from,admission_class,model_selection)
+      VALUES($1,$2,'queued',$3,now(),$4,$5,$6,$7,$8,$9::jsonb)`,
       [
         runId,
         input.sessionId,
         RUNNER_OWNER,
         input.pageKey ?? null,
-        CHAT_MODEL.id,
+        selectedModel.id,
         input.scheduleId ?? null,
         paidFrom,
         input.scheduleId ? "schedule" : "interactive",
+        JSON.stringify(selection),
       ],
     );
     inboxId = (await import("./ids")).newInboxId();
@@ -249,29 +253,11 @@ export async function steerRun(
 }
 
 async function withAttachmentPreflight(
-  message: string,
-  attachmentIds: string[],
-  sessionId: string,
-  userId: string,
-  productionId: string | null,
-  runId: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (!attachmentIds.length) return message;
-  const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
-  if (attachments.length !== attachmentIds.length) {
-    throw Object.assign(new Error("附件不存在、尚未上传完成或不属于该会话"), { status: 400 });
-  }
-  // 显式随消息附带本身就是真引用；预检若失败也不能把它误判为“从未发送”。
-  await recordAttachmentAccess(runId, attachmentIds, "attached");
-  const preflights = await preflightAttachments(attachments.map((attachment) => ({
-    attachmentId: attachment.id,
-    mediaKind: attachment.mediaKind,
-    mimeType: attachment.mimeType,
-    r2Key: attachment.r2Key,
-  })), { signal, usage: { userId, productionId } });
-  await recordAttachmentAccess(runId, attachmentIds, "preflight");
-  return attachTrustedAttachmentContext(message, attachments, preflights);
+  message: string, attachmentIds: string[], sessionId: string, userId: string,
+  productionId: string | null, runId: string, signal = new AbortController().signal,
+) {
+  const model = resolveModel((await runModelSelection(runId)).modelKey);
+  return prepareModelAttachments(message, attachmentIds, { sessionId, userId, productionId, runId, model, signal });
 }
 
 export async function abortRun(
@@ -396,9 +382,13 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     drain: () => rawPublisher.drain(),
   };
   const session = new Session(storage);
+  const selection = await runModelSelection(runId);
+  const selectedModel = resolveModel(selection.modelKey);
+  const mediaInput = { sessionId, userId, productionId, runId, model: selectedModel, signal: abort.signal };
   const audited = new Map<string, MutationRecord[]>(); // toolCallId → 本次调用落下的账本行（挂到 mutation 行上）
   const runHandle: RunHandle = {
     runId, sessionId, signal: abort.signal,
+    modelContext: async () => (await session.buildContext()).messages,
     publish: (line: StreamLine) => publisher.publish(line),
     setStatus: async (s: "running" | "awaiting_answer") => {
       await pool.query(`UPDATE agent_run SET status = $2 WHERE id = $1 AND status IN ('running', 'awaiting_answer')`, [runId, s]);
@@ -434,7 +424,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   // compaction 单列：它是独立模型请求且不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
-  const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,CHAT_MODEL),0);
+  const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,selectedModel),0);
   let message = input.message;
   let lastUser: string | null = message ?? null;
   let lastAssistant: string | null = null;
@@ -532,15 +522,16 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       };
       return [...messages.slice(0, idx), injected, ...messages.slice(idx)];
     };
-    const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal }) =>
+    const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal, calibration }) =>
       compactRequestContext({
         session,
         context,
         model,
-        apiKey: runtimeOverrides.apiKey ?? deepseekApiKey(),
+        apiKey: runtimeOverrides.apiKey ?? modelApiKey(selectedModel),
         signal,
         trigger,
         maxTokens: options?.maxTokens,
+        streamOptions: options, calibration,
         completeSimple: llmRuntime().completeSimple,
         compactFn: runtimeOverrides.compactFn,
         shouldCompact: runtimeOverrides.shouldCompactFn,
@@ -552,6 +543,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
           return { ...requestContext, systemPrompt: buildSystemPrompt(currentInject) };
         },
         rebuildMessages: withInjectedNote,
+        prepareMessages: (messages) => restoreModelMedia(messages, mediaInput),
         onCompacting: async (active) => {
           const next = active ? "compacting" : "running";
           const previous = active ? "running" : "compacting";
@@ -586,12 +578,13 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         return tool;
       },
       systemPrompt: buildSystemPrompt(inject),
-      model: CHAT_MODEL,
-      thinkingLevel: "low",
+      model: selectedModel,
+      thinkingLevel: selection.thinkingLevel,
+      streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
       getApiKeyAndHeaders: async () => {
         // 停止可能发生在 harness 异步准备、内部取消控制器尚未建立时。
         if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        return { apiKey: runtimeOverrides.apiKey ?? deepseekApiKey() };
+        return { apiKey: runtimeOverrides.apiKey ?? modelApiKey(selectedModel) };
       },
       runtime: runtimeOverrides.streamFn
         ? { streamSimple: admittedStream(runtimeOverrides.streamFn, prepareRequest), completeSimple: llmRuntime().completeSimple }
@@ -612,13 +605,17 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
 
     // 额度门与 run 建立之后、基础模型第一次推理之前自动预检。MMP 的 agent context 进入本轮
     // 用户消息并随 transcript 保存；附件 id 与原件仍保留，后续可显式读取。
+    let initialMedia: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent[] = [];
     if (message !== undefined && input.attachmentIds?.length) {
-      message = await withAttachmentPreflight(
+      const prepared = await withAttachmentPreflight(
         message, input.attachmentIds, sessionId, userId, productionId, runId, abort.signal,
       );
+      message = prepared.text;
+      initialMedia = prepared.media;
       lastUser = message;
     }
 
+    harness.on("context", async ({ messages }) => ({ messages: await restoreModelMedia(messages, mediaInput) }));
     // 召回临时插入：送模型的消息列表里，最后一条用户消息前插一条 user 消息。
     // 不进 session（下一轮不再带，与 prependContext 语义一致）。
     if (injectedNote) {
@@ -681,7 +678,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         usage.input += event.message.usage.input;
         usage.output += event.message.usage.output;
         usage.cacheRead += event.message.usage.cacheRead;
-        const dollars = usdOfUsage(event.message.usage, CHAT_MODEL);
+        const dollars = usdOfUsage(event.message.usage, selectedModel);
         usage.usd += dollars;
         taskCostTail = taskCostTail.then(async()=>{
           if (!(await (await import("./subagent-db")).addTaskCost(runId,dollars))) {
@@ -706,7 +703,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     });
 
     if (message !== undefined) {
-      const turn = harness.prompt(message, input.inboxEntryId ? { entryId: input.inboxEntryId } : undefined);
+      const turn = harness.prompt(message, { media: initialMedia, ...(input.inboxEntryId ? { entryId: input.inboxEntryId } : {}) });
       await turn;
     } else {
       const decision = await repairAndClassify(session, toolByName, {
@@ -775,21 +772,17 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         continue;
       }
 
-      const preparedQueued: Array<{ id: string; message: string }> = [];
+      const preparedQueued: Array<{ id: string; message: string; media: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent[] }> = [];
       for (const row of queued) {
-        preparedQueued.push({
-          id: row.id,
-          message: await withAttachmentPreflight(
-            row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal,
-          ),
-        });
+        const prepared = await withAttachmentPreflight(row.message, row.attachment_ids, sessionId, userId, productionId, runId, abort.signal);
+        preparedQueued.push({ id: row.id, message: prepared.text, media: prepared.media });
       }
       const first = preparedQueued[0]!;
       const rest = preparedQueued.slice(1);
       lastUser = preparedQueued.at(-1)?.message ?? lastUser;
-      const nextTurn = harness.prompt(first.message, { entryId: first.id });
+      const nextTurn = harness.prompt(first.message, { entryId: first.id, media: first.media });
       const queuedSteers = rest.map((item) => harness.steer(item.message, {
-        entryId: item.id,
+        media: item.media, entryId: item.id,
         onConsumed: () => { void reconcileConsumedInputs(sessionId); },
       }));
       await Promise.all(queuedSteers);
@@ -837,7 +830,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     if (detached) {
       // 脱离：run 行保持原状态（running/awaiting_*），心跳停更 → 30s 后被下一个进程接管；
       // 已花的 token 照记
-      await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
+      await recordUsage(userId, productionId, usage, input.paidFrom, selectedModel).catch(() => {});
       await pool.query("UPDATE agent_run SET owner=NULL,heartbeat_at=NULL,input_tokens=input_tokens+$4,output_tokens=output_tokens+$5,cache_read_tokens=cache_read_tokens+$6 WHERE id=$1 AND execution_epoch=$2 AND owner=$3", [runId,input.epoch,RUNNER_OWNER,usage.input,usage.output,usage.cacheRead]);
       active.delete(sessionId);
       return;
@@ -847,7 +840,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       [runId, status, error, usage.input, usage.output, usage.cacheRead,input.epoch,RUNNER_OWNER],
     );
     if (!finished.rowCount) { active.delete(sessionId); return; }
-    await recordUsage(userId, productionId, usage, input.paidFrom).catch(() => {});
+    await recordUsage(userId, productionId, usage, input.paidFrom, selectedModel).catch(() => {});
     await pruneStreamingUpdates(sessionId, runId).catch(() => {});
     // 定时任务收尾：写回摘要、按汇报调整任务、通知创建者（附本 run 的写审计改动清单）
     if (schedule) await finishScheduledRun({ scheduleId: schedule.id, runId, sessionId, status, error, lastAssistant, report: scheduleReport });
@@ -904,6 +897,7 @@ async function recordUsage(
   productionId: string | null,
   usage: { input: number; output: number; cacheRead: number; usd: number; compactionUsd: number; compactionTokens: number },
   paidFrom: PaidFrom | undefined,
+  model: import("../../../vendor/openclaw/packages/llm-core/src/types").Model,
 ): Promise<void> {
   const pool = getPool();
   const credits = creditsFromUsd(usage.usd);
@@ -922,7 +916,7 @@ async function recordUsage(
     await pool.query(
       `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [userId, productionId, kind, CHAT_MODEL.id, tokens, c, paid],
+      [userId, productionId, kind, model.id, tokens, c, paid],
     );
     if (c > 0) creditsLanded = true;
   }
@@ -931,14 +925,14 @@ async function recordUsage(
     await pool.query(
       `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
        VALUES ($1, $2, 'chat_input', $3, 0, $4, $5)`,
-      [userId, productionId, CHAT_MODEL.id, credits, paid],
+      [userId, productionId, model.id, credits, paid],
     );
   }
   if (usage.compactionTokens > 0 || compactionCredits > 0) {
     await pool.query(
       `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
        VALUES ($1, $2, 'chat_compaction', $3, $4, $5, $6)`,
-      [userId, productionId, CHAT_MODEL.id, usage.compactionTokens, compactionCredits, paid],
+      [userId, productionId, model.id, usage.compactionTokens, compactionCredits, paid],
     );
   }
   const total = credits + compactionCredits;
@@ -1237,8 +1231,8 @@ function textOf(content: unknown): string {
 }
 
 export async function listSessions(userId: string): Promise<ChatSessionSummary[]> {
-  const r = await getPool().query<{ id: string; title: string | null; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean; queued_run: boolean; pending_question_count: number; latest_question_at: Date | null }>(
-    `SELECT s.id, s.title, s.updated_at,
+  const r = await getPool().query<{ id: string; title: string | null; model_selection: import("../model-types").ModelSelection; updated_at: Date; first_user: string | null; last_text: string | null; active_run: boolean; compacting_run: boolean; queued_run: boolean; pending_question_count: number; latest_question_at: Date | null }>(
+    `SELECT s.id, s.title, s.updated_at, s.model_selection,
        EXISTS(SELECT 1 FROM agent_run r WHERE r.session_id=s.id AND r.status='queued') AS queued_run,
        EXISTS (SELECT 1 FROM agent_run r WHERE r.session_id = s.id
                  AND r.status IN ('running', 'compacting', 'awaiting_approval', 'awaiting_answer')) AS active_run,
@@ -1261,6 +1255,7 @@ export async function listSessions(userId: string): Promise<ChatSessionSummary[]
   );
   return r.rows.map((row) => ({
     key: row.id,
+    modelSelection: row.model_selection,
     title: row.title || stripUiContext(row.first_user ?? "").trim().slice(0, 60) || "新对话",
     lastMessagePreview: row.last_text ? stripUiContext(row.last_text).slice(0, 120) : undefined,
     updatedAt: row.updated_at.getTime(),
@@ -1364,7 +1359,11 @@ export async function dispatchPendingSession(sessionId: string): Promise<void> {
   const meta = await PgSessionStorage.metadata(sessionId);
   if (!meta) return;
   const runId = newRunId();
-  const rows = await claimPendingSession(sessionId, runId, RUNNER_OWNER, CHAT_MODEL.id);
+  const pending = await pendingInputsForSession(sessionId);
+  const configured = await sessionModelSelection(sessionId);
+  const selection = pending.some(row => row.kind === "user_message")
+    ? await assertModelSelection(meta.userId, meta.productionId, configured) : configured;
+  const rows = await claimPendingSession(sessionId, runId, RUNNER_OWNER, resolveModel(selection.modelKey).id, selection);
   if (!rows?.length) return;
   const first = rows.find((r) => r.kind === "user_message");
   // 系统唤醒是原任务的续跑；不会因为子任务已经消耗额度而丢掉交付。
