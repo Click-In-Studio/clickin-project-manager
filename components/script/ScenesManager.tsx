@@ -541,6 +541,9 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
   const [reorderBusy, setReorderBusy] = useState(false);
   const reorderPendingRef = useRef(false);
+  const readSequenceRef = useRef(0);
+  const activeWritesRef = useRef(0);
+  const refreshQueuedRef = useRef(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [orderUncertain, setOrderUncertain] = useState(false);
   const currentVersionId = versionId ?? null;
@@ -553,24 +556,46 @@ export default function ScenesManager({ productionId, productionName, initialSce
   }, [canEdit]);
 
   const applyCanonicalPayload = (data: { scenes?: MarkerProjection[] }) => {
-    if (data.scenes) setScenes(data.scenes);
+    if (data.scenes) {
+      readSequenceRef.current++;
+      setScenes(data.scenes);
+    }
   };
 
-  const refreshCanonicalState = useCallback(async () => {
-    const query = currentVersionId ? `?versionId=${encodeURIComponent(currentVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`);
-    if (!response.ok || response.status === 202) return false;
-    const data = await response.json() as MarkerProjection[];
-    setScenes(data);
-    return true;
+  // 写入开始/完成和新的读取都会淘汰旧请求；过期响应不影响顺序或恢复状态。
+  const refreshCanonicalState = useCallback(async (): Promise<boolean | null> => {
+    const sequence = ++readSequenceRef.current;
+    const isCurrent = () => sequence === readSequenceRef.current && activeWritesRef.current === 0;
+    try {
+      const query = currentVersionId ? `?versionId=${encodeURIComponent(currentVersionId)}` : "";
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`);
+      if (!response.ok || response.status === 202) return isCurrent() ? false : null;
+      const data = await response.json() as MarkerProjection[];
+      if (!isCurrent()) return null;
+      if (!Array.isArray(data)) return false;
+      setScenes(data);
+      return true;
+    } catch {
+      return isCurrent() ? false : null;
+    }
   }, [currentVersionId, productionId]);
+
+  const requestCanonicalRefresh = useCallback(() => {
+    if (activeWritesRef.current || reorderPendingRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+    refreshQueuedRef.current = false;
+    void refreshCanonicalState();
+  }, [refreshCanonicalState]);
 
   // markers 流（#467：后台标签不建连）。debounce timer 挂 ref——连接会随可见性
   // 反复开合，timer 的生命周期比单次连接长。
   const markerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
-  }, []);
+    readSequenceRef.current++;
+  }, [currentVersionId, productionId]);
 
   useVisibleEventSource(
     currentVersionId
@@ -578,26 +603,36 @@ export default function ScenesManager({ productionId, productionName, initialSce
       : null,
     {
       // 隐藏/断线期间的 markers 帧不补发，重连先无条件对一次账
-      onReopen: () => { void refreshCanonicalState(); },
+      onReopen: requestCanonicalRefresh,
       listeners: {
         markers: () => {
           if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
           markerRefreshTimerRef.current = setTimeout(() => {
             markerRefreshTimerRef.current = null;
-            void refreshCanonicalState();
+            requestCanonicalRefresh();
           }, 50);
         },
       },
     },
   );
 
-  const mutate = (url: string, init: RequestInit) => runWrite((async () => {
-      let res = await fetch(url, init);
-      if (res.status === 202) res = await fetch(url, init);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
-      applyCanonicalPayload(data);
-    })());
+  const mutate = async (url: string, init: RequestInit) => {
+    activeWritesRef.current++;
+    readSequenceRef.current++;
+    try {
+      await runWrite((async () => {
+        let res = await fetch(url, init);
+        if (res.status === 202) res = await fetch(url, init);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
+        applyCanonicalPayload(data);
+      })());
+    } finally {
+      activeWritesRef.current--;
+      readSequenceRef.current++;
+      if (refreshQueuedRef.current && !reorderPendingRef.current && !activeWritesRef.current) requestCanonicalRefresh();
+    }
+  };
 
   const update = async (id: string, name: string) => {
     await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
@@ -702,18 +737,22 @@ export default function ScenesManager({ productionId, productionName, initialSce
     if (!canEdit || !fieldPerms.structure || orderUncertain || reorderPendingRef.current || active.id === openingChapterMarkerId) return;
     if (beforeId === active.id || beforeId === afterEdgeBeforeId(active)) return;
     reorderPendingRef.current = true;
+    readSequenceRef.current++;
     setReorderBusy(true);
     setReorderError(null);
     try {
       await reorder(active.id, beforeId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存失败";
-      const restored = await refreshCanonicalState().catch(() => false);
+      const restored = await refreshCanonicalState();
+      if (restored === null) return;
       setOrderUncertain(!restored);
       setReorderError(`顺序未能保存：${message}。${restored ? "已重新读取当前顺序。" : "无法读取当前顺序，请重试读取或刷新页面后再排序。"}`);
     } finally {
+      readSequenceRef.current++;
       reorderPendingRef.current = false;
       setReorderBusy(false);
+      if (refreshQueuedRef.current) requestCanonicalRefresh();
     }
   };
 

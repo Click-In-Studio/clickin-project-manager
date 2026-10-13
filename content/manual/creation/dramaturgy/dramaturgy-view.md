@@ -7,7 +7,7 @@ who: 看：有构作查看权限的成员；改：各字段分别授权（简介
 tier: all
 platform: [desktop, mobile]
 related: [creation/dramaturgy/characters, creation/script/reading, creation/dramaturgy/inspiration]
-updated: 2026-10-09
+updated: 2026-10-13
 ---
 
 ## 这是什么
