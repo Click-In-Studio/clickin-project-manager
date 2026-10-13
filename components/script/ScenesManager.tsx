@@ -623,8 +623,12 @@ export default function ScenesManager({ productionId, productionName, initialSce
       await runWrite((async () => {
         let res = await fetch(url, init);
         if (res.status === 202) res = await fetch(url, init);
+        if (res.status === 401 || (res.redirected && new URL(res.url).pathname === `${BASE_PATH}/login`)) {
+          throw new Error("登录已失效，请重新登录后再排序");
+        }
         const data = await res.json().catch(() => ({}));
         if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
+        if (!Array.isArray(data.scenes)) throw new Error("服务端未返回章节和段落，请重新读取当前顺序");
         applyCanonicalPayload(data);
       })());
     } finally {
