@@ -61,7 +61,7 @@ describe("#554 项目切换器窄屏收紧", () => {
   it("常规阶段保留桌面尺寸", () => {
     const button = renderSwitcher(false);
     expect(button.style.height).toBe("44px");
-    expect(button.style.padding).toBe("8px 12px");
+    expect(button.style.padding).toBe("8px 8px 8px 12px");
     expect(button.style.minWidth).toBe("180px");
     expect(button.style.maxWidth).toBe("280px");
     expect(button.style.width).toBe("");
@@ -70,7 +70,7 @@ describe("#554 项目切换器窄屏收紧", () => {
   it("最窄阶段限制宽度并缩小高度和间距", () => {
     const button = renderSwitcher(true);
     expect(button.style.height).toBe("36px");
-    expect(button.style.padding).toBe("5px 7px");
+    expect(button.style.padding).toBe("5px 5px 5px 7px");
     expect(button.style.minWidth).toBe("88px");
     expect(button.style.maxWidth).toBe("132px");
     expect(button.style.width).toBe("clamp(88px, 28vw, 132px)");
