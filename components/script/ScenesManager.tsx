@@ -744,6 +744,8 @@ export default function ScenesManager({ productionId, productionName, initialSce
       await reorder(active.id, beforeId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存失败";
+      setOrderUncertain(true);
+      setReorderError(`顺序未能保存：${message}。请重试读取顺序或刷新页面后再排序。`);
       const restored = await refreshCanonicalState();
       if (restored === null) return;
       setOrderUncertain(!restored);
