@@ -8,8 +8,9 @@ import type { MarkerDeleteDialogState } from "./MarkerDeleteDialog";
 
 /** 表格结构写入沿用列表的 REST 契约，展示顺序只接受服务端结果。 */
 export function useSceneTableStructure({
-  productionId, versionId, scenes, openingChapterMarkerId, onScenesChange, trackWrite,
+  productionId, versionId, scenes, openingChapterMarkerId, onScenesChange, trackWrite, active,
 }: {
+  active: boolean;
   productionId: string;
   versionId: string | null;
   scenes: MarkerProjection[];
@@ -20,6 +21,7 @@ export function useSceneTableStructure({
   const [busy, setBusy] = useState(false);
   const [writeBlocked, setWriteBlocked] = useState(false);
   const writeBlockedRef = useRef(false);
+  const failedWriteRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const busyRef = useRef(false);
@@ -51,15 +53,16 @@ export function useSceneTableStructure({
 
   const refreshWithNotice = useCallback(() => {
     if (busyRef.current) { refreshQueued.current = true; return; }
-    void refresh().then((synced) => { if (synced) setError(null); })
+    void refresh().then((synced) => { if (synced) setError(failedWriteRef.current); })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "同步失败"));
   }, [refresh]);
   useEffect(() => {
     const sequence = readSequence;
+    if (!active) return;
     refreshWithNotice();
     return () => { sequence.current++; };
-  }, [refreshWithNotice]);
-  useVisibleEventSource(versionId ? `${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(versionId)}` : null, {
+  }, [refreshWithNotice, active]);
+  useVisibleEventSource(active && versionId ? `${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(versionId)}` : null, {
     onReopen: refreshWithNotice,
     listeners: { markers: refreshWithNotice },
   });
@@ -84,15 +87,18 @@ export function useSceneTableStructure({
           return;
         }
         if (!response.ok || response.status === 202 || data.status === "updating") {
-          throw new Error(data.error ?? "操作未完成，请同步后重试");
+          throw new Error(data.error ?? "操作未完成，请核对结果");
         }
         if (!Array.isArray(data.scenes)) throw new Error("服务端未返回章节和段落，请同步后确认结果");
         readSequence.current++;
         onScenesChange(data.scenes);
+        failedWriteRef.current = null;
+        setError(null);
         setDeleteDialog(null);
       })());
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "操作失败";
+      failedWriteRef.current = message;
       setError(message);
       if (method === "DELETE" && deleteDialog) setDeleteDialog({ plan: null, message });
       // 请求可能已落库；先释放锁再对账，不把失败请求当作成功。

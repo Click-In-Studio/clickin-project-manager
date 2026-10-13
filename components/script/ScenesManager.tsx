@@ -27,6 +27,8 @@ type Props = {
   /** 逐字段编辑权限；canEdit 是「值得显示编辑态」的粗门 */
   fieldPerms: SceneFieldPerms;
   embedded?: boolean;
+  /** 隐藏看法保留草稿，但暂停实时订阅。 */
+  active?: boolean;
   versionId?: string | null;
   initialExpandedId?: string;
   trackWrite?: <T>(operation: Promise<T>) => Promise<T>;
@@ -52,17 +54,21 @@ function MetaField({
   const [draft, setDraft] = useState(externalValue);
   const [lastSeen, setLastSeen] = useState(externalValue);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  if (lastSeen !== externalValue) { setLastSeen(externalValue); setDraft(externalValue); }
+  if (lastSeen !== externalValue) {
+    setLastSeen(externalValue);
+    if (!saveError) setDraft(externalValue);
+  }
 
   const commit = async () => {
     if (draft === externalValue) return;
     setSaving(true);
-    try { await onSave(draft); } catch { /* 保留草稿，由顶栏提示重试。 */ } finally { setSaving(false); }
+    try { await onSave(draft); setSaveError(null); } catch (caught) { setSaveError(caught instanceof Error ? caught.message : "保存失败"); } finally { setSaving(false); }
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" data-dramaturgy-unsaved={saveError ? "true" : undefined}>
       <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">{label}</label>
       {canEdit ? (
         multiline ? (
@@ -91,6 +97,7 @@ function MetaField({
           {externalValue || <span className="text-zinc-300 italic">—</span>}
         </p>
       )}
+      {saveError && <p role="alert" className="break-words text-xs text-red-700">{saveError}。输入尚未保存；重新编辑后移开焦点重试。</p>}
     </div>
   );
 }
@@ -140,6 +147,7 @@ function SceneEditRow({
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(scene.name);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded ?? false);
@@ -168,8 +176,8 @@ function SceneEditRow({
   const commit = async (name: string) => {
     if (name === scene.name) return;
     setSaving(true);
-    try { await onUpdate(name); setEditingName(false); }
-    catch { setEditingName(true); }
+    try { await onUpdate(name); setNameError(null); setEditingName(false); }
+    catch (caught) { setNameError(caught instanceof Error ? caught.message : "保存失败"); setEditingName(true); }
     finally { setSaving(false); }
   };
 
@@ -232,7 +240,7 @@ function SceneEditRow({
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               onBlur={() => commit(draftName.trim())}
-              onKeyDown={(e) => { if (e.key === "Enter") commit(draftName.trim()); if (e.key === "Escape") { setDraftName(scene.name); setEditingName(false); } }}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(draftName.trim()); if (e.key === "Escape") { setDraftName(scene.name); setNameError(null); setEditingName(false); } }}
               disabled={saving}
               className="w-full border-b border-zinc-400 text-sm text-zinc-800 outline-none disabled:opacity-50"
             />
@@ -245,6 +253,7 @@ function SceneEditRow({
               {scene.name || <span className="italic text-zinc-300">未命名</span>}
             </span>
           )}
+          {nameError && <p role="alert" data-dramaturgy-unsaved="true" className="mt-1 break-words text-xs text-red-700">{nameError}。名称尚未保存；按 Enter 或移开焦点重试，Esc 取消。</p>}
         </td>
         <td className="border-r border-zinc-100/80 px-4 py-3">
           {marks.length > 0 && (
@@ -508,14 +517,20 @@ function InsertSceneRow({
   );
 }
 
-export default function ScenesManager({ productionId, productionName, initialScenes, openingChapterMarkerId, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId, trackWrite }: Props & { canImport?: boolean }) {
+export default function ScenesManager({ productionId, productionName, initialScenes, openingChapterMarkerId, canEdit, fieldPerms, embedded, canImport, versionId, initialExpandedId, trackWrite, active = true }: Props & { canImport?: boolean }) {
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [dragging, setDragging] = useState<MarkerProjection | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
   const currentVersionId = versionId ?? null;
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const runWrite = trackWrite ?? (async <T,>(operation: Promise<T>) => operation);
+
+  // 隐藏列表不订阅 SSE，仍接收表格已同步的 canonical 数据；切换本身不重置列表写入结果。
+  useEffect(() => {
+    setScenes(initialScenes);
+  }, [initialScenes]);
 
   useEffect(() => {
     if (!canEdit) setDeleteDialog(null);
@@ -538,10 +553,10 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const markerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
-  }, []);
+  }, [active]);
 
   useVisibleEventSource(
-    currentVersionId
+    active && currentVersionId
       ? `${BASE_PATH}/api/script/${productionId}/stream?v=${encodeURIComponent(currentVersionId)}`
       : null,
     {
@@ -559,13 +574,21 @@ export default function ScenesManager({ productionId, productionName, initialSce
     },
   );
 
-  const mutate = (url: string, init: RequestInit) => runWrite((async () => {
+  const mutate = async (url: string, init: RequestInit) => {
+    try {
+      await runWrite((async () => {
       let res = await fetch(url, init);
       if (res.status === 202) res = await fetch(url, init);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
       applyCanonicalPayload(data);
-    })());
+      })());
+      setOperationError(null);
+    } catch (caught) {
+      setOperationError(caught instanceof Error ? caught.message : "操作失败");
+      throw caught;
+    }
+  };
 
   const update = async (id: string, name: string) => {
     await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
@@ -716,6 +739,7 @@ export default function ScenesManager({ productionId, productionName, initialSce
 
   const card = (
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+          {operationError && <p role="alert" className="mb-3 break-words text-xs text-red-700">{operationError}。本次操作未完成；字段请在原输入处重新保存，新增请在原表单重试，排序请核对当前顺序后重试原操作。</p>}
           {acts.length === 0 ? (
             <div>
               {canEdit && fieldPerms.create && (

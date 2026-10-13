@@ -76,7 +76,10 @@ export default function SceneTableActions({ marker, scenes, fieldPerms, structur
           <h2 className="min-w-0 break-words text-sm font-semibold">{insert?.label ?? (confirmDelete ? `确认删除 ${label}？` : `${label} · 行操作`)}</h2>
           <button type="button" disabled={structure.busy} onClick={close} aria-label="关闭行操作" className="h-8 w-8 shrink-0 rounded text-zinc-500 hover:bg-zinc-100">×</button>
         </div>
-        {structure.error && <p role="alert" className="mb-3 text-xs text-red-700">{structure.error}</p>}
+        {structure.error && <div role="alert" className="mb-3 space-y-2 break-words text-xs text-red-700">
+          <p>{structure.error}。本次操作未确认完成；同步只核对当前章节和段落，不会重新提交。</p>
+          <button type="button" disabled={structure.busy} onClick={structure.refreshWithNotice} className="underline">重试同步</button>
+        </div>}
         {insert ? (
           <form onSubmit={submit}>
             <label className="block text-xs text-zinc-600">{insert.parentId ? "段落名称" : "章节名称"}

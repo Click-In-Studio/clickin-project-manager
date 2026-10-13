@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SceneTableView, { getDefaultViewConfig, type SceneTableViewProps } from "@/components/script/SceneTableView";
 import { ALL_SCENE_FIELD_PERMS, NO_SCENE_FIELD_PERMS } from "@/lib/script/scene-field-perms-shared";
+import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
 import type { MarkerProjection } from "@/lib/script/script-marker-domain";
 
 vi.mock("@/components/assets/MountPointAssets", () => ({ default: () => null }));
@@ -74,6 +75,17 @@ async function drag(from: string, to: string, clientY = 110) {
 }
 
 describe("构作表格结构操作", () => {
+  it("隐藏表格暂停订阅和进入时同步；重新显示只读取，不重放写入", async () => {
+    props = { ...props, active: false }; await render();
+    expect(vi.mocked(useVisibleEventSource).mock.calls.at(-1)?.[0]).toBeNull();
+    fetchMock.mockClear();
+    await render();
+    expect(fetchMock).not.toHaveBeenCalled();
+    props = { ...props, active: true }; await render();
+    expect(vi.mocked(useVisibleEventSource).mock.calls.at(-1)?.[0]).toContain('/api/script/p/stream?v=v');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+  });
   it("新增段落指定父章及插入位置，并采用服务端结果", async () => {
     await openRow("s1"); await clickText("在此段落后新增段落"); await submitName("新段落");
     expect(JSON.parse(writes("POST")[0][1].body)).toEqual({ versionId: "v", name: "新段落", parentId: "c0", insertBeforeSceneId: "s2" });
@@ -91,6 +103,41 @@ describe("构作表格结构操作", () => {
     await submitName("保留的草稿");
     expect(host.querySelector<HTMLInputElement>("form input")?.value).toBe("保留的草稿");
     expect(host.textContent).toContain("权限不足"); expect(props.onScenesChange).toHaveBeenLastCalledWith(SCENES);
+  });
+  it("字段失败在单元格保留草稿和错误，重新保存成功后清除", async () => {
+    props.onUpdateScene = vi.fn().mockRejectedValueOnce(new Error("名称保存失败")).mockResolvedValue(undefined);
+    await render();
+    const name = host.querySelector<HTMLElement>('[data-scene-id="s1"] [title="单击编辑"]')!;
+    await act(async () => name.click());
+    const input = host.querySelector<HTMLInputElement>('tbody input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '失败草稿');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => input.blur());
+    expect(input.value).toBe('失败草稿');
+    expect(host.textContent).toContain('名称保存失败');
+    await act(async () => { input.focus(); input.blur(); });
+    expect(props.onUpdateScene).toHaveBeenCalledTimes(2);
+    expect(host.textContent).not.toContain('名称保存失败');
+  });
+  it("时长保存失败后接收同步结果不会覆盖正在保留的输入", async () => {
+    props.onPatchMeta = vi.fn().mockRejectedValue(new Error("时长保存失败"));
+    props.scenes = SCENES.map(scene => scene.id === "s1" ? { ...scene, expectedDuration: "60" } : scene);
+    await render();
+    const cell = host.querySelector<HTMLElement>('[data-scene-id="s1"] td:nth-child(8) [title="单击编辑"]')!;
+    await act(async () => cell.click());
+    const input = host.querySelector<HTMLInputElement>('input[placeholder="如 1:30"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "1:30");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => input.blur());
+    expect(host.textContent).toContain("时长保存失败");
+    props.scenes = props.scenes.map(scene => scene.id === "s1" ? { ...scene, expectedDuration: "120" } : scene);
+    await render();
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="如 1:30"]')?.value).toBe("1:30");
+    expect(host.textContent).toContain("时长保存失败");
   });
   it("202 不自动重复结构写入，不冒充成功", async () => {
     await openRow("s1"); await clickText("在此段落后新增段落");
@@ -117,6 +164,19 @@ describe("构作表格结构操作", () => {
     expect(host.textContent).not.toContain("已暂停新增、删除和排序");
     expect(host.textContent).not.toContain("同步也失败");
     await submitName("恢复后的草稿");
+    expect(writes("POST")).toHaveLength(2);
+  });
+  it("成功同步不会冒充失败写入成功，原操作成功重试后才清除失败", async () => {
+    await openRow("s1"); await clickText("在此段落后新增段落");
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(500, {}) : response(200, SCENES));
+    await submitName("保留草稿");
+    await clickText("重试同步");
+    expect(host.textContent).toContain("操作未完成");
+    expect(host.querySelector<HTMLInputElement>("form input")?.value).toBe("保留草稿");
+    expect(writes("POST")).toHaveLength(1);
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method ? response(200, { scenes: SCENES }) : response(200, SCENES));
+    await submitName("保留草稿");
+    expect(host.textContent).not.toContain("操作未完成");
     expect(writes("POST")).toHaveLength(2);
   });
   it("晚到的旧同步不会清除新写入失败提示或覆盖状态", async () => {
