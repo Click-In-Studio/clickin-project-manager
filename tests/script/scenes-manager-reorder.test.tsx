@@ -20,9 +20,12 @@ vi.mock("next/navigation", () => ({
 
 class FakeEventSource {
   closed = false;
-  constructor(public url: string) {}
-  addEventListener() {}
-  removeEventListener() {}
+  static latest: FakeEventSource;
+  listeners = new Map<string, EventListener>();
+  constructor(public url: string) { FakeEventSource.latest = this; }
+  addEventListener(type: string, listener: EventListener) { this.listeners.set(type, listener); }
+  removeEventListener(type: string) { this.listeners.delete(type); }
+  emit(type: string) { this.listeners.get(type)?.(new Event(type)); }
   close() { this.closed = true; }
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -325,5 +328,74 @@ describe("层级、取消与触控排序", () => {
     await act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === "重试读取顺序")!.click(); });
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')!.disabled).toBe(false);
+  });
+});
+
+/** 经真实 hook 的第二次 open 触发重连读取，不替换组件的 SSE 接线。 */
+async function reopen() {
+  await act(async () => { FakeEventSource.latest.emit("open"); FakeEventSource.latest.emit("open"); });
+}
+const NEW_ORDER = [SCENES[0], SCENES[2], SCENES[1]];
+const getResponse = (scenes: MarkerProjection[]) => ({ ok: true, status: 200, json: async () => scenes });
+const visibleNames = () => [...container.querySelectorAll('tr[data-scene-sort-row]')].map(tr => tr.textContent);
+
+describe("排序与 SSE 读取竞态", () => {
+  it("晚到的旧 GET 不覆盖成功 PUT", async () => {
+    let resolveGet!: (value: unknown) => void;
+    fetchMock.mockImplementation((_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ scenes: NEW_ORDER }) })
+      : new Promise(resolve => { resolveGet = resolve; }));
+    await reopen();
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(visibleNames()[1]).toContain("第二章");
+    await act(async () => { resolveGet(getResponse(SCENES)); });
+    expect(visibleNames()[1]).toContain("第二章");
+  });
+
+  it("多个 GET 逆序返回只接受最后发起的读取", async () => {
+    const reads: Array<(value: unknown) => void> = [];
+    fetchMock.mockImplementation(() => new Promise(resolve => { reads.push(resolve); }));
+    await reopen();
+    await act(async () => { FakeEventSource.latest.emit("open"); });
+    expect(reads).toHaveLength(2);
+    await act(async () => { reads[1](getResponse(NEW_ORDER)); });
+    await act(async () => { reads[0](getResponse(SCENES)); });
+    expect(visibleNames()[1]).toContain("第二章");
+  });
+
+  it("保存期间 SSE 重读合并排队，保存后再读取", async () => {
+    let resolvePut!: (value: unknown) => void;
+    fetchMock.mockImplementation((_url, init) => (init as RequestInit | undefined)?.method === "PUT"
+      ? new Promise(resolve => { resolvePut = resolve; })
+      : Promise.resolve(getResponse(NEW_ORDER)));
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    await reopen();
+    await act(async () => { FakeEventSource.latest.emit("open"); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { resolvePut({ ok: true, status: 200, json: async () => ({ scenes: NEW_ORDER }) }); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(visibleNames()[1]).toContain("第二章");
+  });
+
+  it("失败恢复后晚到的旧读取不覆盖恢复顺序或错误状态", async () => {
+    let resolveOld!: (value: unknown) => void;
+    let reads = 0;
+    fetchMock.mockImplementation((_url, init) => {
+      if ((init as RequestInit | undefined)?.method === "PUT") return Promise.reject(new Error("断线"));
+      if (++reads === 1) return new Promise(resolve => { resolveOld = resolve; });
+      return Promise.resolve(getResponse(NEW_ORDER));
+    });
+    await reopen();
+    await clickButton("调整顺序：第二章");
+    await clickButton("上移：第二章");
+    expect(visibleNames()[1]).toContain("第二章");
+    const notice = container.querySelector('[role="alert"]')?.textContent;
+    expect(notice).toContain("已重新读取当前顺序");
+    await act(async () => { resolveOld(getResponse(SCENES)); });
+    expect(visibleNames()[1]).toContain("第二章");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(notice);
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="调整顺序：第二章"]')?.disabled).toBe(false);
   });
 });
