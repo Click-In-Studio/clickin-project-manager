@@ -67,7 +67,47 @@ describe("PlanningClient view state", () => {
     });
   }
 
-  it("restores the last section, calendar month, and gantt scale", async () => {
+  async function selectMode(label: string) {
+    const tab = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find(button => button.textContent?.includes(label));
+    expect(tab).toBeDefined();
+    await act(async () => tab!.click());
+  }
+
+  function expectMode(label: string) {
+    const selected = container.querySelector('button[aria-pressed="true"]');
+    expect(selected?.textContent).toContain(label);
+  }
+
+  it.each(["timetable", "gantt"])("starts on the calendar despite the old %s preference", async (saved) => {
+    window.localStorage.setItem("planning-last-view:production-a", saved);
+    await render();
+    expectMode("项目日历");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("preserves the selected section on data refresh but resets on re-entry", async () => {
+    await render();
+    await selectMode("执行日程");
+    expectMode("执行日程");
+    await render({ ...baseProps, events: [...baseProps.events] });
+    expectMode("执行日程");
+    await selectMode("任务甘特");
+    expectMode("任务甘特");
+    await act(async () => root.render(null));
+    await render();
+    expectMode("项目日历");
+    expect(window.localStorage.getItem("planning-last-view:production-a")).toBeNull();
+  });
+
+  it("starts on the calendar when switching projects without unmounting the page", async () => {
+    await render();
+    await selectMode("执行日程");
+    await render({ ...baseProps, productionId: "production-b" });
+    expectMode("项目日历");
+  });
+
+  it("restores the calendar month and gantt scale", async () => {
     window.localStorage.setItem("planning-last-view:production-a", "calendar");
     window.localStorage.setItem("planning-calendar-cursor:production-a", "2031-04");
     window.localStorage.setItem("planning-gantt-scale:production-a", "quarter");
@@ -95,6 +135,7 @@ describe("PlanningClient view state", () => {
     }));
 
     await render(timetableProps);
+    await selectMode("执行日程");
 
     const controls = [...container.querySelectorAll<HTMLButtonElement>('[role="combobox"]')];
     expect(controls[0]?.textContent).toContain("复排");
@@ -108,6 +149,7 @@ describe("PlanningClient view state", () => {
     window.localStorage.setItem("planning-timetable-filters:production-a", JSON.stringify({ eventId: "event-b" }));
 
     await render(timetableProps);
+    await selectMode("执行日程");
 
     const urls = fetchSpy.mock.calls.map(call => String(call[0]));
     expect(urls.every(url => !url.includes("event-a"))).toBe(true);
@@ -119,6 +161,7 @@ describe("PlanningClient view state", () => {
     window.localStorage.setItem("planning-last-view:production-a", "timetable");
 
     await render(timetableProps);
+    await selectMode("执行日程");
 
     const urls = fetchSpy.mock.calls.map(call => String(call[0]));
     expect(urls.filter(url => url.includes("event-a"))).toHaveLength(4);
