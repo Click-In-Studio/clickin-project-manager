@@ -2,6 +2,7 @@
 kind: fixed
 title: 灵光恢复回复，失败提示不再一闪而过
 page: ai/assistant/chat
+pr: 1000
 order: 1
 ---
 
