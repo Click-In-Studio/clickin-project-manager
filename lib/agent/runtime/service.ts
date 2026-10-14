@@ -789,7 +789,13 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       if (abort.signal.aborted) status = "aborted";
       if (abort.signal.aborted) break;
     }
-    if (terminalLine) publisher.publish(terminalLine);
+    // SDK 的模型失败以终态消息返回，不一定抛异常；与 SSE 的最终结果同源记账。
+    const terminal = terminalLine as Extract<StreamLine, { type: "final" | "aborted" | "error" }> | null;
+    if (terminal?.type === "error") {
+      status = "failed";
+      error = terminal.error;
+    }
+    if (terminal) publisher.publish(terminal);
   } catch (err) {
     if (err instanceof Error && err.message === "会话执行租约已失效") { detached=true; storage.detach(); abort.abort(); }
     status = abort.signal.aborted ? "aborted" : "failed";
@@ -1192,6 +1198,9 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       if (thinking) entries.push({ role: "thinking", content: thinking });
       const t = textOf(m.content);
       if (t) entries.push({ role: "assistant", content: t });
+      if (m.stopReason === "error") {
+        entries.push({ role: "notice", content: m.errorMessage || "模型请求失败，请重试" });
+      }
     }
   }
   for (const pending of await pendingInputsForSession(sessionId)) {
