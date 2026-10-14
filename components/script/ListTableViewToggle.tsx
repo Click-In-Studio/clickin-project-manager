@@ -5,11 +5,12 @@ import type { ListTableViewMode } from "./use-list-table-view-preference";
 type Props = {
   value: ListTableViewMode;
   onChange: (value: ListTableViewMode) => void;
+  persistent?: boolean;
 };
 
-export default function ListTableViewToggle({ value, onChange }: Props) {
+export default function ListTableViewToggle({ value, onChange, persistent = false }: Props) {
   const { stage } = useProductionToolbar();
-  if (stage >= PRODUCTION_TOOLBAR_STAGE.primaryStored) return null;
+  if (!persistent && stage >= PRODUCTION_TOOLBAR_STAGE.primaryStored) return null;
 
   return (
     <div className={styles.viewToggle} data-compact={stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || undefined}>

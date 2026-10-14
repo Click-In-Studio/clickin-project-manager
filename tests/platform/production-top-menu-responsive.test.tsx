@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import ListTableViewToggle from "@/components/script/ListTableViewToggle";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -44,6 +45,25 @@ function renderContext(label: string, stage: number, side: "overview" | "script"
   ));
   return container.querySelector<HTMLElement>(`[data-production-top-menu-context="${label}"]`)!;
 }
+
+describe("构作表格 / 列表切换常驻", () => {
+  it("最窄折叠阶段仍只有一组可操作的主栏切换", () => {
+    const changes: string[] = [];
+    act(() => root.render(
+      <ProductionToolbarContext.Provider value={{
+        stage: PRODUCTION_TOOLBAR_STAGE.lowPriorityStored,
+        closeOverflow: () => {}, overflowOpen: false,
+        hasStoredControls: true, setHasStoredControls: () => {},
+      }}>
+        <ListTableViewToggle persistent value="table" onChange={value => changes.push(value)} />
+      </ProductionToolbarContext.Provider>,
+    ));
+    expect(container.querySelectorAll("button")).toHaveLength(2);
+    const list = container.querySelector<HTMLButtonElement>('[aria-label="列表"]')!;
+    act(() => list.click());
+    expect(changes).toEqual(["list"]);
+  });
+});
 
 describe("共享项目工具栏上下文", () => {
   it.each([

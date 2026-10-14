@@ -1,0 +1,22 @@
+/* 详情内容跟预期时长展示保持 12px；局部覆盖移动端全局的 16px 输入字号。 */
+.details input,
+.details textarea {
+  min-width: 0;
+  font-size: 12px !important;
+  line-height: 1.5;
+}
+
+/* 时长输入、预览和操作在窄详情内换行，输入仍保留可用宽度。 */
+.duration > div {
+  flex-wrap: wrap;
+}
+
+.duration input {
+  flex-basis: 8rem;
+}
+
+@media (min-width: 640px) {
+  .duration {
+    max-width: calc((100% - 1.5rem) / 2);
+  }
+}

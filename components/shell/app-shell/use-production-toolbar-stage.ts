@@ -67,7 +67,7 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
 
     const current = productionToolbarStageRef.current;
     if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
-    const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
+    const overflowTarget = document.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
     const overflow = productionTopbarOverflow(topbar);
@@ -106,6 +106,8 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     const mutationObserver = new MutationObserver(scheduleMeasure);
     resizeObserver.observe(topbar);
     mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
+    const overflowTarget = document.getElementById(PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID);
+    if (overflowTarget) mutationObserver.observe(overflowTarget, { childList: true, subtree: true });
     window.addEventListener("resize", scheduleMeasure);
     return () => {
       resizeObserver.disconnect();
@@ -134,14 +136,17 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
   useEffect(() => {
     if (!topOverflowOpen) return;
     const handler = (event: MouseEvent) => {
+      // 手机第二栏由“更多”显式收起，点击正文不使布局跳动。
+      if (window.innerWidth < 768) return;
       const target = event.target;
+      if (topOverflowMenu.menuRef.current?.contains(target as Node)) return;
       if (topOverflowRef.current?.contains(target as Node)) return;
       if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
       closeTopOverflow();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [topOverflowOpen, closeTopOverflow]);
+  }, [topOverflowOpen, closeTopOverflow, topOverflowMenu.menuRef]);
 
   return {
     productionHeaderStage,

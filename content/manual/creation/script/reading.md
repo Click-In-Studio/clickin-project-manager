@@ -7,7 +7,7 @@ who: 有剧本查看权限的成员
 tier: all
 platform: [desktop, mobile]
 related: [creation/script/editing, creation/script/print, creation/dramaturgy/dramaturgy-view]
-updated: 2026-10-10
+updated: 2026-10-14
 ---
 
 ## 这是什么
@@ -19,7 +19,7 @@ updated: 2026-10-10
 ![宽窗口下的剧本页：目录、正文和构作详情同时展开](/manual/creation/script.png)
 
 > [!📱]
-> 手机上改为单列：目录排在正文上方，构作详情不占右栏，剧本工具收进顶部「更多」。
+> 手机上改为单列：目录排在正文上方，构作详情不占右栏，剧本工具收进顶部「更多」；点开后在主栏下方展开第二条工具栏，再次点「更多」收起。
 
 ![手机上的剧本：目录在正文上方，台词单列排列](/manual/creation/script-mobile.png)
 

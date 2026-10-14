@@ -1,5 +1,6 @@
 .viewToggle {
   display: inline-flex;
+  flex-shrink: 0;
   gap: 2px;
   padding: 3px;
   background: var(--surface-2);
