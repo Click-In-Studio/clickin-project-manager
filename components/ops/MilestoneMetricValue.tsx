@@ -7,8 +7,8 @@ export default function MilestoneMetricValue({
   days: number | null;
   emptyLabel: string;
 }) {
-  if (days === null) return <strong>{emptyLabel}</strong>;
-  if (days === 0) return <strong>今天</strong>;
+  if (days === null) return <strong className={styles.progressMetricText}>{emptyLabel}</strong>;
+  if (days === 0) return <strong className={styles.progressMetricText}>今天</strong>;
 
   return (
     <strong className={styles.progressMetricValue}>
