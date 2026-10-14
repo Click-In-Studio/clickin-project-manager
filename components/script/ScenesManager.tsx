@@ -110,6 +110,10 @@ function SceneEditRow({
   onDelete,
   onPatchMeta,
   canReorder,
+  reorderBusy,
+  canMoveUp,
+  canMoveDown,
+  onMove,
   isDragging,
   dropEdge,
   onDragStart,
@@ -131,6 +135,10 @@ function SceneEditRow({
   onDelete: () => Promise<void>;
   onPatchMeta: (fields: Partial<MetaFields>) => Promise<void>;
   canReorder: boolean;
+  reorderBusy: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: "up" | "down") => Promise<void>;
   isDragging: boolean;
   dropEdge: "top" | "bottom" | null;
   onDragStart: (event: React.DragEvent<HTMLElement>) => void;
@@ -138,6 +146,7 @@ function SceneEditRow({
   onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => void;
   onDrop: (event: React.DragEvent<HTMLTableRowElement>) => void;
 }) {
+  const [sortingOpen, setSortingOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(scene.name);
   const [saving, setSaving] = useState(false);
@@ -192,6 +201,7 @@ function SceneEditRow({
     <>
       <tr
         ref={rowRef}
+        data-scene-sort-row
         onClick={handleRowClick}
         onDragOver={onDragOver}
         onDrop={onDrop}
@@ -202,20 +212,25 @@ function SceneEditRow({
         }}
         className={`group cursor-pointer border-b transition-colors hover:bg-zinc-100/70 ${expanded ? "border-zinc-200" : "border-zinc-100 last:border-0"}${indent ? " bg-zinc-50/40" : ""}${isDragging ? " relative z-10 bg-blue-50/70 opacity-70 outline outline-2 outline-blue-400 outline-offset-[-2px]" : ""}`}
       >
-        <td className={`border-r border-zinc-100/80 py-3 w-16 sm:w-24${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
+        <td className={`border-r border-zinc-100/80 py-3 w-28 sm:w-32${indent ? " pl-2 sm:pl-8 pr-2 sm:pr-4" : " px-2 sm:px-4"}`}>
           <div className="flex items-center gap-1">
             {canReorder && (
-              <span
-                draggable
+              <button
+                type="button"
+                draggable={!reorderBusy}
+                disabled={reorderBusy}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
-                onClick={(event) => event.stopPropagation()}
-                className="hidden cursor-grab select-none text-[10px] tracking-[-2px] text-zinc-300 opacity-0 transition-opacity active:cursor-grabbing group-hover:opacity-100 sm:inline"
-                title="拖动调整顺序"
-                aria-label="拖动调整顺序"
+                onClick={() => setSortingOpen((value) => !value)}
+                className="flex h-11 w-11 shrink-0 cursor-grab items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-blue-600 active:cursor-grabbing disabled:opacity-50"
+                title="拖动排序，或点击上移 / 下移"
+                aria-label={`调整顺序：${scene.name || scene.number}`}
+                aria-expanded={sortingOpen}
               >
-                ⋮⋮
-              </span>
+                <svg width="18" height="20" viewBox="0 0 18 20" fill="currentColor" aria-hidden="true">
+                  {[4, 10, 16].map((y) => <React.Fragment key={y}><circle cx="6" cy={y} r="1.7" /><circle cx="12" cy={y} r="1.7" /></React.Fragment>)}
+                </svg>
+              </button>
             )}
             <span className="flex w-4 flex-shrink-0 items-center text-zinc-400 sm:hidden">
               <ChevronIcon direction={expanded ? "down" : "right"} size={12} />
@@ -279,6 +294,18 @@ function SceneEditRow({
           </div>
         </td>
       </tr>
+      {canReorder && sortingOpen && (
+        <tr>
+          <td colSpan={4} className="border-b border-zinc-200 bg-zinc-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-zinc-600">{scene.kind === "scene" ? "在本章内调整顺序" : "调整章节顺序"}</span>
+              <button type="button" disabled={reorderBusy || !canMoveUp} onClick={() => { void onMove("up"); }} aria-label={`上移：${scene.name || scene.number}`} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 disabled:opacity-40">↑ 上移</button>
+              <button type="button" disabled={reorderBusy || !canMoveDown} onClick={() => { void onMove("down"); }} aria-label={`下移：${scene.name || scene.number}`} className="min-h-11 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 disabled:opacity-40">↓ 下移</button>
+              <button type="button" onClick={() => setSortingOpen(false)} className="min-h-11 rounded-lg px-3 text-sm text-zinc-600">收起排序</button>
+            </div>
+          </td>
+        </tr>
+      )}
       {expanded && (
         <tr className={`border-b border-zinc-100${indent ? " bg-zinc-50/40" : " bg-zinc-50/60"}`}>
           <td colSpan={4} className={`pb-4 pt-2${indent ? " pl-8 pr-4" : " px-4"}`}>
@@ -512,6 +539,13 @@ export default function ScenesManager({ productionId, productionName, initialSce
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [dragging, setDragging] = useState<MarkerProjection | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; edge: "top" | "bottom"; beforeId: string | null } | null>(null);
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const reorderPendingRef = useRef(false);
+  const readSequenceRef = useRef(0);
+  const activeWritesRef = useRef(0);
+  const refreshQueuedRef = useRef(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [orderUncertain, setOrderUncertain] = useState(false);
   const currentVersionId = versionId ?? null;
   const [deleteDialog, setDeleteDialog] = useState<MarkerDeleteDialogState | null>(null);
   const [deleteDialogBusy, setDeleteDialogBusy] = useState(false);
@@ -522,23 +556,46 @@ export default function ScenesManager({ productionId, productionName, initialSce
   }, [canEdit]);
 
   const applyCanonicalPayload = (data: { scenes?: MarkerProjection[] }) => {
-    if (data.scenes) setScenes(data.scenes);
+    if (data.scenes) {
+      readSequenceRef.current++;
+      setScenes(data.scenes);
+    }
   };
 
-  const refreshCanonicalState = useCallback(async () => {
-    const query = currentVersionId ? `?versionId=${encodeURIComponent(currentVersionId)}` : "";
-    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`);
-    if (!response.ok || response.status === 202) return;
-    const data = await response.json() as MarkerProjection[];
-    setScenes(data);
+  // 写入开始/完成和新的读取都会淘汰旧请求；过期响应不影响顺序或恢复状态。
+  const refreshCanonicalState = useCallback(async (): Promise<boolean | null> => {
+    const sequence = ++readSequenceRef.current;
+    const isCurrent = () => sequence === readSequenceRef.current && activeWritesRef.current === 0;
+    try {
+      const query = currentVersionId ? `?versionId=${encodeURIComponent(currentVersionId)}` : "";
+      const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scenes${query}`);
+      if (!response.ok || response.status === 202) return isCurrent() ? false : null;
+      const data = await response.json() as MarkerProjection[];
+      if (!isCurrent()) return null;
+      if (!Array.isArray(data)) return false;
+      setScenes(data);
+      return true;
+    } catch {
+      return isCurrent() ? false : null;
+    }
   }, [currentVersionId, productionId]);
+
+  const requestCanonicalRefresh = useCallback(() => {
+    if (activeWritesRef.current || reorderPendingRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+    refreshQueuedRef.current = false;
+    void refreshCanonicalState();
+  }, [refreshCanonicalState]);
 
   // markers 流（#467：后台标签不建连）。debounce timer 挂 ref——连接会随可见性
   // 反复开合，timer 的生命周期比单次连接长。
   const markerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
-  }, []);
+    readSequenceRef.current++;
+  }, [currentVersionId, productionId]);
 
   useVisibleEventSource(
     currentVersionId
@@ -546,26 +603,40 @@ export default function ScenesManager({ productionId, productionName, initialSce
       : null,
     {
       // 隐藏/断线期间的 markers 帧不补发，重连先无条件对一次账
-      onReopen: () => { void refreshCanonicalState(); },
+      onReopen: requestCanonicalRefresh,
       listeners: {
         markers: () => {
           if (markerRefreshTimerRef.current) clearTimeout(markerRefreshTimerRef.current);
           markerRefreshTimerRef.current = setTimeout(() => {
             markerRefreshTimerRef.current = null;
-            void refreshCanonicalState();
+            requestCanonicalRefresh();
           }, 50);
         },
       },
     },
   );
 
-  const mutate = (url: string, init: RequestInit) => runWrite((async () => {
-      let res = await fetch(url, init);
-      if (res.status === 202) res = await fetch(url, init);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
-      applyCanonicalPayload(data);
-    })());
+  const mutate = async (url: string, init: RequestInit) => {
+    activeWritesRef.current++;
+    readSequenceRef.current++;
+    try {
+      await runWrite((async () => {
+        let res = await fetch(url, init);
+        if (res.status === 202) res = await fetch(url, init);
+        if (res.status === 401 || (res.redirected && new URL(res.url).pathname === `${BASE_PATH}/login`)) {
+          throw new Error("登录已失效，请重新登录后再排序");
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || isUpdatingResponse(data)) throw new Error(data.error ?? "操作失败");
+        if (!Array.isArray(data.scenes)) throw new Error("服务端未返回章节和段落，请重新读取当前顺序");
+        applyCanonicalPayload(data);
+      })());
+    } finally {
+      activeWritesRef.current--;
+      readSequenceRef.current++;
+      if (refreshQueuedRef.current && !reorderPendingRef.current && !activeWritesRef.current) requestCanonicalRefresh();
+    }
+  };
 
   const update = async (id: string, name: string) => {
     await mutate(`${BASE_PATH}/api/production/${productionId}/scenes/${id}`, {
@@ -666,56 +737,101 @@ export default function ScenesManager({ productionId, productionName, initialSce
       ?? (row.kind === "scene" ? acts[acts.findIndex((item) => item.id === row.parentId) + 1]?.id ?? null : null);
   };
 
-  const dragPosition = (target: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
-    if (!dragging || dragging.id === target.id || dragging.kind !== target.kind || dragging.parentId !== target.parentId) {
-      return;
+  const saveOrder = async (active: MarkerProjection, beforeId: string | null) => {
+    if (!canEdit || !fieldPerms.structure || orderUncertain || reorderPendingRef.current || active.id === openingChapterMarkerId) return;
+    if (beforeId === active.id || beforeId === afterEdgeBeforeId(active)) return;
+    reorderPendingRef.current = true;
+    readSequenceRef.current++;
+    setReorderBusy(true);
+    setReorderError(null);
+    try {
+      await reorder(active.id, beforeId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "保存失败";
+      setOrderUncertain(true);
+      setReorderError(`顺序未能保存：${message}。请重试读取顺序或刷新页面后再排序。`);
+      const restored = await refreshCanonicalState();
+      if (restored === null) return;
+      setOrderUncertain(!restored);
+      setReorderError(`顺序未能保存：${message}。${restored ? "已重新读取当前顺序。" : "无法读取当前顺序，请重试读取或刷新页面后再排序。"}`);
+    } finally {
+      readSequenceRef.current++;
+      reorderPendingRef.current = false;
+      setReorderBusy(false);
+      if (refreshQueuedRef.current) requestCanonicalRefresh();
     }
-    const edge = event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2 ? "top" : "bottom";
+  };
+
+  // 悬停和释放都按当前行计算；离开同级行后不能沿用旧落点。
+  const positionAt = (target: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
+    if (!dragging || reorderPendingRef.current || orderUncertain || !canEdit || !fieldPerms.structure
+      || dragging.id === target.id || dragging.kind !== target.kind || dragging.parentId !== target.parentId) return null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const edge = event.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
     const beforeId = edge === "top" ? target.id : afterEdgeBeforeId(target);
-    // 开场章不让别人插到它前面（拖柄那边也不让它自己动），否则编号 0 会跳到别的章头上。
-    // 不 preventDefault，浏览器显示禁止光标；同时清掉上一次悬停留下的落点线。
-    if (beforeId !== null && beforeId === openingChapterMarkerId) {
-      setDropTarget(null);
-      return;
-    }
+    if ((beforeId !== null && beforeId === openingChapterMarkerId) || beforeId === dragging.id || beforeId === afterEdgeBeforeId(dragging)) return null;
+    return { id: target.id, edge: edge as "top" | "bottom", beforeId };
+  };
+
+  const dragPosition = (target: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
+    const position = positionAt(target, event);
+    setDropTarget(position);
+    if (!position) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    setDropTarget({ id: target.id, edge, beforeId });
   };
 
-  const drop = async (event: React.DragEvent<HTMLTableRowElement>) => {
-    event.preventDefault();
+  const drop = (scene: MarkerProjection, event: React.DragEvent<HTMLTableRowElement>) => {
     const active = dragging;
-    const target = dropTarget;
+    const target = positionAt(scene, event);
     setDragging(null);
     setDropTarget(null);
-    // 原位放置（放回自己的上沿或下沿）服务端会原样退回 400，这里直接吞掉。
     if (!active || !target) return;
-    if (target.beforeId === active.id || target.beforeId === afterEdgeBeforeId(active)) return;
-    try {
-      await reorder(active.id, target.beforeId);
-    } catch (error) {
-      console.error("Failed to reorder scene marker", error);
-      await refreshCanonicalState();
-    }
+    event.preventDefault();
+    void saveOrder(active, target.beforeId);
   };
 
-  const dragProps = (scene: MarkerProjection) => ({
-    canReorder: canEdit && fieldPerms.structure && scene.id !== openingChapterMarkerId,
-    isDragging: dragging?.id === scene.id,
-    dropEdge: dropTarget?.id === scene.id ? dropTarget.edge : null,
-    onDragStart: (event: React.DragEvent<HTMLElement>) => {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", scene.id);
-      setDragging(scene);
-    },
-    onDragEnd: () => { setDragging(null); setDropTarget(null); },
-    onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => dragPosition(scene, event),
-    onDrop: (event: React.DragEvent<HTMLTableRowElement>) => { void drop(event); },
-  });
+  const dragProps = (scene: MarkerProjection) => {
+    const siblings = scene.kind === "chapter" ? acts : subScenes(scene.parentId ?? "");
+    const index = siblings.findIndex((item) => item.id === scene.id);
+    const canMoveUp = index > 0 && siblings[index - 1].id !== openingChapterMarkerId;
+    const canMoveDown = index >= 0 && index < siblings.length - 1;
+    return {
+      canReorder: canEdit && fieldPerms.structure && scene.id !== openingChapterMarkerId,
+      reorderBusy: reorderBusy || orderUncertain,
+      canMoveUp,
+      canMoveDown,
+      onMove: async (direction: "up" | "down") => {
+        if (direction === "up" && canMoveUp) await saveOrder(scene, siblings[index - 1].id);
+        if (direction === "down" && canMoveDown) await saveOrder(scene, afterEdgeBeforeId(siblings[index + 1]));
+      },
+      isDragging: dragging?.id === scene.id,
+      dropEdge: dropTarget?.id === scene.id ? dropTarget.edge : null,
+      onDragStart: (event: React.DragEvent<HTMLElement>) => {
+        if (reorderPendingRef.current || orderUncertain) { event.preventDefault(); return; }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", scene.id);
+        setDropTarget(null);
+        setDragging(scene);
+      },
+      onDragEnd: () => { setDragging(null); setDropTarget(null); },
+      onDragOver: (event: React.DragEvent<HTMLTableRowElement>) => dragPosition(scene, event),
+      onDrop: (event: React.DragEvent<HTMLTableRowElement>) => drop(scene, event),
+    };
+  };
 
   const card = (
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+          {reorderBusy && <p role="status" className="px-4 py-3 text-sm text-zinc-600">正在保存顺序…</p>}
+          {reorderError && (
+            <div role="alert" className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {reorderError}
+              {orderUncertain && <button type="button" className="ml-2 min-h-11 underline" onClick={async () => {
+                const restored = await refreshCanonicalState().catch(() => false);
+                if (restored) { setOrderUncertain(false); setReorderError(null); }
+              }}>重试读取顺序</button>}
+            </div>
+          )}
           {acts.length === 0 ? (
             <div>
               {canEdit && fieldPerms.create && (
@@ -734,10 +850,18 @@ export default function ScenesManager({ productionId, productionName, initialSce
               {!(canEdit && fieldPerms.create) && <p className="px-4 py-8 text-center text-sm text-zinc-300">暂无章节</p>}
             </div>
           ) : (
-            <table className="w-full table-auto sm:table-fixed">
+            <table className="w-full table-auto sm:table-fixed"
+              onDragOverCapture={(event) => {
+                if (!(event.target as HTMLElement).closest("[data-scene-sort-row]")) setDropTarget(null);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null);
+              }}
+              onDrop={() => { setDragging(null); setDropTarget(null); }}
+            >
               <thead>
                 <tr className="border-b border-zinc-100 text-left text-xs text-zinc-400">
-                  <th className="border-r border-zinc-100/80 px-2 sm:px-4 py-3 font-medium w-16 sm:w-24">编号</th>
+                  <th className="border-r border-zinc-100/80 px-2 sm:px-4 py-3 font-medium w-28 sm:w-32">编号</th>
                   <th className="border-r border-zinc-100/80 px-2 sm:px-4 py-3 font-medium">名称</th>
                   <th className="border-r border-zinc-100/80 px-4 py-3 font-medium">排练记号</th>
                   <th className="w-72 px-4 py-3 hidden sm:table-cell" />
