@@ -18,7 +18,7 @@ import ProductionTopMenu, {
   useAnchoredMenu,
   useProductionToolbar,
 } from "../shell/ProductionTopMenu";
-import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
+import ListTableViewToggle from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import PageSkeleton from "@/components/ui/PageSkeleton";
@@ -274,9 +274,6 @@ export default function Dramaturgy({
       </div>
     </>
   ) : null;
-  const primaryOverflow = sceneViewMode !== null && toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
-    <ListTableViewToggleOverflow value={sceneViewMode} onChange={setSceneViewMode} />
-  ) : null;
   const modeOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
     <div className="border-t border-[var(--line)] px-3 py-2">
       <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">页面模式</p>
@@ -289,11 +286,10 @@ export default function Dramaturgy({
       />
     </div>
   ) : null;
-  const toolbarOverflow = modeOverflow || secondaryOverflow || primaryOverflow ? (
+  const toolbarOverflow = modeOverflow || secondaryOverflow ? (
     <>
       {modeOverflow}
       {secondaryOverflow}
-      {primaryOverflow}
     </>
   ) : null;
 
@@ -319,12 +315,13 @@ export default function Dramaturgy({
           </>
         )}
         {sceneViewMode !== null && (
-          <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+          <ListTableViewToggle persistent value={sceneViewMode} onChange={setSceneViewMode} />
         )}
 
         {sceneViewMode === "table" && (
           <>
-          <div className={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored ? "hidden" : `${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
+          {toolbarStage < PRODUCTION_TOOLBAR_STAGE.secondaryStored && (
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
             {/* Desktop: inline controls */}
             <div className="flex items-center gap-2">
               <TableViewSelector
@@ -352,6 +349,7 @@ export default function Dramaturgy({
               </div>
             </div>
           </div>
+          )}
           {toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && overflowOpen && storedColumnSettingsOpen && (
             <TableColumnSettings
               config={tableConfig}

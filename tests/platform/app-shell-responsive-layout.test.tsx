@@ -146,6 +146,17 @@ describe("#354 配置中心窄屏顶栏", () => {
 describe("共享项目工具栏入口契约", () => {
   const source = readFileSync("components/shell/AppShell.tsx", "utf8");
 
+  it("单一折叠槽位于主栏之后、正文之前，隐藏时不卸载控件", () => {
+    const headerEnd = source.indexOf("</header>");
+    const panel = source.indexOf('data-production-overflow-menu="true"');
+    const body = source.indexOf("{/* Body: sidebar + workspace */}");
+    expect(panel).toBeGreaterThan(headerEnd);
+    expect(panel).toBeLessThan(body);
+    expect(source.match(/id=\{PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID\}/g)).toHaveLength(1);
+    expect(source.match(/id=\{PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID\}/g)).toHaveLength(1);
+    expect(source).toContain('data-secondary-toolbar-open=');
+  });
+
   it("搜索、AI、个人中心和 overflow 入口仍挂在同一顶栏", () => {
     expect(source).toContain("<SearchBar");
     expect(source).toContain("data-ai-toggle");
