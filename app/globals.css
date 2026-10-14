@@ -793,11 +793,6 @@ span[data-stage-inline] {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  [data-production-top-menu-root]:has([data-dramaturgy-heading]) > [data-production-top-menu-context],
-  [data-production-top-menu-root]:has([data-dramaturgy-heading]) > [data-production-top-menu-divider] {
-    display: none;
-  }
 }
 
 @property --panel-scrollbar-thumb-opacity {
@@ -844,6 +839,12 @@ span[data-stage-inline] {
 
 /* Side panels stay above the bottom nav wherever that nav is visible. */
 @media (max-width: 1023px) {
+  /* 当前页面由底部导航识别，只隐藏标签及紧随它的分隔线，保留内容切换控件。 */
+  [data-production-top-menu-context],
+  [data-production-top-menu-context] + [data-production-top-menu-divider] {
+    display: none;
+  }
+
   /* iOS Safari 会在聚焦小于 16px 的编辑控件时自动放大页面。移动端统一使用
      可读字号下限，避免焦点改变 viewport scale；不禁用用户手动缩放。 */
   input,
