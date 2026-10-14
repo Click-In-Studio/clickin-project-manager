@@ -1,9 +1,11 @@
 "use client";
 
 import { useAnchoredMenu } from "../shell/ProductionTopMenu";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
+import { createPortal } from "react-dom";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import styles from "./TableViewSelector.module.css";
 
 export type SavedView = {
   id: string;
@@ -21,242 +23,177 @@ type Props = {
   currentConfig: unknown;
   onSelectView: (view: SavedView) => void;
   onViewsChange: (views: SavedView[]) => void;
+  loading?: boolean;
+  loadError?: string | null;
+  onRetryLoad?: () => void;
 };
 
 export default function TableViewSelector({
-  productionId,
-  views,
-  activeViewId,
-  currentConfig,
-  onSelectView,
-  onViewsChange,
+  productionId, views, activeViewId, currentConfig, onSelectView, onViewsChange,
+  loading = false, loadError, onRetryLoad,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const menuPosition = useAnchoredMenu<HTMLButtonElement>(open, "bottom");
-  const [editingName, setEditingName] = useState<string | null>(null);
+  const position = useAnchoredMenu<HTMLButtonElement>(open, "bottom");
+  const panelId = useId();
+  const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const pendingRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  const activeView = views.find((v) => v.id === activeViewId);
+  const activeView = views.find((view) => view.id === activeViewId);
+  const busy = pending !== null;
+  const unavailable = busy || loading || !!loadError;
+  const saveReason = loading ? "正在读取视图" : loadError ? "请先重试读取视图"
+    : busy ? "正在处理，请稍候" : !activeView ? "请先另存新视图，再保存当前视图" : undefined;
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setEditingName(null);
-        setConfirmDelete(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const handleSaveView = async () => {
-    if (!activeViewId || saving) return;
-    setSaving(true);
-    try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/scene-table-views/${activeViewId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config: currentConfig }),
-        }
-      );
-      if (!res.ok) throw new Error("保存失败");
-      onViewsChange(views.map((v) => v.id === activeViewId ? { ...v, config: currentConfig } : v));
+    if (!open) return;
+    function dismiss(event: MouseEvent) {
+      if (!(event.target instanceof Node)) return;
+      if (position.anchorRef.current?.contains(event.target) || position.menuRef.current?.contains(event.target)) return;
       setOpen(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
+      setConfirmDelete(null);
     }
-  };
+    function escape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      setConfirmDelete(null);
+      position.anchorRef.current?.focus();
+    }
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open, position.anchorRef, position.menuRef]);
 
-  const handleCreateView = async () => {
-    if (!newName.trim() || saving) return;
-    setSaving(true);
+  // 所有写操作共用同步锁，连续点击或 Enter 不会在 React 更新前发出第二次请求。
+  async function mutate(label: string, work: () => Promise<void>) {
+    if (pendingRef.current || loading || loadError) return;
+    pendingRef.current = true;
+    setPending(label);
+    setError(null);
+    setNotice(null);
     try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          config: currentConfig,
-          isDefault: views.length === 0,
-        }),
-      });
-      if (!res.ok) throw new Error("创建失败");
-      const data = await res.json();
-      onViewsChange([...views, data]);
-      onSelectView(data);
+      await work();
+      setNotice(`${label}成功`);
+    } catch (cause) {
+      setError(`${label}失败：${cause instanceof Error ? cause.message : "请重试"}`);
+      setOpen(true);
+    } finally {
+      pendingRef.current = false;
+      setPending(null);
+    }
+  }
+
+  async function request(path: string, method: string, body?: unknown) {
+    const response = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views${path}`, {
+      method,
+      ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    });
+    const data = await response.json().catch(() => { throw new Error("服务器返回异常，请重试"); });
+    if (!response.ok) throw new Error(data.error || "操作失败，请重试");
+    return data;
+  }
+
+  function saveCurrent() {
+    if (!activeView) return;
+    void mutate("保存当前视图", async () => {
+      const saved = await request(`/${activeView.id}`, "PATCH", { config: currentConfig }) as SavedView;
+      onViewsChange(views.map((view) => view.id === saved.id ? saved : view));
+    });
+  }
+
+  function createView() {
+    if (!newName.trim()) return;
+    void mutate("另存新视图", async () => {
+      const saved = await request("", "POST", {
+        name: newName.trim(), config: currentConfig, isDefault: views.length === 0,
+      }) as SavedView;
+      onViewsChange([...views, saved]);
+      onSelectView(saved);
       setNewName("");
-      setEditingName(null);
-      setOpen(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
-  };
+      setCreating(false);
+    });
+  }
 
-  const handleSetDefault = async (viewId: string) => {
-    try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/scene-table-views/${viewId}/default`,
-        { method: "PATCH" }
-      );
-      if (!res.ok) throw new Error("设置失败");
-      const updated = views.map((v) => ({ ...v, isDefault: v.id === viewId }));
-      onViewsChange(updated);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  function setDefault(viewId: string) {
+    void mutate("设为默认", async () => {
+      await request(`/${viewId}/default`, "PATCH");
+      onViewsChange(views.map((view) => ({ ...view, isDefault: view.id === viewId })));
+    });
+  }
 
-  const handleDelete = async (viewId: string) => {
-    try {
-      const res = await fetch(
-        `${BASE_PATH}/api/production/${productionId}/scene-table-views/${viewId}`,
-        { method: "DELETE" }
-      );
-      if (!res.ok) throw new Error("删除失败");
-      const filtered = views.filter((v) => v.id !== viewId);
-      onViewsChange(filtered);
+  function deleteView(viewId: string) {
+    void mutate("删除视图", async () => {
+      await request(`/${viewId}`, "DELETE");
+      onViewsChange(views.filter((view) => view.id !== viewId));
       if (activeViewId === viewId) {
-        onSelectView({
-          id: "",
-          name: "",
-          isDefault: false,
-          config: currentConfig,
-          createdAt: "",
-          updatedAt: "",
-        });
+        // 沿用删除选中视图后的行为：取消选中，保留当前表格配置。
+        onSelectView({ id: "", name: "", isDefault: false, config: currentConfig, createdAt: "", updatedAt: "" });
       }
       setConfirmDelete(null);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+    });
+  }
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        ref={menuPosition.anchorRef}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
-      >
-        <span className="max-w-[120px] truncate">
-          {activeView?.name || "默认视图"}
-        </span>
+    <>
+      <button ref={position.anchorRef} type="button" aria-expanded={open} aria-controls={panelId}
+        aria-haspopup="dialog" title={activeView?.name || "默认视图"}
+        onClick={() => setOpen((value) => !value)} className={styles.trigger}>
+        <span className={styles.triggerName}>{activeView?.name || "默认视图"}</span>
         <ChevronIcon size={12} className="shrink-0 text-zinc-400" />
       </button>
-
-      {open && (
-        <div ref={menuPosition.menuRef} style={menuPosition.style} className="w-56 rounded-xl border border-zinc-200 bg-white shadow-lg z-20">
-          <div className="border-b border-zinc-200 px-3 py-2">
-            <p className="text-[11px] font-bold tracking-[0.06em] text-zinc-500 uppercase">
-              视图
-            </p>
+      {open && createPortal(
+        <div ref={position.menuRef} id={panelId} role="dialog" aria-label="保存视图选择器"
+          data-production-overflow-menu-child="true" style={position.style} className={styles.panel}>
+          <div className={styles.actions}>
+            <button type="button" aria-disabled={unavailable} title={unavailable ? saveReason : undefined}
+              onClick={() => { if (!unavailable) { setCreating(true); setNotice(null); } }} className={styles.action}>
+              另存新视图
+            </button>
+            <button type="button" aria-disabled={!!saveReason} title={saveReason}
+              onClick={() => { if (!saveReason) saveCurrent(); }} className={styles.action}>
+              {pending === "保存当前视图" ? "保存中…" : "保存当前视图"}
+            </button>
+            {!activeView && !loading && !loadError && <p className={styles.hint}>请先另存新视图</p>}
+            {creating && <form className={styles.create} onSubmit={(event) => { event.preventDefault(); createView(); }}>
+              <input autoFocus aria-label="视图名称" placeholder="视图名称" value={newName}
+                onChange={(event) => setNewName(event.target.value)} disabled={unavailable} />
+              <button type="submit" disabled={unavailable || !newName.trim()}>{pending === "另存新视图" ? "保存中…" : "保存"}</button>
+              <button type="button" disabled={busy} onClick={() => setCreating(false)}>取消</button>
+            </form>}
+            {(error || loadError) && <p role="alert" className={styles.error}>{error || loadError}</p>}
+            {loadError && <button type="button" className={styles.action} onClick={onRetryLoad}>重试读取视图</button>}
+            <div role="status" className={styles.hint}>{pending ? `${pending}中…` : notice}</div>
           </div>
-          <div className="py-1 max-h-64 overflow-y-auto">
-            {views.length === 0 && (
-              <div className="px-3 py-2 text-xs text-zinc-400">
-                暂无保存的视图
-              </div>
-            )}
-            {views.map((view) => (
-              <div
-                key={view.id}
-                className={`flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-50 ${
-                  view.id === activeViewId ? "bg-zinc-50" : ""
-                }`}
-              >
-                <button
-                  onClick={() => { onSelectView(view); setOpen(false); }}
-                  className="flex-1 text-left text-xs text-zinc-600 truncate"
-                >
-                  <span className="flex items-center gap-1">
-                    {view.name}
-                    {view.isDefault && (
-                      <span className="text-[10px] text-zinc-400">默认</span>
-                    )}
-                  </span>
-                </button>
-                {!view.isDefault && (
-                  <button
-                    onClick={() => handleSetDefault(view.id)}
-                    className="text-[10px] text-zinc-400 hover:text-zinc-600"
-                    title="设为默认"
-                  >
-                    ★
-                  </button>
-                )}
-                {confirmDelete === view.id ? (
-                  <button
-                    onClick={() => handleDelete(view.id)}
-                    className="text-[10px] text-red-500 hover:text-red-700"
-                  >
-                    确认
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDelete(view.id)}
-                    className="text-[10px] text-zinc-300 hover:text-red-400"
-                    title="删除视图"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="border-t border-zinc-100 p-2 flex flex-col gap-0.5">
-            {activeViewId && (
-              <button
-                onClick={handleSaveView}
-                disabled={saving}
-                className="w-full text-left px-2 py-1 text-xs text-zinc-700 font-medium hover:bg-zinc-50 rounded disabled:opacity-50"
-              >
-                {saving ? "保存中…" : "↑ 保存到当前视图"}
+          <div className={styles.list} aria-label="已保存视图">
+            {loading ? <p className={styles.hint}>正在读取视图…</p>
+              : !loadError && views.length === 0 ? <p className={styles.hint}>暂无保存的视图</p> : null}
+            {views.map((view) => <div key={view.id} className={styles.row} data-selected={view.id === activeViewId}>
+              <button type="button" title={view.name} aria-pressed={view.id === activeViewId} disabled={unavailable}
+                className={styles.select} onClick={() => {
+                  onSelectView(view); setOpen(false); setNotice(null); setError(null); setConfirmDelete(null);
+                }}>
+                <span className={styles.check}>{view.id === activeViewId ? "✓" : ""}</span>
+                <span className={styles.name}>{view.name}</span>
+                {view.isDefault && <span className={styles.defaultBadge}>默认</span>}
               </button>
-            )}
-            {editingName ? (
-              <div className="flex gap-2">
-                <input
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCreateView();
-                    if (e.key === "Escape") { setEditingName(null); setNewName(""); }
-                  }}
-                  placeholder="视图名称"
-                  className="flex-1 rounded border border-zinc-200 px-2 py-1 text-xs outline-none focus:border-zinc-400"
-                  disabled={saving}
-                />
-                <button
-                  onClick={handleCreateView}
-                  disabled={saving || !newName.trim()}
-                  className="px-2 py-1 text-xs text-white bg-zinc-800 hover:bg-zinc-700 rounded disabled:opacity-50"
-                >
-                  {saving ? "…" : "保存"}
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setEditingName("new")}
-                className="w-full text-left px-2 py-1 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 rounded"
-              >
-                + 另存为新视图
+              {!view.isDefault && <button type="button" disabled={unavailable} className={styles.rowAction}
+                title="设为默认" aria-label={`将 ${view.name} 设为默认`} onClick={() => setDefault(view.id)}>★</button>}
+              <button type="button" disabled={unavailable} className={styles.rowAction}
+                title={confirmDelete === view.id ? "确认删除视图" : "删除视图"}
+                aria-label={`${confirmDelete === view.id ? "确认删除" : "删除"} ${view.name}`}
+                onClick={() => confirmDelete === view.id ? deleteView(view.id) : setConfirmDelete(view.id)}>
+                {confirmDelete === view.id ? "确认" : "×"}
               </button>
-            )}
+            </div>)}
           </div>
-        </div>
+        </div>, document.body,
       )}
-    </div>
+    </>
   );
 }
