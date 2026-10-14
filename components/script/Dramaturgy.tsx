@@ -68,6 +68,7 @@ export default function Dramaturgy({
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
+  const [viewLoadError, setViewLoadError] = useState<string | null>(null);
   const columnsPosition = useAnchoredMenu<HTMLButtonElement>(showColumnSettings, "bottom");
   useEffect(() => {
     if (!showColumnSettings) return;
@@ -84,8 +85,9 @@ export default function Dramaturgy({
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`);
-        if (!res.ok) return;
         const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "读取视图失败，请重试");
+        setViewLoadError(null);
         if (data.views && data.views.length > 0) {
           setSavedViews(data.views);
           const defaultView = data.views.find((v: SavedView) => v.isDefault) ?? data.views[0];
@@ -95,7 +97,7 @@ export default function Dramaturgy({
           }
         }
       } catch (e) {
-        console.error("Failed to load table views", e);
+        setViewLoadError(e instanceof Error ? e.message : "读取视图失败，请重试");
       } finally {
         setViewsLoaded(true);
       }
@@ -151,7 +153,9 @@ export default function Dramaturgy({
             <ProductionToolbarBlock id="saved-view" priority={10}>
               <TableViewSelector productionId={productionId} views={savedViews}
                 activeViewId={activeViewId} currentConfig={tableConfig}
-                onSelectView={handleSelectView} onViewsChange={setSavedViews} />
+                onSelectView={handleSelectView} onViewsChange={setSavedViews}
+                loading={!viewsLoaded} loadError={viewLoadError}
+                onRetryLoad={() => { setViewLoadError(null); setViewsLoaded(false); }} />
             </ProductionToolbarBlock>
             <ProductionToolbarBlock id="columns" priority={20}>
               <button ref={columnsPosition.anchorRef} aria-expanded={showColumnSettings}
