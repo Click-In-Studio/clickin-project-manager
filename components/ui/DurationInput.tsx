@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   parseDuration,
   formatDuration,
@@ -17,6 +17,17 @@ type Props = {
   placeholder?: string;
   /** 额外的 CSS 类名 */
   className?: string;
+};
+
+// 解析 MM:SS 格式（分:秒）
+const parseMMSS = (str: string): number | null => {
+  const match = str.match(/^(\d+):(\d+)$/);
+  if (match) {
+    const m = parseInt(match[1], 10);
+    const s = parseInt(match[2], 10);
+    return m * 60 + Math.min(59, s);
+  }
+  return null;
 };
 
 export default function DurationInput({
@@ -41,35 +52,10 @@ export default function DurationInput({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // 解析 MM:SS 格式（分:秒）
-  const parseMMSS = (str: string): number | null => {
-    const match = str.match(/^(\d+):(\d+)$/);
-    if (match) {
-      const m = parseInt(match[1], 10);
-      const s = parseInt(match[2], 10);
-      return m * 60 + Math.min(59, s);
-    }
-    return null;
-  };
-
   // 当外部 value 变化时，更新内部状态
   useEffect(() => {
     setTextInput(formatAsMMSS(value) || "");
   }, [value]);
-
-  // 点击外部关闭编辑模式
-  useEffect(() => {
-    if (!isEditing) return;
-    
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        commit();
-      }
-    };
-    
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isEditing, textInput]);
 
   // 开始编辑
   const startEditing = (e: React.MouseEvent) => {
@@ -84,8 +70,8 @@ export default function DurationInput({
   };
 
   // 提交保存
-  const commit = async () => {
-    if (!isEditing) return;
+  const commit = useCallback(async () => {
+    if (!canEdit || !isEditing || saving) return;
 
     const trimmed = textInput.trim();
     let finalValue: number | null = null;
@@ -116,10 +102,25 @@ export default function DurationInput({
       setIsEditing(false);
     } catch (err) {
       console.error("保存时长失败:", err);
+      setParseError("保存时长失败，请重试");
     } finally {
       setSaving(false);
     }
-  };
+  }, [canEdit, isEditing, onSave, saving, textInput, value]);
+
+  // 点击外部关闭编辑模式
+  useEffect(() => {
+    if (!isEditing) return;
+    
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        commit();
+      }
+    };
+    
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isEditing, commit]);
 
   // 取消编辑
   const cancel = (e?: React.MouseEvent) => {
