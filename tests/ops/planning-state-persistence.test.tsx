@@ -43,6 +43,7 @@ describe("PlanningClient view state", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     window.localStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
