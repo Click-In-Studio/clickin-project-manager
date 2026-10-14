@@ -25,6 +25,7 @@ import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import type { ChatTranscriptEntry } from "@/lib/agent/chat/types";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -408,7 +409,7 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant" | "thinking"; content: string; attachments?: ChatAttachment[] } | { role: "tool"; name: string; id?: string; result?: string; attachments?: ChatAttachment[] })[];
+          messages: ChatTranscriptEntry[];
         };
         if (activeKeyRef.current !== key) return;
         const history = data.messages.map((m) =>

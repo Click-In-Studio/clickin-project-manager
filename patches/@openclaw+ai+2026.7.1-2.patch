@@ -1,0 +1,13 @@
+diff --git a/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs b/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs
+index 715f2f9..c5b676a 100644
+--- a/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs
++++ b/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs
+@@ -35,6 +35,8 @@ const streamSimpleGoogle = (model, context, options) => {
+ };
+ function createClient(model, apiKey, optionsHeaders) {
+ 	const httpOptions = {};
++	const fetcher = getAiTransportHost().buildModelFetch(model);
++	if (fetcher) httpOptions.fetch = fetcher;
+ 	if (model.baseUrl) {
+ 		httpOptions.baseUrl = model.baseUrl;
+ 		httpOptions.apiVersion = "";
