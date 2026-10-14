@@ -7,12 +7,14 @@ who: 所有成员可看；新建事件 / 任务需要对应权限
 tier: all
 platform: [desktop, mobile]
 related: [production/planning/phases, production/events/events-overview, production/tasks/tasks]
-updated: 2026-10-03
+updated: 2026-10-14
 ---
 
 ## 这是什么
 
 「制作 → 计划与日程」有三个视图：**项目日历**、**任务甘特**、**执行日程**，顶部切换。本页讲项目日历。
+
+每次进入「计划与日程」、刷新页面或切换项目，都会先打开「项目日历」。停留在本页时，可以自由切换三个视图；页面内的数据刷新不会改变当前视图。
 
 月历上四种东西叠在一起，顶部可以分别开关：
 

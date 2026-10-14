@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import MilestoneMetricValue from "@/components/ops/MilestoneMetricValue";
+import styles from "@/components/ops/home.module.css";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 
@@ -16,7 +20,7 @@ const viewports = [
 let browser: Browser;
 let page: Page;
 
-async function mountProgressMetrics(width: number, height = 800) {
+async function mountProgressMetrics(width: number, height = 800, milestoneMarkup = '<strong class="progressMetricValue"><span>11</span><span class="progressMetricUnit">天</span></strong>') {
   await page.setViewportSize({ width, height });
   await page.setContent(`
     <style>
@@ -33,7 +37,7 @@ async function mountProgressMetrics(width: number, height = 800) {
         </div>
         <div class="progressHeroMetrics">
           <div class="progressMetricCard progressMetricUrgent">
-            <strong class="progressMetricValue"><span>11</span><span class="progressMetricUnit">天</span></strong>
+            ${milestoneMarkup}
             <div class="progressMetricDisclosure">
               <button
                 type="button"
@@ -204,7 +208,7 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
 
     expect(metrics.gridWidth).toBeCloseTo(300, 1);
     expect(metrics.cardHeight).toBeCloseTo(84, 1);
-    expect(metrics.numberSize).toBeCloseTo(32, 1);
+    expect(metrics.numberSize).toBeCloseTo(18, 1);
     expect(metrics.labelSize).toBeCloseTo(11, 1);
   });
 
@@ -280,5 +284,35 @@ describe("项目首页进展指标卡真实浏览器布局", () => {
       expect(new Set(cards.map(card => card.height)).size).toBe(1);
       for (const card of cards) expect(card.scrollHeight).toBeLessThanOrEqual(card.clientHeight);
     });
+  }
+});
+
+// 用实际组件覆盖空态和日期分支，避免手写数字夹具漏掉文字状态。
+describe("里程碑字号与完整文字", () => {
+  for (const width of [390, 578, 705, 1280]) {
+    for (const days of [null, 0, 11, -3, 365]) {
+      it(`${width}px / ${days ?? "空态"}：字号协调且文字完整无溢出`, async () => {
+        let markup = renderToStaticMarkup(createElement(MilestoneMetricValue, { days, emptyLabel: "暂无里程碑" }));
+        for (const name of ["progressMetricText", "progressMetricValue", "progressMetricUnit"]) markup = markup.replaceAll(styles[name], name);
+        await mountProgressMetrics(width, 900, markup);
+        const value = await page.locator(".progressMetricCard strong").first().evaluate(el => {
+          const style = getComputedStyle(el);
+          return {
+            text: el.textContent,
+            fontSize: parseFloat(style.fontSize),
+            height: el.getBoundingClientRect().height,
+            lineHeight: parseFloat(style.lineHeight),
+            scrollWidth: el.scrollWidth,
+            clientWidth: el.clientWidth,
+            overflow: style.overflow,
+          };
+        });
+        expect(value.text).toBe(days === null ? "暂无里程碑" : days === 0 ? "今天" : `${days < 0 ? "已过" : ""}${Math.abs(days)}天`);
+        expect(value.fontSize).toBeLessThanOrEqual(days === null || days === 0 ? 14 : 22);
+        expect(value.height).toBeLessThanOrEqual(value.lineHeight + 1);
+        expect(value.scrollWidth).toBeLessThanOrEqual(value.clientWidth);
+        expect(value.overflow).toBe("visible");
+      });
+    }
   }
 });

@@ -1,4 +1,4 @@
-import { createApiRegistry, createLlmRuntime } from "@openclaw/ai";
+import { configureAiTransportHost, createApiRegistry, createLlmRuntime } from "@openclaw/ai";
 import { registerBuiltInApiProviders } from "@openclaw/ai/providers";
 import type {
   Model,
@@ -10,6 +10,7 @@ import {
   type ModelSelection,
 } from "../model-types";
 import { createMediaRuntime } from "./media-provider";
+import { modelProxyFetch } from "./model-proxy";
 
 export const COMPACTION_TOKEN_BUDGET = 128_000;
 export const REQUEST_OUTPUT_TOKENS = 8_192;
@@ -82,6 +83,7 @@ const googleMedia = [image, pdf, audio, video].map((capability) => ({
 interface Entry {
   info: Omit<AgentModelInfo, "available" | "unavailableReason">;
   credential: string;
+  proxyEnv?: string;
   model: Model;
 }
 const entries: Entry[] = [
@@ -176,6 +178,7 @@ const entries: Entry[] = [
       thinkingLevels: ["low", "medium", "high"],
     },
     credential: "GEMINI_API_KEY",
+    proxyEnv: "GEMINI_PROXY_URL",
     model: {
       id: "gemini-3.8-flash",
       name: "灵光",
@@ -247,6 +250,13 @@ export const CHAT_MODEL = resolveModel(
 let runtime: ReturnType<typeof createMediaRuntime> | undefined;
 export function llmRuntime() {
   if (!runtime) {
+    configureAiTransportHost({
+      buildModelFetch: (model) => {
+        const entry = entries.find((item) => item.model.id === model.id);
+        const proxyUrl = entry?.proxyEnv && process.env[entry.proxyEnv];
+        return proxyUrl ? modelProxyFetch(proxyUrl) : undefined;
+      },
+    });
     const registry = createApiRegistry();
     registerBuiltInApiProviders(registry);
     runtime = createMediaRuntime(createLlmRuntime(registry));

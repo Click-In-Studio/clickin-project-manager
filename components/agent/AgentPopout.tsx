@@ -25,6 +25,7 @@ import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import type { ChatTranscriptEntry } from "@/lib/agent/chat/types";
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -400,15 +401,17 @@ export default function AgentPopout({
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
+    const switchingSession = activeKeyRef.current !== key;
     setActiveKey(key);
-    setBubbles([]);
+    // 同一会话的后台同步保留当前内容，避免回复结束时清空消息并闪现加载提示。
+    if (switchingSession) setBubbles([]);
     setCompacting(status === "compacting");
     setLoadingHistory(true);
     try {
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
       if (res.ok) {
         const data = (await res.json()) as {
-          messages: ({ role: "user" | "assistant" | "thinking"; content: string; attachments?: ChatAttachment[] } | { role: "tool"; name: string; id?: string; result?: string; attachments?: ChatAttachment[] })[];
+          messages: ChatTranscriptEntry[];
         };
         if (activeKeyRef.current !== key) return;
         const history = data.messages.map((m) =>
@@ -992,7 +995,7 @@ export default function AgentPopout({
       {/* 聊天区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
         <div ref={scrollContentRef} className="min-h-full space-y-3">
-        {loadingHistory && <p className="text-center text-sm text-zinc-400">加载中…</p>}
+        {loadingHistory && bubbles.length === 0 && <p className="text-center text-sm text-zinc-400">加载中…</p>}
         {!loadingHistory && bubbles.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <p className="text-sm text-zinc-400">
@@ -1070,7 +1073,7 @@ export default function AgentPopout({
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
-                <div className="max-w-[92%]">
+                <div className="min-w-0 max-w-[92%]">
                   <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} progress={b.progress}
                     onCancel={!b.done && b.name.startsWith("clickin__mmp-") ? abort : undefined} />
                   {b.attachments?.map((attachment) => (
@@ -1598,21 +1601,21 @@ function ToolCallBubble({
   );
 
   return (
-    <div className="max-w-[92%]">
-      <div className="flex items-start gap-1.5">
+    <div className="min-w-0 max-w-full">
+      <div className="flex min-w-0 max-w-full items-start gap-1.5">
         <button
           type="button"
           disabled={!hasDetail}
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
-          className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-xl border px-3 py-1 text-left text-xs ${
+          className={`flex min-w-0 max-w-full items-start gap-1.5 rounded-xl border px-3 py-1 text-left text-xs ${
             failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
           } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
         >
           <span className="mt-0.5 shrink-0">{statusIcon}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block break-words">{toolLabel(name)}</span>
+          <span className="min-w-0">
+            <span className="block truncate" title={toolLabel(name)}>{toolLabel(name)}</span>
             {!done && progress && <span className="block break-words text-zinc-400">{progress}</span>}
           </span>
           {hasDetail && <span className="mt-0.5 shrink-0"><ChevronIcon direction={expanded ? "up" : "down"} size={10} /></span>}
@@ -1621,7 +1624,7 @@ function ToolCallBubble({
       </div>
       {expanded && hasDetail && (
         <div className="mt-1 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-          <p className="font-mono text-[10px] text-zinc-400">{name}</p>
+          <p className="break-all font-mono text-[10px] text-zinc-400">{name}</p>
           {inputText !== "" && (
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">参数</p>

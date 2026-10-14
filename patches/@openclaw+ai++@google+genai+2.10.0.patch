@@ -1,0 +1,36 @@
+diff --git a/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.cjs b/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.cjs
+index eae017a..225a9f6 100644
+--- a/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.cjs
++++ b/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.cjs
+@@ -13614,11 +13614,11 @@ class ApiClient {
+         var _a;
+         if (!this.clientOptions.httpOptions ||
+             !this.clientOptions.httpOptions.retryOptions) {
+-            return fetch(url, requestInit);
++            return (this.clientOptions.httpOptions?.fetch ?? fetch)(url, requestInit);
+         }
+         const retryOptions = this.clientOptions.httpOptions.retryOptions;
+         const runFetch = async () => {
+-            const response = await fetch(url, requestInit);
++            const response = await (this.clientOptions.httpOptions?.fetch ?? fetch)(url, requestInit);
+             if (response.ok) {
+                 return response;
+             }
+diff --git a/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.mjs b/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.mjs
+index 1567887..c57c979 100644
+--- a/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.mjs
++++ b/node_modules/@openclaw/ai/node_modules/@google/genai/dist/node/index.mjs
+@@ -13592,11 +13592,11 @@ class ApiClient {
+         var _a;
+         if (!this.clientOptions.httpOptions ||
+             !this.clientOptions.httpOptions.retryOptions) {
+-            return fetch(url, requestInit);
++            return (this.clientOptions.httpOptions?.fetch ?? fetch)(url, requestInit);
+         }
+         const retryOptions = this.clientOptions.httpOptions.retryOptions;
+         const runFetch = async () => {
+-            const response = await fetch(url, requestInit);
++            const response = await (this.clientOptions.httpOptions?.fetch ?? fetch)(url, requestInit);
+             if (response.ok) {
+                 return response;
+             }
