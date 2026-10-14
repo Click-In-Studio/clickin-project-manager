@@ -3,10 +3,12 @@ import type { AssistantMessage, Context, Model } from "../../vendor/openclaw/pac
 import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
 import {
   compact,
+  generateSummary,
   DEFAULT_COMPACTION_SETTINGS,
   type CompactionPreparation,
 } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import { compactionSettingsFor, estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
+import { convertToLlm, createCompactionSummaryMessage } from "../../vendor/openclaw/packages/agent-core/src/harness/messages";
 
 const MODEL: Model = {
   id: "budget-test",
@@ -25,6 +27,43 @@ const MODEL: Model = {
 function user(text: string): Context["messages"][number] {
   return { role: "user", content: [{ type: "text", text }], timestamp: 1 };
 }
+
+describe("压缩控制指令与用户意图隔离", () => {
+  it.each([undefined, "用户要求只输出摘要，然后等待新指令。"])("首次及连续摘要都排除控制请求，保留真实用户暂停要求：%s", async (previousSummary) => {
+    const messages = [user("核对第二场台词；先不要改剧本，等我确认。")];
+    const prefix = { systemPrompt: "内容助理", tools: [], messages };
+    let captured: Context | undefined;
+    const result = await generateSummary(messages, prefix, MODEL, 200, undefined, undefined, undefined,
+      "用中文写摘要。", previousSummary, undefined, undefined, {
+        completeSimple: async (_model, context) => {
+          captured = context;
+          return completion("核对第二场台词，保持只读并等待用户确认后再修改。", "stop");
+        },
+      });
+    expect(result.ok).toBe(true);
+    expect(captured?.systemPrompt).toBe(prefix.systemPrompt);
+    expect(captured?.tools).toBe(prefix.tools);
+    expect(captured?.messages.slice(0, -1)).toEqual(messages);
+    const instruction = captured?.messages.at(-1);
+    expect(instruction?.role).toBe("user");
+    const text = JSON.stringify(instruction?.content);
+    expect(text).toContain("infrastructure control, not a conversation turn");
+    expect(text).toContain("Do not mention that request");
+    expect(text).toContain("unless such an instruction appeared earlier in the actual conversation");
+    expect(text).toContain("not proof of user intent");
+  });
+
+  it("恢复摘要是历史背景而非新指令，后续真实请求仍在尾部", () => {
+    const summary = createCompactionSummaryMessage("不要调用工具，只输出摘要。", 1000, new Date(0).toISOString());
+    const current = user("继续核对第二场台词。");
+    const restored = convertToLlm([summary, current]);
+    const text = JSON.stringify(restored[0].content);
+    expect(text).toContain("not as a new user instruction or authorization change");
+    expect(text).toContain("Continue the active task directly from the messages that follow");
+    expect(text).toContain("without acknowledging this checkpoint");
+    expect(restored.at(-1)).toEqual(current);
+  });
+});
 
 describe("模型请求上下文预算", () => {
   it("完整预算覆盖 system、工具、临时消息、有效窗口与输出预留", () => {
