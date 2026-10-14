@@ -108,7 +108,9 @@ function buttonWithText(root: ParentNode, text: string): HTMLButtonElement {
   return Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
     .find((button) => {
       const content = button.textContent?.trim();
-      return content === text || content?.includes(text);
+      return content === text || (root instanceof Element && root.classList.contains("app-shell-bottom-nav")
+        ? content?.endsWith(text)
+        : content?.includes(text));
     })!;
 }
 
@@ -273,7 +275,7 @@ describe("手机导航入口完整性", () => {
       </AppShell>,
     ));
 
-    const overview = buttonWithText(mobileNav(), "概览");
+    const overview = buttonWithText(mobileNav(), "我的工作");
     act(() => overview.click());
 
     const links = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"));
