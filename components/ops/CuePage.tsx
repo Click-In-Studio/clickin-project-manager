@@ -621,7 +621,7 @@ export default function CuePage({
             data-cue-toolbar-menu-trigger="active"
             aria-expanded={openToolbarMenu === "active"}
             onClick={() => toggleToolbarMenu("active")}
-            className={`flex max-w-[160px] items-baseline gap-1 whitespace-nowrap rounded px-1.5 py-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+            className={`flex max-w-[148px] items-baseline gap-1 whitespace-nowrap rounded px-1.5 py-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
           >
             <span className="shrink-0 text-xs">显示 Cue</span>
             <span className="min-w-0 truncate text-sm">{activeCueList?.name ?? "—"}</span>
