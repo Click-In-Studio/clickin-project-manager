@@ -58,12 +58,12 @@ export function DramaturgyWorkspaceHeading({
             aria-haspopup="menu"
             aria-expanded={workspaceMenuOpen}
             onClick={() => setWorkspaceMenuOpen((open) => !open)}
-            className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 text-[11px] font-semibold text-[var(--ink)] shadow-sm"
+            className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] pl-2.5 pr-1.5 text-[11px] font-semibold text-[var(--ink)] shadow-sm"
           >
             <span>{activeSection.label}</span>
             <ChevronIcon
               direction={workspaceMenuOpen ? "up" : "down"}
-              size={12}
+              size={10}
               className="shrink-0 self-center text-[var(--muted)]"
             />
           </button>
