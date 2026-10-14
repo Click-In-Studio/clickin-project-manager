@@ -159,6 +159,22 @@ describe("agent-runtime service", () => {
     }
   }
 
+  it.each([false, true])("模型错误消息结束（已有工具调用=%s）记为失败，刷新历史保留原因", async (withTool) => {
+    const reason = "模型服务当前不可用";
+    const script: Step[] = withTool
+      ? [{ calls: [{ type: "toolCall", id: "failure_read", name: exposedName("my.productions"), arguments: {} }] }, { error: reason }]
+      : [{ error: reason }];
+    runtimeOverrides.streamFn = scripted(script).streamFn;
+    const key = newKey();
+    const { runId } = await startRun({ sessionId: key, userId, message: "读取我的制作" });
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(lines.at(-1)).toEqual({ type: "error", error: reason });
+    expect((await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0])
+      .toEqual({ status: "failed", error: reason });
+    expect((await getHistory(key)).at(-1)).toEqual({ role: "notice", content: reason });
+  });
+
   it("纯文本一轮：会话行自动建立并带关联；事件落表（delta 合并、final 收尾）→ 现有 reducer；历史投影；记账", async () => {
     const { streamFn, seen } = scripted([{ text: "你好，我是后台助手" }]);
     runtimeOverrides.streamFn = streamFn;
@@ -236,7 +252,7 @@ describe("agent-runtime service", () => {
       }
       const source = { tier: "cpu", engine: "test", engine_version: "1", generated_at: "2026-09-29T00:00:00Z", degraded: false, params: {} };
       return Response.json({
-        job_id: "test-node-1", type: "triage.audio", status: "done", media_ids: { media: "sha256:runtime-audio" }, cached: false, source,
+        job_id: `test-node-${pending.id}`, type: "triage.audio", status: "done", media_ids: { media: "sha256:runtime-audio" }, cached: false, source,
         usage: { served_from: "compute", tier: "cpu", engine: "test", compute_ms: 12, wasted_ms: 0 },
         timings_ms: { vad: 3, tagging: 4, asr: 5 },
         outputs: { digest: { kind: "json", value: { media_id: "sha256:runtime-audio", kind: "audio", duration_sec: 1, timeline_unit: "sec",

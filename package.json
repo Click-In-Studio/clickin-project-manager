@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -82,6 +83,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "jsdom": "^30.0.1",
+    "patch-package": "8.0.1",
     "playwright": "^1.62.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
