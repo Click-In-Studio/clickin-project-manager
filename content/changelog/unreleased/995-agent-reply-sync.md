@@ -2,7 +2,7 @@
 kind: fixed
 title: AI 回复结束后不再闪现加载提示
 page: ai/assistant/chat
-pr: 993
+pr: 995
 order: 1
 ---
 
