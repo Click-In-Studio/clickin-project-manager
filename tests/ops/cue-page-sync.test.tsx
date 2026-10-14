@@ -9,6 +9,7 @@ vi.mock('@/components/shell/ProductionTopMenu', async () => {
   const React = await import('react');
   return {
     default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    ProductionToolbarBlock: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     ProductionTopMenuContext: () => null, ProductionTopMenuDivider: () => null,
     ProductionOverflowSubmenuButton: () => null,
     PRODUCTION_PAGE_SCROLL_ROOT_CLASS: '', PRODUCTION_TOP_MENU_RIGHT_CLASS: '',

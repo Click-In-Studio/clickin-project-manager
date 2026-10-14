@@ -1,5 +1,6 @@
 "use client";
 
+import { useAnchoredMenu } from "../shell/ProductionTopMenu";
 import { useState, useRef, useEffect } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import ChevronIcon from "@/components/ui/ChevronIcon";
@@ -31,6 +32,7 @@ export default function TableViewSelector({
   onViewsChange,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const menuPosition = useAnchoredMenu<HTMLButtonElement>(open, "bottom");
   const [editingName, setEditingName] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -142,6 +144,7 @@ export default function TableViewSelector({
   return (
     <div ref={ref} className="relative">
       <button
+        ref={menuPosition.anchorRef}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
       >
@@ -152,7 +155,7 @@ export default function TableViewSelector({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-zinc-200 bg-white shadow-lg z-20">
+        <div ref={menuPosition.menuRef} style={menuPosition.style} className="w-56 rounded-xl border border-zinc-200 bg-white shadow-lg z-20">
           <div className="border-b border-zinc-200 px-3 py-2">
             <p className="text-[11px] font-bold tracking-[0.06em] text-zinc-500 uppercase">
               视图

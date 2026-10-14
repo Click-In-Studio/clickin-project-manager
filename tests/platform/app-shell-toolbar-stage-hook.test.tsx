@@ -71,13 +71,13 @@ describe("useProductionToolbarStage — 头部阶段", () => {
 });
 
 describe("useProductionToolbarStage — 搜索与溢出菜单联动", () => {
-  it("搜索原位展开记下当前路由并关掉溢出菜单；收进溢出槽里展开则不动", () => {
+  it("搜索展开记下当前路由但保留第二栏状态", () => {
     mount("/production/p1/script");
     act(() => latest().setTopOverflowOpen(true));
     expect(latest().topOverflowOpen).toBe(true);
     act(() => latest().handleProductionSearchOpenChange(true, false));
     expect(latest().productionSearchPath).toBe("/production/p1/script");
-    expect(latest().topOverflowOpen).toBe(false);
+    expect(latest().topOverflowOpen).toBe(true);
 
     act(() => latest().setTopOverflowOpen(true));
     act(() => latest().handleProductionSearchOpenChange(true, true));
@@ -85,7 +85,7 @@ describe("useProductionToolbarStage — 搜索与溢出菜单联动", () => {
     expect(latest().topOverflowOpen).toBe(true);
   });
 
-  it("溢出菜单开着时点外面关闭；点菜单内或标了 data-production-overflow-menu-child 的元素不关", () => {
+  it("所有宽度点击正文或子菜单都保持第二栏展开", () => {
     mount("/production/p1/script");
     act(() => latest().setTopOverflowOpen(true));
     const overflow = container.querySelector('[data-testid="overflow"]')!;
@@ -102,7 +102,7 @@ describe("useProductionToolbarStage — 搜索与溢出菜单联动", () => {
     child.remove();
 
     mousedownOn(document.body);
-    expect(latest().topOverflowOpen).toBe(false);
+    expect(latest().topOverflowOpen).toBe(true);
   });
 
   it("手机第二栏点击正文保持展开，再次点击或切页才收起", () => {

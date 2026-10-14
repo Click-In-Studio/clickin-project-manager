@@ -17,8 +17,8 @@ type Snapshot = ReturnType<typeof useCueToolbarMenus>;
 const seen: Snapshot[] = [];
 const latest = () => seen[seen.length - 1];
 const closeOverflow = vi.fn();
-function Probe({ stage, overflowOpen }: { stage: ProductionToolbarStage; overflowOpen: boolean }) {
-  seen.push(useCueToolbarMenus({ toolbarStage: stage, overflowOpen, closeOverflow }));
+function Probe() {
+  seen.push(useCueToolbarMenus());
   return (
     <div>
       <button data-cue-toolbar-menu-trigger="jump" data-testid="trigger-jump" />
@@ -38,8 +38,8 @@ beforeEach(() => {
   root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
-function render(stage: ProductionToolbarStage, overflowOpen = false) {
-  act(() => root.render(<Probe stage={stage} overflowOpen={overflowOpen} />));
+function render(_stage: ProductionToolbarStage, _overflowOpen = false) {
+  act(() => root.render(<Probe />));
 }
 function mousedown(el: EventTarget) { act(() => { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); }); }
 const S = PRODUCTION_TOOLBAR_STAGE;
@@ -53,35 +53,25 @@ describe("useCueToolbarMenus — 跳转目标", () => {
     expect(latest().jumpTarget).toBe("line");
     expect(latest().jumpValue).toBe("");
     expect(latest().openToolbarMenu).toBe(null);
-    expect(closeOverflow).toHaveBeenCalledTimes(1);
+    expect(closeOverflow).not.toHaveBeenCalled();
     act(() => latest().setJumpValue("3"));
     act(() => latest().selectJumpTarget("line"));
     expect(latest().jumpTarget).toBe(null);
     expect(latest().jumpValue).toBe("");
     expect(latest().openToolbarMenu).toBe(null);
-    expect(closeOverflow).toHaveBeenCalledTimes(2);
+    expect(closeOverflow).not.toHaveBeenCalled();
   });
 });
 
-describe("useCueToolbarMenus — 折叠阶段联动", () => {
-  it("jump 菜单只在次级菜单已折叠且未压缩时存在；阶段一变就收", () => {
+describe("useCueToolbarMenus — 两栏之间保持菜单", () => {
+  it("重新渲染不收起子菜单；只有完成动作或外点关闭", () => {
     render(S.full);
     act(() => latest().toggleToolbarMenu("jump"));
-    expect(latest().openToolbarMenu).toBe(null); // full：跳转框内联，菜单无意义
-    render(S.secondaryStored);
-    act(() => latest().toggleToolbarMenu("jump"));
-    expect(latest().openToolbarMenu).toBe("jump");
-    render(S.primaryStored); // compact：跳转收进溢出菜单
-    expect(latest().openToolbarMenu).toBe(null);
-    expect(latest().toolbarCompact).toBe(true);
-  });
-
-  it("settings 菜单在压缩态下随溢出菜单关闭而关闭", () => {
     render(S.primaryStored, true);
-    act(() => latest().toggleToolbarMenu("settings"));
-    expect(latest().openToolbarMenu).toBe("settings");
-    render(S.primaryStored, false);
+    expect(latest().openToolbarMenu).toBe("jump");
+    act(() => latest().finishToolbarAction());
     expect(latest().openToolbarMenu).toBe(null);
+    expect(closeOverflow).not.toHaveBeenCalled();
   });
 });
 

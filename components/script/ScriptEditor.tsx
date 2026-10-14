@@ -7,7 +7,7 @@ import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/s
 import ModeSwitch from "@/components/script/ModeSwitch";
 import ScriptDialog, { SCRIPT_CONFIRM_CANCEL_BUTTON_CLASS, SCRIPT_CONFIRM_PRIMARY_BUTTON_CLASS } from "@/components/script/ScriptDialog";
 import TagGroupEditor from "@/components/script/TagGroupEditor";
-import ProductionTopMenu, { ProductionOverflowSubmenuButton, ProductionTopMenuContext, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbarStage } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { ProductionToolbarBlock, ProductionTopMenuContext, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import PageSkeleton from "@/components/ui/PageSkeleton";
 import Kbd from "@/components/ui/Kbd";
@@ -79,7 +79,6 @@ import { useCharacterFocus } from "./script-editor/use-character-focus";
 import { useSceneDetailDialog } from "./script-editor/use-scene-detail-dialog";
 import { useMobileBlockMenus } from "./script-editor/use-mobile-block-menus";
 import { useDisplaySettings } from "./script-editor/use-display-settings";
-import { useScriptToolbarFold } from "./script-editor/use-script-toolbar-fold";
 import { useScriptWindowPrefetch } from "./script-editor/use-script-window-prefetch";
 import { useWorkspaceWidth } from "./script-editor/use-workspace-width";
 import { useStoredScriptPersonalMode, type ScriptPersonalMode } from "./script-editor/personal-mode";
@@ -138,7 +137,6 @@ export default function ScriptEditor({
   initialVersionId?: string | null;
   initialWindow?: ScriptWindowBootstrap | null;
 }) {
-  const toolbarStage = useProductionToolbarStage();
   const effectiveScriptId = productionId ?? scriptId;
 
   // ── Version state ─────────────────────────────────────────────────────────────
@@ -397,7 +395,7 @@ export default function ScriptEditor({
 
   const {
     clientId, userName, setUserName, presenceMap, setPresenceMap,
-    presenceCountRef, presenceTimerRef, presenceLayoutTimerRef, sendPresence,
+    presenceTimerRef, sendPresence,
   } = useScriptPresence({ effectiveScriptId, activeVersionId });
   const {
     setComments, blockAssetsByBlockId, loadBlockAssetBubbles, commentsByBlockId,
@@ -429,10 +427,6 @@ export default function ScriptEditor({
       clearTimeout(presenceTimerRef.current);
       presenceTimerRef.current = null;
     }
-    if (presenceLayoutTimerRef.current !== null) {
-      clearTimeout(presenceLayoutTimerRef.current);
-      presenceLayoutTimerRef.current = null;
-    }
     if (streamDebounceTimerRef.current !== null) {
       clearTimeout(streamDebounceTimerRef.current);
       streamDebounceTimerRef.current = null;
@@ -442,7 +436,7 @@ export default function ScriptEditor({
       eventSourceRef.current = null;
     }
     navigation.stop();
-  }, [stopReorder, navigation, presenceLayoutTimerRef, presenceTimerRef]);
+  }, [stopReorder, navigation, presenceTimerRef]);
 
   const taRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const mobileBlockMenuCaretRef = useRef<{ blockId: string; textOffset: number | null } | null>(null);
@@ -461,9 +455,6 @@ export default function ScriptEditor({
   const suppressProgrammaticScrollRef = useRef(false);
   const programmaticScrollFrameRef = useRef<number | null>(null);
   const navigatingAwayRef = useRef(false);
-  const { toolbarCompact, toolbarShort, presenceFolded, setToolbarElement, setToolbarMeasureTick, resetToolbarMeasurement } = useScriptToolbarFold({
-    toolbarStage, navigatingAwayRef, toolbarOpenMenuRef, closeToolbarMenu, activeVersionId, isLockedMode: isContentLocked, canEditMetadata,
-  });
   const clampWindowRange = useCallback((range: { start: number; end: number }, blockCount = script.getSnapshot().blocks.length) => (
     clampWindowRangePure(range, blockCount)
   ), [script]);
@@ -1715,21 +1706,6 @@ export default function ScriptEditor({
 
     const handlePresence = (list: RemotePresence[]) => {
       const next = new Map(list.map(p => [p.clientId, p]));
-      const previousSize = presenceCountRef.current;
-      if (next.size !== previousSize) {
-        presenceCountRef.current = next.size;
-        setToolbarMeasureTick(tick => tick + 1);
-        if (presenceLayoutTimerRef.current !== null) {
-          clearTimeout(presenceLayoutTimerRef.current);
-          presenceLayoutTimerRef.current = null;
-        }
-        if (next.size < previousSize) {
-          presenceLayoutTimerRef.current = setTimeout(() => {
-            presenceLayoutTimerRef.current = null;
-            resetToolbarMeasurement(false);
-          }, 120);
-        }
-      }
       setPresenceMap(next);
     };
 
@@ -1888,12 +1864,8 @@ export default function ScriptEditor({
         clearTimeout(streamDebounceTimerRef.current);
         streamDebounceTimerRef.current = null;
       }
-      if (presenceLayoutTimerRef.current !== null) {
-        clearTimeout(presenceLayoutTimerRef.current);
-        presenceLayoutTimerRef.current = null;
-      }
     };
-  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, requestVirtualWindowRefresh, resetToolbarMeasurement, setToolbarMeasureTick, streamVisible, presenceCountRef, presenceLayoutTimerRef, setPresenceMap, recoverScript, suspendRecovery, recoverySuspendedRef, streamRetryToken, sync, windowRequests, script]);
+  }, [effectiveScriptId, loadState, clientId, activeVersionId, applyWindowBootstrap, initialWindow, requestVirtualWindowRefresh, streamVisible, setPresenceMap, recoverScript, suspendRecovery, recoverySuspendedRef, streamRetryToken, sync, windowRequests, script]);
 
   const [meUserId, setMeUserId] = useState("");
   const [meIsAdmin, setMeIsAdmin] = useState(false);
@@ -3436,11 +3408,7 @@ export default function ScriptEditor({
   const dragInstructionNotice = !edgeDragNotice && (isScriptDragging || isReorderLocked)
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
-  const rightMenuClass = `${
-    toolbarCompact
-      ? ""
-      : "absolute right-0 top-full"
-  } ${toolbarCompact ? "" : "mt-2.5"} z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md`;
+  const rightMenuClass = "z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md";
   const effectivePersonalMode: ScriptPersonalMode = personalModeReady && baseCanEdit ? personalMode : "read";
   const personalModeLabel = effectivePersonalMode === "edit" ? "编辑" : "只读";
   const currentModeLabel = rehearsalMode ? "排练" : personalModeLabel;
@@ -3495,7 +3463,6 @@ export default function ScriptEditor({
         : "contents"
       }>
         <ScriptToolbarMenuController
-          toolbarCompact={toolbarCompact}
           characterCloseBlocked={pendingAggregateFocusPrompt !== null}
           openMenuRef={toolbarOpenMenuRef}
           closeMenuRef={toolbarMenuCloseRef}
@@ -3504,74 +3471,16 @@ export default function ScriptEditor({
             openMenu,
             setOpenMenu,
             toggleMenu,
-            openNestedMenu,
             handleCharacterPanelOpenChange,
             scriptMenuPosition,
             nestedMenuPosition,
           }) => {
-            const toolbarOverflow = toolbarCompact ? (
-              <>
-                {presenceFolded && onlineUsers.length > 0 && (
-                  <div className="border-b border-zinc-100">
-                    <ProductionOverflowSubmenuButton
-                      menuId="presence"
-                      label={<span className="text-[10px] font-medium tracking-wide text-zinc-400">当前在线</span>}
-                      detail={renderPresenceStack(4)}
-                      expanded={openMenu === "presence"}
-                      onToggle={(anchor) => openNestedMenu("presence", anchor)}
-                    />
-                  </div>
-                )}
-                <ProductionOverflowSubmenuButton
-                  menuId="mode"
-                  label={`模式 · ${currentModeLabel}`}
-                  expanded={openMenu === "mode"}
-                  onToggle={(anchor) => openNestedMenu("mode", anchor)}
-                />
-                {canEditMetadata && (
-                  <ProductionOverflowSubmenuButton
-                    menuId="scene"
-                    label="章节"
-                    expanded={openMenu === "scene"}
-                    onToggle={(anchor) => openNestedMenu("scene", anchor)}
-                  />
-                )}
-                {(canEditMetadata || isContentLocked) && (
-                  <ProductionOverflowSubmenuButton
-                    menuId="char"
-                    label="角色"
-                    expanded={openMenu === "char"}
-                    onToggle={(anchor) => openNestedMenu("char", anchor)}
-                  />
-                )}
-                <ProductionOverflowSubmenuButton
-                  menuId="edit"
-                  label={isContentLocked ? "查找" : "编辑"}
-                  expanded={openMenu === "edit"}
-                  onToggle={(anchor) => openNestedMenu("edit", anchor)}
-                />
-                <ProductionOverflowSubmenuButton
-                  menuId="display"
-                  label="显示"
-                  expanded={openMenu === "display"}
-                  onToggle={(anchor) => openNestedMenu("display", anchor)}
-                />
-                <ProductionOverflowSubmenuButton
-                  menuId="export"
-                  label="导出"
-                  expanded={openMenu === "export"}
-                  onToggle={(anchor) => openNestedMenu("export", anchor)}
-                />
-              </>
-            ) : null;
-
             return (
         <ProductionTopMenu
-          barRef={setToolbarElement}
+          progressive
           fallbackClassName="gap-0 px-6"
-          overflow={toolbarOverflow}
         >
-          {(portaled) => (
+          {() => (
             <>
           {productionName && (
             <>
@@ -3583,7 +3492,8 @@ export default function ScriptEditor({
             <>
 
               {/* 剧本菜单 — 关于 + 元数据设置 */}
-              <div className="relative -ml-1 shrink-0">
+              <ProductionToolbarBlock id="script" priority={70}>
+<div className="relative -ml-1 shrink-0">
                 <button
                   ref={scriptMenuPosition.anchorRef}
                   data-script-toolbar-menu-trigger="script"
@@ -3714,10 +3624,11 @@ export default function ScriptEditor({
                   </div>
                 )}
               </div>
+</ProductionToolbarBlock>
             </>
           )}
-          <ScriptModeMenu
-            compact={toolbarCompact}
+          <ProductionToolbarBlock id="mode" priority={60}>
+<ScriptModeMenu
             open={openMenu === "mode"}
             currentLabel={currentModeLabel}
             selectedMode={rehearsalMode ? null : effectivePersonalMode}
@@ -3730,13 +3641,14 @@ export default function ScriptEditor({
             onToggle={() => { clearModeSwitchError(); toggleMenu("mode"); }}
             onSelect={(mode) => { void selectPersonalMode(mode); }}
           />
-          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ${presenceFolded ? "absolute right-0 flex w-0 items-center" : "ml-auto flex shrink-0 items-center gap-1"}`}>
-          <div className={`${toolbarCompact ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+</ProductionToolbarBlock>
+          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-0`}>
           {(canEditMetadata || isContentLocked) && (
             <>
               {canEditMetadata && (
                 <>
-                  <ScenePanel
+                  <ProductionToolbarBlock id="scene" priority={50}>
+<ScenePanel
                     scenes={scenes}
                     productionId={productionId ?? ""}
                     onAdd={(parentId, target) => addScene(parentId, target)}
@@ -3745,16 +3657,17 @@ export default function ScriptEditor({
                     open={openMenu === "scene"}
                     onOpenChange={(v) => setOpenMenu(v ? "scene" : null)}
                     onNavigate={prepareForNavigation}
-                    triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
-                    nestedFromMore={toolbarCompact}
+                    triggerClassName={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+                    nestedFromMore
                     nestedMenuRef={nestedMenuPosition.menuRef}
                     nestedMenuStyle={nestedMenuPosition.style}
-                    label={toolbarShort ? "章" : "章节"}
+                    label="章节"
                   />
-                  <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+</ProductionToolbarBlock>
                 </>
               )}
-              <CharacterPanel
+              <ProductionToolbarBlock id="char" priority={40}>
+<CharacterPanel
                 characters={characters}
                 productionId={productionId ?? ""}
                 focusedCharacterIds={focusedCharacterIds}
@@ -3767,35 +3680,36 @@ export default function ScriptEditor({
                 onOpenChange={handleCharacterPanelOpenChange}
                 onNavigate={prepareForNavigation}
                 readOnly={isContentLocked}
-                triggerClassName={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
+                triggerClassName={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm transition-colors ${
                   openMenu === "char"
                     ? "bg-zinc-100 text-zinc-800"
                     : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
                 }`}
-                nestedFromMore={toolbarCompact}
+                nestedFromMore
                 nestedMenuRef={nestedMenuPosition.menuRef}
                 nestedMenuStyle={nestedMenuPosition.style}
-                label={toolbarShort ? "角" : "角色"}
+                label="角色"
               />
-              <div className={`${toolbarCompact || portaled ? "hidden" : "block"} h-4 w-px shrink-0 bg-zinc-100`} />
+</ProductionToolbarBlock>
             </>
           )}
 
           {/* 编辑菜单 — undo/redo + 格式 + 搜索/跳转 */}
-          <div className="relative shrink-0">
+          <ProductionToolbarBlock id="edit" priority={10}>
+<div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="edit"
               onClick={() => toggleMenu("edit")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? (isContentLocked ? "找" : "编") : (isContentLocked ? "查找" : "编辑")} <ChevronIcon size={12} className="opacity-50" />
+              {isContentLocked ? "查找" : "编辑"} <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "edit" && (
               <div
                 data-script-toolbar-menu-panel="edit"
-                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
-                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
-                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                data-production-overflow-menu-child="true"
+                ref={nestedMenuPosition.menuRef}
+                style={nestedMenuPosition.style}
                 className={`${rightMenuClass} w-44`}
               >
                 {canEdit && (
@@ -3866,22 +3780,24 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
+</ProductionToolbarBlock>
 
           {/* 显示菜单 */}
-          <div className="relative shrink-0">
+          <ProductionToolbarBlock id="display" priority={30}>
+<div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="display"
               onClick={() => toggleMenu("display")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
-              {toolbarShort ? "显" : "显示"} <ChevronIcon size={12} className="opacity-50" />
+              显示 <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "display" && (
               <div
                 data-script-toolbar-menu-panel="display"
-                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
-                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
-                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                data-production-overflow-menu-child="true"
+                ref={nestedMenuPosition.menuRef}
+                style={nestedMenuPosition.style}
                 className={`${rightMenuClass} w-44`}
               >
                 {(
@@ -3966,13 +3882,13 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
+</ProductionToolbarBlock>
 
           {/* Online users: self (dimmed) + overflow menu */}
-          <div className="relative shrink-0">
-            {!presenceFolded && onlineUsers.length > 0 && (() => {
-              const maxVisibleAvatars = toolbarShort || toolbarCompact
-                ? 2
-                : rehearsalMode
+          <ProductionToolbarBlock id="presence" priority={5}>
+<div className="relative shrink-0">
+            {onlineUsers.length > 0 && (() => {
+              const maxVisibleAvatars = rehearsalMode
                   ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
                   : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
               const stack = renderPresenceStack(maxVisibleAvatars);
@@ -3980,11 +3896,10 @@ export default function ScriptEditor({
               return (
                 <button
                   type="button"
-                  ref={toolbarCompact ? nestedMenuPosition.anchorRef : undefined}
+                  ref={nestedMenuPosition.anchorRef}
                   data-script-toolbar-menu-trigger="presence"
-                  onClick={(event) => {
-                    if (toolbarCompact) openNestedMenu("presence", event.currentTarget);
-                    else toggleMenu("presence");
+                  onClick={() => {
+                    toggleMenu("presence");
                   }}
                   className="flex items-center rounded px-1 py-1 transition-colors hover:bg-zinc-100"
                   aria-label={`当前在线：${onlineUsers.length} 人`}
@@ -3997,9 +3912,9 @@ export default function ScriptEditor({
             {openMenu === "presence" && (
               <div
                 data-script-toolbar-menu-panel="presence"
-                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
-                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
-                style={toolbarCompact ? nestedMenuPosition.style : undefined}
+                data-production-overflow-menu-child="true"
+                ref={nestedMenuPosition.menuRef}
+                style={nestedMenuPosition.style}
                 className={`${rightMenuClass} w-44`}
               >
                 <p className="px-3 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">当前在线</p>
@@ -4018,23 +3933,25 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
+</ProductionToolbarBlock>
 
           {/* 导出菜单 */}
-          <div className="relative shrink-0">
+          <ProductionToolbarBlock id="export" priority={20}>
+<div className="relative shrink-0">
             <button
               data-script-toolbar-menu-trigger="export"
               onClick={() => toggleMenu("export")}
-              className={`${toolbarCompact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+              className={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
             >
               导出 <ChevronIcon size={12} className="opacity-50" />
             </button>
             {openMenu === "export" && (
               <div
                 data-script-toolbar-menu-panel="export"
-                data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
-                ref={toolbarCompact ? nestedMenuPosition.menuRef : undefined}
-                style={toolbarCompact ? nestedMenuPosition.style : undefined}
-                className={`${rightMenuClass} w-36`}
+                data-production-overflow-menu-child="true"
+                ref={nestedMenuPosition.menuRef}
+                style={nestedMenuPosition.style}
+                className={`${rightMenuClass} min-w-[112px] w-max`}
               >
                 {/* 打印页现在是独立路由（#335）。新标签打开：印本子的人通常一边继续
                     改本子一边比对，同标签跳走会把编辑态一起带走。 */}
@@ -4050,6 +3967,7 @@ export default function ScriptEditor({
               </div>
             )}
           </div>
+</ProductionToolbarBlock>
           </div>
             </>
           )}

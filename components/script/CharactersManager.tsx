@@ -5,8 +5,8 @@ import { BASE_PATH } from "@/lib/base-path";
 import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import type { CharacterDetail } from "@/lib/script/script-scene-character-db";
 import ChevronIcon from "@/components/ui/ChevronIcon";
-import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, PRODUCTION_TOOLBAR_STAGE, ProductionTopMenuDivider, useProductionToolbar } from "../shell/ProductionTopMenu";
-import ListTableViewToggle, { ListTableViewToggleOverflow } from "./ListTableViewToggle";
+import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionToolbarBlock } from "../shell/ProductionTopMenu";
+import ListTableViewToggle from "./ListTableViewToggle";
 import { DramaturgyWorkspaceHeading } from "./DramaturgyWorkspaceTabs";
 import { canDeleteCharacter, canEditCharacter, type CharacterPerms } from "@/lib/script/character-perms-types";
 import { isMultilineSubmitShortcut } from "@/components/ui/multiline-keyboard";
@@ -766,7 +766,6 @@ function AddCharacterForm({
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 export default function CharactersManager({ productionId, initialCharacters, perms, embedded, versionId, initialExpandedId }: Props) {
-  const { stage: toolbarStage } = useProductionToolbar();
   const [characters, setCharacters] = useState<CharacterDetail[]>(initialCharacters);
   const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
   const [view, setView] = useListTableViewPreference("characters");
@@ -945,29 +944,12 @@ export default function CharactersManager({ productionId, initialCharacters, per
   return (
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* Frozen toolbar */}
-      <ProductionTopMenu
-        overflow={toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
-          <>
-            <div className="border-t border-[var(--line)] px-3 py-2">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">页面模式</p>
-              {modePicker}
-            </div>
-            {view !== null && <ListTableViewToggleOverflow value={view} onChange={setView} />}
-          </>
-        ) : null}
-      >
-        <DramaturgyWorkspaceHeading
-          productionId={productionId}
-          active="characters"
-        />
-        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored && (
-          <>
-            <ProductionTopMenuDivider />
-            {modePicker}
-            <ProductionTopMenuDivider />
-          </>
-        )}
-        {view !== null && <ListTableViewToggle value={view} onChange={setView} />}
+      <ProductionTopMenu progressive>
+        <DramaturgyWorkspaceHeading productionId={productionId} active="characters" />
+        <ProductionToolbarBlock id="mode" priority={30}>{modePicker}</ProductionToolbarBlock>
+        {view !== null && <ProductionToolbarBlock id="view" priority={40}>
+          <ListTableViewToggle value={view} onChange={setView} />
+        </ProductionToolbarBlock>}
       </ProductionTopMenu>
       {/* Scrollable content */}
       <div

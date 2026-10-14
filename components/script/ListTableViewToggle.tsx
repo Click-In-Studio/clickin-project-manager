@@ -1,19 +1,15 @@
 import styles from "./ListTableViewToggle.module.css";
-import { PRODUCTION_TOOLBAR_STAGE, useProductionToolbar } from "../shell/ProductionTopMenu";
 import type { ListTableViewMode } from "./use-list-table-view-preference";
 
 type Props = {
   value: ListTableViewMode;
   onChange: (value: ListTableViewMode) => void;
-  persistent?: boolean;
 };
 
-export default function ListTableViewToggle({ value, onChange, persistent = false }: Props) {
-  const { stage } = useProductionToolbar();
-  if (!persistent && stage >= PRODUCTION_TOOLBAR_STAGE.primaryStored) return null;
+export default function ListTableViewToggle({ value, onChange }: Props) {
 
   return (
-    <div className={styles.viewToggle} data-compact={stage >= PRODUCTION_TOOLBAR_STAGE.primaryShort || undefined}>
+    <div className={styles.viewToggle}>
       <button
         type="button"
         aria-label="表格"
@@ -33,37 +29,6 @@ export default function ListTableViewToggle({ value, onChange, persistent = fals
       >
         <span className={styles.icon} aria-hidden="true">☰</span>
         <span className={styles.label}>列表</span>
-      </button>
-    </div>
-  );
-}
-
-export function ListTableViewToggleOverflow({ value, onChange }: Pick<Props, "value" | "onChange">) {
-  const { closeOverflow } = useProductionToolbar();
-  const select = (next: ListTableViewMode) => {
-    closeOverflow();
-    onChange(next);
-  };
-
-  return (
-    <div className="border-t border-[var(--line)] py-1">
-      <button
-        type="button"
-        onClick={() => select("table")}
-        className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
-      >
-        <span aria-hidden="true">⊞</span>
-        <span className="min-w-0 flex-1">表格</span>
-        {value === "table" && <span className="text-[var(--script)]">✓</span>}
-      </button>
-      <button
-        type="button"
-        onClick={() => select("list")}
-        className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
-      >
-        <span aria-hidden="true">☰</span>
-        <span className="min-w-0 flex-1">列表</span>
-        {value === "list" && <span className="text-[var(--script)]">✓</span>}
       </button>
     </div>
   );
