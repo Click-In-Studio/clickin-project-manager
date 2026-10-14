@@ -11,12 +11,8 @@ import { useAgentMutation } from "@/lib/agent/agent-mutations";
 import type { MarkerProjection } from "@/lib/script/script-marker-domain";
 import ProductionTopMenu, {
   PRODUCTION_PAGE_SCROLL_ROOT_CLASS,
-  PRODUCTION_TOOLBAR_STAGE,
-  ProductionOverflowSubmenuButton,
-  ProductionTopMenuDivider,
-  PRODUCTION_TOP_MENU_RIGHT_CLASS,
+  ProductionToolbarBlock,
   useAnchoredMenu,
-  useProductionToolbar,
 } from "../shell/ProductionTopMenu";
 import ListTableViewToggle from "./ListTableViewToggle";
 import type { SceneFieldPerms } from "@/lib/script/scene-field-perms-shared";
@@ -52,7 +48,6 @@ export default function Dramaturgy({
   fieldPerms,
   initialSceneId,
 }: Props) {
-  const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
   const [scenes, setScenes] = useState<MarkerProjection[]>(initialScenes);
   const [sceneViewMode, setSceneViewMode] = useListTableViewPreference("dramaturgy");
   const workspaceMode = useDramaturgyWorkspaceMode(productionId, canEdit);
@@ -70,37 +65,19 @@ export default function Dramaturgy({
 
   const [tableConfig, setTableConfig] = useState<TableViewConfigData>(getDefaultViewConfig());
   const [showColumnSettings, setShowColumnSettings] = useState(false);
-  const [storedColumnSettingsOpen, setStoredColumnSettingsOpen] = useState(false);
-  const [mobileCreatingView, setMobileCreatingView] = useState(false);
-  const [mobileNewName, setMobileNewName] = useState("");
-  const [mobileSaving, setMobileSaving] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [viewsLoaded, setViewsLoaded] = useState(false);
-  const storedColumnSettingsPosition = useAnchoredMenu<HTMLButtonElement>(
-    toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && sceneViewMode === "table" && overflowOpen && storedColumnSettingsOpen,
-    "left",
-    "columns",
-  );
-
+  const columnsPosition = useAnchoredMenu<HTMLButtonElement>(showColumnSettings, "bottom");
   useEffect(() => {
-    if (!overflowOpen || toolbarStage < PRODUCTION_TOOLBAR_STAGE.secondaryStored || sceneViewMode !== "table") {
-      setStoredColumnSettingsOpen(false);
-    }
-  }, [overflowOpen, toolbarStage, sceneViewMode]);
-
-  useEffect(() => {
-    if (!storedColumnSettingsOpen) return;
+    if (!showColumnSettings) return;
     const dismiss = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (storedColumnSettingsPosition.anchorRef.current?.contains(target)) return;
-      if (storedColumnSettingsPosition.menuRef.current?.contains(target)) return;
-      setStoredColumnSettingsOpen(false);
+      if (event.target instanceof Node && !columnsPosition.anchorRef.current?.contains(event.target)
+        && !columnsPosition.menuRef.current?.contains(event.target)) setShowColumnSettings(false);
     };
     document.addEventListener("mousedown", dismiss);
     return () => document.removeEventListener("mousedown", dismiss);
-  }, [storedColumnSettingsOpen, storedColumnSettingsPosition.anchorRef, storedColumnSettingsPosition.menuRef]);
+  }, [showColumnSettings, columnsPosition.anchorRef, columnsPosition.menuRef]);
 
   useEffect(() => {
     if (viewsLoaded) return;
@@ -154,212 +131,38 @@ export default function Dramaturgy({
     setActiveViewId(view.id || null);
   };
 
-  const handleMobileSaveView = async () => {
-    if (!activeViewId || mobileSaving) return;
-    setMobileSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views/${activeViewId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: tableConfig }),
-      });
-      if (!res.ok) throw new Error("保存失败");
-      setSavedViews((prev) => prev.map((v) => v.id === activeViewId ? { ...v, config: tableConfig } : v));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setMobileSaving(false);
-    }
-  };
-
-  const handleMobileCreateView = async () => {
-    if (!mobileNewName.trim() || mobileSaving) return;
-    setMobileSaving(true);
-    try {
-      const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: mobileNewName.trim(), config: tableConfig, isDefault: savedViews.length === 0 }),
-      });
-      if (!res.ok) throw new Error("创建失败");
-      const data = await res.json() as SavedView;
-      setSavedViews((prev) => [...prev, data]);
-      handleSelectView(data);
-      setMobileNewName("");
-      setMobileCreatingView(false);
-      closeOverflow();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setMobileSaving(false);
-    }
-  };
-
-  const secondaryOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && sceneViewMode === "table" ? (
-    <>
-      {savedViews.length > 0 && (
-        <>
-          <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">
-            切换视图
-          </div>
-          {savedViews.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              onClick={() => { handleSelectView(view); closeOverflow(); }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface-2)] ${
-                activeViewId === view.id ? "font-bold text-[var(--ink)]" : "text-[var(--muted)]"
-              }`}
-            >
-              <span className="w-3 text-[9px] text-[var(--script)]">{activeViewId === view.id ? "✓" : ""}</span>
-              <span className="min-w-0 flex-1 truncate">{view.name}</span>
-              {view.isDefault && <span className="text-[9px] font-normal text-[var(--muted)]">默认</span>}
-            </button>
-          ))}
-        </>
-      )}
-      <div className="border-t border-[var(--line)] py-1">
-        {activeViewId && (
-          <button
-            type="button"
-            onClick={() => { void handleMobileSaveView(); }}
-            disabled={mobileSaving}
-            className="w-full px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-          >
-            {mobileSaving ? "保存中…" : "保存到当前视图"}
-          </button>
-        )}
-        {mobileCreatingView ? (
-          <div className="flex gap-1.5 px-3 py-2">
-            <input
-              autoFocus
-              value={mobileNewName}
-              onChange={(event) => setMobileNewName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleMobileCreateView();
-                if (event.key === "Escape") { setMobileCreatingView(false); setMobileNewName(""); }
-              }}
-              placeholder="视图名称"
-              className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-[var(--paper)] px-2 py-1 text-xs text-[var(--ink)] outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => { void handleMobileCreateView(); }}
-              disabled={mobileSaving || !mobileNewName.trim()}
-              className="rounded-md border-0 bg-[var(--ink)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40"
-            >
-              存
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setMobileCreatingView(true)}
-            className="w-full px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
-          >
-            另存为新视图
-          </button>
-        )}
-      </div>
-      <div className="border-t border-[var(--line)] py-1">
-        <ProductionOverflowSubmenuButton
-          menuId="columns"
-          label="列设置"
-          expanded={storedColumnSettingsOpen}
-          onToggle={(anchor) => {
-            storedColumnSettingsPosition.anchorRef.current = anchor;
-            setStoredColumnSettingsOpen((open) => !open);
-          }}
-        />
-      </div>
-    </>
-  ) : null;
-  const modeOverflow = toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored ? (
-    <div className="border-t border-[var(--line)] px-3 py-2">
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--muted)]">页面模式</p>
-      <DramaturgyModePicker
-        mode={workspaceMode.mode}
-        canEdit={canEdit}
-        switching={workspaceMode.switching}
-        error={workspaceMode.error}
-        onChange={(mode) => { void workspaceMode.requestMode(mode); }}
-      />
-    </div>
-  ) : null;
-  const toolbarOverflow = modeOverflow || secondaryOverflow ? (
-    <>
-      {modeOverflow}
-      {secondaryOverflow}
-    </>
-  ) : null;
-
   return (
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS}>
       {/* ── Frozen toolbar ── */}
-      <ProductionTopMenu overflow={toolbarOverflow}>
-        <DramaturgyWorkspaceHeading
-          productionId={productionId}
-          active="overview"
-        />
-        {toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored && (
-          <>
-            <ProductionTopMenuDivider />
-            <DramaturgyModePicker
-              mode={workspaceMode.mode}
-              canEdit={canEdit}
-              switching={workspaceMode.switching}
-              error={workspaceMode.error}
-              onChange={(mode) => { void workspaceMode.requestMode(mode); }}
-            />
-            <ProductionTopMenuDivider />
-          </>
-        )}
+      <ProductionTopMenu progressive>
+        <DramaturgyWorkspaceHeading productionId={productionId} active="overview" />
+        <ProductionToolbarBlock id="mode" priority={30}>
+          <DramaturgyModePicker mode={workspaceMode.mode} canEdit={canEdit}
+            switching={workspaceMode.switching} error={workspaceMode.error}
+            onChange={(mode) => { void workspaceMode.requestMode(mode); }} />
+        </ProductionToolbarBlock>
         {sceneViewMode !== null && (
-          <ListTableViewToggle persistent value={sceneViewMode} onChange={setSceneViewMode} />
+          <ProductionToolbarBlock id="view" priority={40}>
+            <ListTableViewToggle value={sceneViewMode} onChange={setSceneViewMode} />
+          </ProductionToolbarBlock>
         )}
-
         {sceneViewMode === "table" && (
           <>
-          {toolbarStage < PRODUCTION_TOOLBAR_STAGE.secondaryStored && (
-          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex items-center`}>
-            {/* Desktop: inline controls */}
-            <div className="flex items-center gap-2">
-              <TableViewSelector
-                productionId={productionId}
-                views={savedViews}
-                activeViewId={activeViewId}
-                currentConfig={tableConfig}
-                onSelectView={handleSelectView}
-                onViewsChange={setSavedViews}
-              />
-              <div style={{ position: "relative" }}>
-                <button
-                  onClick={() => setShowColumnSettings((v) => !v)}
-                  className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
-                >
-                  列设置 <ChevronIcon size={12} className="opacity-50" />
-                </button>
-                {showColumnSettings && (
-                  <TableColumnSettings
-                    config={tableConfig}
-                    onChange={handleConfigChange}
-                    onClose={() => setShowColumnSettings(false)}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-          )}
-          {toolbarStage >= PRODUCTION_TOOLBAR_STAGE.secondaryStored && overflowOpen && storedColumnSettingsOpen && (
-            <TableColumnSettings
-              config={tableConfig}
-              onChange={handleConfigChange}
-              onClose={() => setStoredColumnSettingsOpen(false)}
-              nestedFromOverflow
-              nestedMenuRef={storedColumnSettingsPosition.menuRef}
-              nestedMenuStyle={storedColumnSettingsPosition.style}
-            />
-          )}
+            <ProductionToolbarBlock id="saved-view" priority={10}>
+              <TableViewSelector productionId={productionId} views={savedViews}
+                activeViewId={activeViewId} currentConfig={tableConfig}
+                onSelectView={handleSelectView} onViewsChange={setSavedViews} />
+            </ProductionToolbarBlock>
+            <ProductionToolbarBlock id="columns" priority={20}>
+              <button ref={columnsPosition.anchorRef} aria-expanded={showColumnSettings}
+                onClick={() => setShowColumnSettings((open) => !open)}
+                className="flex h-8 items-center gap-0.5 whitespace-nowrap rounded px-1.5 text-xs text-zinc-500 hover:bg-zinc-100">
+                列设置 <ChevronIcon size={12} className="opacity-50" />
+              </button>
+              {showColumnSettings && <TableColumnSettings config={tableConfig} onChange={handleConfigChange}
+                onClose={() => setShowColumnSettings(false)} nestedFromOverflow
+                nestedMenuRef={columnsPosition.menuRef} nestedMenuStyle={columnsPosition.style} />}
+            </ProductionToolbarBlock>
           </>
         )}
       </ProductionTopMenu>

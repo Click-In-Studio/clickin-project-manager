@@ -129,6 +129,8 @@ export default function CharacterPanel({
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 placeholder="新角色名…"
+                data-script-character-input
+                style={{ fontSize: "14px" }}
                 className="min-w-0 flex-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-300"
               />
               <button

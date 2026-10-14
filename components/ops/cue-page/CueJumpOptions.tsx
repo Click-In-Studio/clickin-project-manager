@@ -13,7 +13,7 @@ export default function CueJumpOptions({ onSelect }: { onSelect: (target: CueJum
       key={target}
       type="button"
       onClick={() => onSelect(target)}
-      className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
+      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
     >
       跳转到{label}…
     </button>

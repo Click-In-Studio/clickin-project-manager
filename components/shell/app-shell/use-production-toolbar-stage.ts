@@ -13,6 +13,7 @@ import {
   productionHeaderStageForWidth,
   adjacentProductionToolbarStage,
   productionTopbarOverflow,
+  layoutProgressiveToolbar,
 } from "./toolbar-stage";
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
@@ -41,10 +42,9 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
   const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
   const topOverflowMenu = useAnchoredMenu<HTMLButtonElement>(topOverflowOpen, "bottom");
   const handleProductionSearchOpenChange = useCallback((open: boolean, stored: boolean) => {
-    productionSearchOpenRef.current = open;
-    if (open && !stored) closeTopOverflow();
+    productionSearchOpenRef.current = open && !stored;
     setProductionSearchPath(open && !stored ? pathname : null);
-  }, [pathname, closeTopOverflow]);
+  }, [pathname]);
   const productionToolbarContext = useMemo(() => ({
     stage: productionToolbarStage,
     closeOverflow: closeTopOverflow,
@@ -65,6 +65,12 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     if (!topbar) return;
     if (productionSearchOpenRef.current) return;
 
+    const progressiveStored = layoutProgressiveToolbar(topbar);
+    if (progressiveStored !== null) {
+      setProductionToolbarStage(PRODUCTION_TOOLBAR_STAGE.searchCollapsed);
+      setProductionToolbarHasStoredControls(progressiveStored);
+      return;
+    }
     const current = productionToolbarStageRef.current;
     if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
     const overflowTarget = document.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
@@ -107,7 +113,10 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     resizeObserver.observe(topbar);
     mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
     const overflowTarget = document.getElementById(PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID);
-    if (overflowTarget) mutationObserver.observe(overflowTarget, { childList: true, subtree: true });
+    if (overflowTarget) {
+      mutationObserver.observe(overflowTarget, { childList: true, characterData: true, subtree: true });
+      resizeObserver.observe(overflowTarget);
+    }
     window.addEventListener("resize", scheduleMeasure);
     return () => {
       resizeObserver.disconnect();
@@ -124,8 +133,8 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
   }, [pathname]);
 
   useLayoutEffect(() => {
-    closeTopOverflow();
-  }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
+    if (!productionToolbarHasStoredControls) closeTopOverflow();
+  }, [productionToolbarHasStoredControls, closeTopOverflow]);
 
   useEffect(() => {
     setProductionSearchPath(null);
@@ -133,20 +142,6 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     setTopOverflowOpen(false);
   }, [pathname]);
 
-  useEffect(() => {
-    if (!topOverflowOpen) return;
-    const handler = (event: MouseEvent) => {
-      // 手机第二栏由“更多”显式收起，点击正文不使布局跳动。
-      if (window.innerWidth < 768) return;
-      const target = event.target;
-      if (topOverflowMenu.menuRef.current?.contains(target as Node)) return;
-      if (topOverflowRef.current?.contains(target as Node)) return;
-      if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
-      closeTopOverflow();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [topOverflowOpen, closeTopOverflow, topOverflowMenu.menuRef]);
 
   return {
     productionHeaderStage,

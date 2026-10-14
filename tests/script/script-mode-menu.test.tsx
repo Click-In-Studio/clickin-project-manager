@@ -21,11 +21,10 @@ afterEach(() => {
 });
 
 describe("剧本个人模式菜单", () => {
-  it("窄屏由外层更多菜单承载，仍渲染可操作的模式面板", () => {
+  it("两栏都保留模式按钮并直接打开选项", () => {
     const onSelect = vi.fn();
     act(() => root.render(
       <ScriptModeMenu
-        compact
         open
         currentLabel="只读"
         selectedMode="read"
@@ -37,7 +36,7 @@ describe("剧本个人模式菜单", () => {
         onSelect={onSelect}
       />,
     ));
-    expect(container.querySelector('[data-script-toolbar-menu-trigger="mode"]')?.className).toContain("hidden");
+    expect(container.querySelector('[data-script-toolbar-menu-trigger="mode"]')?.className).toContain("flex");
     expect(container.querySelector('[data-production-overflow-menu-child="true"]')).not.toBeNull();
     const edit = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("编辑"));
     act(() => edit?.click());
@@ -47,7 +46,6 @@ describe("剧本个人模式菜单", () => {
   it("无内容编辑能力时保留编辑项但禁用，并显示保存错误", () => {
     act(() => root.render(
       <ScriptModeMenu
-        compact={false}
         open
         currentLabel="只读"
         selectedMode="read"

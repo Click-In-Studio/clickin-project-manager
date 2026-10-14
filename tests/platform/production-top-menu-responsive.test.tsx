@@ -55,7 +55,7 @@ describe("构作表格 / 列表切换常驻", () => {
         closeOverflow: () => {}, overflowOpen: false,
         hasStoredControls: true, setHasStoredControls: () => {},
       }}>
-        <ListTableViewToggle persistent value="table" onChange={value => changes.push(value)} />
+        <ListTableViewToggle value="table" onChange={value => changes.push(value)} />
       </ProductionToolbarContext.Provider>,
     ));
     expect(container.querySelectorAll("button")).toHaveLength(2);

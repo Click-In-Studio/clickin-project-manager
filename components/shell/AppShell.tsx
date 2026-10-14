@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
@@ -386,6 +387,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           <SearchBar
             key={pathname}
             productionId={productionId}
+            keepInline={/\/(script|dramaturgy|cues)(\/|$)/.test(pathname)}
             onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
           />
 
@@ -438,7 +440,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   onClick={() => setTopOverflowOpen((open) => !open)}
                   className="flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border-0 bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
                 >
-                  <span>更多</span><span aria-hidden="true">⋮</span>
+                  <span>更多</span><ChevronIcon direction={topOverflowOpen ? "up" : "down"} size={12} />
                 </button>
               )}
             </div>
@@ -449,14 +451,15 @@ export default function AppShell({ session, productions, canCreateProduction = f
       {hasTopMenu && (
         <div
           ref={topOverflowMenu.menuRef}
-          style={topOverflowMenu.style}
+          aria-hidden={!topOverflowOpen}
+          inert={!topOverflowOpen}
           data-production-overflow-menu="true"
           data-secondary-toolbar-open={productionToolbarHasStoredControls && topOverflowOpen ? "true" : undefined}
           role="region"
           aria-label="更多工具栏"
           className={productionToolbarHasStoredControls && topOverflowOpen
-            ? "production-secondary-toolbar z-50 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-            : "hidden"
+            ? "production-secondary-toolbar"
+            : "production-secondary-toolbar production-secondary-toolbar-closed"
           }
         >
           <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />

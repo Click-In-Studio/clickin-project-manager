@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
-import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionOverflowSubmenuButton, ProductionTopMenuContext, ProductionTopMenuDivider, PRODUCTION_TOP_MENU_RIGHT_CLASS, useProductionToolbar } from "@/components/shell/ProductionTopMenu";
+import ProductionTopMenu, { PRODUCTION_PAGE_SCROLL_ROOT_CLASS, ProductionToolbarBlock, ProductionTopMenuContext } from "@/components/shell/ProductionTopMenu";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { useVisibleEventSource } from "@/hooks/useVisibleEventSource";
@@ -16,7 +16,7 @@ import type { Block, Scene } from "@/lib/script/script-types";
 import BlockText from "./cue-page/BlockText";
 import CueChip from "./cue-page/CueChip";
 import CueCommentsPanel from "./cue-page/CueCommentsPanel";
-import CueJumpOptions, { CUE_JUMP_OPTIONS } from "./cue-page/CueJumpOptions";
+import CueJumpOptions from "./cue-page/CueJumpOptions";
 import ExportModal from "./cue-page/ExportModal";
 import InlineField from "./cue-page/InlineField";
 import ShareModal from "./cue-page/ShareModal";
@@ -41,7 +41,7 @@ export default function CuePage({
   cueLists, initialCues, editableListIds, manageListIds, myUserId, isAdmin, pageMap,
   versionId,
 }: Props) {
-  const { stage: toolbarStage, closeOverflow, overflowOpen } = useProductionToolbar();
+  const [cueMode, setCueMode] = useState<"read" | "edit">("edit");
   const orderedBlocks = useMemo(() => withLegacyOwnershipProjection(
     withMarkerOwnership(rawBlocks),
     buildMarkerContextById(rawBlocks),
@@ -65,9 +65,11 @@ export default function CuePage({
     shareModalListId, setShareModalListId,
     accessModal, setAccessModal, accessModalConfirming, setAccessModalConfirming,
     visibleListIdsRef, activeListIdRef,
-    activeCueList, canShareActive, visibleLists, listColorIndex, canEditActive, canEditCue,
+    activeCueList, canShareActive, visibleLists, listColorIndex, canEditActive: hasEditActive, canEditCue: hasEditCue,
     handleActivateList,
   } = useCueLists({ productionId, cueLists, editableListIds, manageListIds, myUserId });
+  const canEditActive = cueMode === "edit" && hasEditActive;
+  const canEditCue = useCallback((cue: Cue) => cueMode === "edit" && hasEditCue(cue), [cueMode, hasEditCue]);
   const {
     cues, saveStates, readFailed, updateCueField, editingCue, scheduleCueRefetch,
     beginListWrite, replaceListCues, removeCue, retry, discardConflicts,
@@ -78,10 +80,10 @@ export default function CuePage({
   const { comments, setComments, activeCommentCueId, setActiveCommentCueId } = useCueComments({ productionId, selection });
   const {
     jumpTarget, setJumpTarget, jumpValue, setJumpValue,
-    openToolbarMenu, secondaryMenusFolded, cueTagsFolded, toolbarCompact,
-    activeMenuPosition, settingsMenuPosition, toggleToolbarMenu, finishToolbarAction, selectJumpTarget,
-  } = useCueToolbarMenus({ toolbarStage, overflowOpen, closeOverflow });
-  const { clientId, setPresenceMap, lastSentPresRef, sendCuePresence, presenceForCue, presenceForList } =
+    openToolbarMenu,
+    activeMenuPosition, settingsMenuPosition, jumpMenuPosition, toggleToolbarMenu, finishToolbarAction, selectJumpTarget,
+  } = useCueToolbarMenus();
+  const { clientId, setPresenceMap, lastSentPresRef, sendCuePresence, presenceForCue } =
     useCuePresence({ productionId, activeListId, selection });
 
   // ── Toolbar menus ─────────────────────────────────────────────────────────
@@ -602,51 +604,26 @@ export default function CuePage({
 
   const toolbarTriggerClass = "flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800";
 
-  const cueOverflow = toolbarCompact ? (
-    <>
-      <p className="px-3 pb-0.5 pt-1 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">跳转</p>
-      <CueJumpOptions onSelect={selectJumpTarget} />
-      <div className="my-1 border-t border-zinc-50" />
-      <button
-        type="button"
-        onClick={() => { finishToolbarAction(); setShowExport(true); }}
-        className="w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-      >
-        导出
-      </button>
-      <ProductionOverflowSubmenuButton
-        menuId="settings"
-        label="设置"
-        expanded={openToolbarMenu === "settings"}
-        onToggle={(anchor) => {
-          settingsMenuPosition.anchorRef.current = anchor;
-          toggleToolbarMenu("settings");
-        }}
-      />
-    </>
-  ) : null;
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className={PRODUCTION_PAGE_SCROLL_ROOT_CLASS} onClick={handleContainerClick}>
 
       {/* ── Top bar ── */}
-      <ProductionTopMenu onClick={e => e.stopPropagation()} overflow={cueOverflow}>
+      <ProductionTopMenu progressive onClick={e => e.stopPropagation()}>
         <ProductionTopMenuContext label="Cue" side="script" />
-        <ProductionTopMenuDivider />
-        <div className="relative -ml-1 shrink-0">
+        <ProductionToolbarBlock id="cue-selector" priority={50}>
+        <div className="relative shrink-0">
           <button
             ref={activeMenuPosition.anchorRef}
+            title={activeCueList?.name}
             type="button"
             data-cue-toolbar-menu-trigger="active"
             aria-expanded={openToolbarMenu === "active"}
             onClick={() => toggleToolbarMenu("active")}
-            className={`flex ${cueTagsFolded ? "max-w-[118px]" : "max-w-40"} items-baseline gap-1 whitespace-nowrap rounded px-1.5 py-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+            className={`flex max-w-[148px] items-baseline gap-1 whitespace-nowrap rounded px-1.5 py-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
           >
-            {!cueTagsFolded && (
-              <span className="shrink-0 text-[10px] text-zinc-400">当前编辑</span>
-            )}
+            <span className="shrink-0 text-xs">显示 Cue</span>
             <span className="min-w-0 truncate text-sm">{activeCueList?.name ?? "—"}</span>
             <ChevronIcon size={12} className="shrink-0 self-center opacity-50" />
           </button>
@@ -677,14 +654,14 @@ export default function CuePage({
                     activeListId === list.id ? "font-medium text-zinc-800" : "text-zinc-600"
                   }`}
                 >
-                  <span className="min-w-0 truncate">{list.name}</span>
+                  <span className="min-w-0 whitespace-normal break-words">{list.name}</span>
                   <span className="flex shrink-0 items-center gap-2">
                     {!localEditableIds.has(list.id) && <span className="text-[10px] text-zinc-400">只读</span>}
                     {activeListId === list.id && <span className="text-[10px] text-zinc-400">✓</span>}
                   </span>
                 </button>
               ))}
-              {cueTagsFolded && (
+              {(
                 <>
                   <div className="my-1 border-t border-zinc-50" />
                   <p className="px-3 pb-0.5 pt-1 text-[10px] font-medium tracking-wide text-zinc-400 uppercase">显示</p>
@@ -707,7 +684,7 @@ export default function CuePage({
                         >
                           <span className="flex min-w-0 items-center gap-2">
                             <span className={`h-2 w-2 shrink-0 rounded-full ${color.bg}`} />
-                            <span className="truncate">{list.name}</span>
+                            <span className="min-w-0 whitespace-normal break-words">{list.name}</span>
                           </span>
                           <span
                             aria-hidden
@@ -730,162 +707,47 @@ export default function CuePage({
             </div>
           )}
         </div>
-        <span className={`${canEditActive ? "ml-[3px]" : "ml-0.5"} shrink-0 rounded bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-zinc-400`}>
-          {canEditActive ? "可编辑" : "只读"}
-        </span>
-
-        {/* List chips are the first controls folded when toolbar space runs out. */}
-        {!cueTagsFolded && (
-          <div className="flex min-w-0 flex-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-          <div data-production-toolbar-flex-content="true" className="ml-2 flex w-max shrink-0 flex-nowrap gap-1.5">
-            {cueLists.map((cl, i) => {
-              const c = colorFor(i);
-              const isActive = cl.id === activeListId;
-              const on = isActive || visibleListIds.has(cl.id);
-              const lp = presenceForList.get(cl.id) ?? [];
-              return (
-                <div key={cl.id} className="flex shrink-0 flex-col items-center gap-0.5">
-                  <button
-                    onClick={() => toggleListVisibility(cl.id)}
-                    disabled={isActive}
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-all ${
-                      on ? `${c.bg} text-white` : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200"
-                    } ${isActive ? "cursor-default" : ""}`}
-                  >
-                    {cl.name}
-                  </button>
-                  {lp.length > 0 && (
-                    <div className="flex -space-x-0.5" title={lp.map(p => p.userName).join("、")}>
-                      {lp.slice(0, 4).map(p => (
-                        <div key={p.clientId} style={{ backgroundColor: p.color }} className="h-2 w-2 rounded-full ring-1 ring-white" />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          </div>
-        )}
-
-        {!toolbarCompact && (
-          <div className={`${PRODUCTION_TOP_MENU_RIGHT_CLASS} ml-auto flex shrink-0 items-center gap-1`}>
-        {/* Desktop: list actions */}
-        <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-100" />
-        {!secondaryMenusFolded && canShareActive && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShareModalListId(activeListId)}
-              className={toolbarTriggerClass}
-            >
-              分享
-            </button>
-            <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-100" />
-          </>
-        )}
-        {secondaryMenusFolded ? (
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              data-cue-toolbar-menu-trigger="jump"
-              aria-expanded={openToolbarMenu === "jump"}
-              onClick={() => toggleToolbarMenu("jump")}
-              className={`${toolbarTriggerClass} ${openToolbarMenu === "jump" ? "bg-zinc-100 text-zinc-800" : ""}`}
-            >
-              跳转 <ChevronIcon size={12} className="opacity-50" />
-            </button>
-            {openToolbarMenu === "jump" && (
-              <div
-                data-cue-toolbar-menu-panel="jump"
-                className="absolute right-0 top-full z-40 mt-2.5 w-44 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-              >
-                <CueJumpOptions onSelect={selectJumpTarget} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex shrink-0 items-center gap-0.5">
-            <span className="mr-0.5 shrink-0 text-[10px] text-zinc-400">跳转至</span>
-            {CUE_JUMP_OPTIONS.map(({ target, label }) => (
-              <button
-                key={target}
-                type="button"
-                onClick={() => selectJumpTarget(target)}
-                className={`rounded px-1.5 py-1 text-sm transition-colors ${
-                  jumpTarget === target
-                    ? "bg-zinc-800 text-white"
-                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        {!secondaryMenusFolded && <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-100" />}
-        <button
-          type="button"
-          onClick={() => setShowExport(true)}
-          className={toolbarTriggerClass}
-        >
-          导出
-        </button>
-        {secondaryMenusFolded ? (
-          <button
-            ref={settingsMenuPosition.anchorRef}
-            type="button"
-            data-cue-toolbar-menu-trigger="settings"
-            aria-expanded={openToolbarMenu === "settings"}
-            onClick={() => toggleToolbarMenu("settings")}
-            className={`${toolbarTriggerClass} ${openToolbarMenu === "settings" ? "bg-zinc-100 text-zinc-800" : ""}`}
-          >
-            设置 <ChevronIcon size={12} className="opacity-50" />
-          </button>
-        ) : (
-          <Link href={`/production/${productionId}/cuelists`} className={toolbarTriggerClass}>
-            设置
-          </Link>
-        )}
-        {!cueTagsFolded && insertCueAvailable && (
-          <button
-            onClick={e => { e.stopPropagation(); insertCue(); }}
-            className="block shrink-0 rounded bg-zinc-800 px-3 py-1 text-xs text-white hover:bg-zinc-900"
-          >
-            插入 Cue
-          </button>
-        )}
-
-          </div>
-        )}
-        {secondaryMenusFolded && openToolbarMenu === "settings" && (
-          <div
-            data-cue-toolbar-menu-panel="settings"
-            data-production-overflow-menu-child={toolbarCompact ? "true" : undefined}
-            ref={settingsMenuPosition.menuRef}
-            style={settingsMenuPosition.style}
-            className="z-40 w-64 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-          >
-            {canShareActive && (
-              <button
-                type="button"
-                onClick={() => { finishToolbarAction(); setShareModalListId(activeListId); }}
-                className="flex w-full min-w-0 px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-              >
-                <span className="min-w-0 flex-1 truncate whitespace-nowrap">
-                  分享当前 Cue 表：{activeCueList?.name ?? "—"}
-                </span>
-              </button>
-            )}
-            <Link
-              href={`/production/${productionId}/cuelists`}
-              className="flex w-full items-center px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50"
-              onClick={finishToolbarAction}
-            >
-              Cue 表设置
-            </Link>
-          </div>
-        )}
+        </ProductionToolbarBlock>
+        <ProductionToolbarBlock id="mode" priority={40}>
+          <OverflowSafeSelect menuMinWidth={96} aria-label="Cue 页面模式" value={hasEditActive ? cueMode : "read"}
+            onChange={(event) => { setCueMode(event.target.value as "read" | "edit"); setSelection({ kind: "none" }); }}
+            className="h-8 min-w-[60px] rounded-lg border border-[var(--line)] bg-[var(--surface)] px-1.5 text-[11px] font-semibold">
+            <option value="read">只读</option>
+            <option value="edit" disabled={!hasEditActive}>编辑</option>
+          </OverflowSafeSelect>
+        </ProductionToolbarBlock>
+        <ProductionToolbarBlock id="jump" priority={30}>
+          <button ref={jumpMenuPosition.anchorRef} type="button" data-cue-toolbar-menu-trigger="jump"
+            aria-expanded={openToolbarMenu === "jump"} onClick={() => toggleToolbarMenu("jump")}
+            className={toolbarTriggerClass}>跳转 <ChevronIcon size={12} className="opacity-50" /></button>
+          {openToolbarMenu === "jump" && <div data-cue-toolbar-menu-panel="jump"
+            ref={jumpMenuPosition.menuRef} style={jumpMenuPosition.style}
+            className="z-40 min-w-[104px] w-max rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+            <CueJumpOptions onSelect={selectJumpTarget} />
+          </div>}
+        </ProductionToolbarBlock>
+        <ProductionToolbarBlock id="export" priority={20}>
+          <button type="button" onClick={() => setShowExport(true)} className={toolbarTriggerClass}>导出</button>
+        </ProductionToolbarBlock>
+        <ProductionToolbarBlock id="settings" priority={10}>
+          <button ref={settingsMenuPosition.anchorRef} type="button" data-cue-toolbar-menu-trigger="settings"
+            aria-expanded={openToolbarMenu === "settings"} onClick={() => toggleToolbarMenu("settings")}
+            className={toolbarTriggerClass}>设置 <ChevronIcon size={12} className="opacity-50" /></button>
+          {openToolbarMenu === "settings" && <div data-cue-toolbar-menu-panel="settings"
+            ref={settingsMenuPosition.menuRef} style={settingsMenuPosition.style}
+            className="z-40 w-64 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md">
+            {canShareActive && <button type="button" onClick={() => { finishToolbarAction(); setShareModalListId(activeListId); }}
+              className="flex w-full px-3 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-50">
+              分享当前 Cue 表：{activeCueList?.name ?? "—"}
+            </button>}
+            <Link href={`/production/${productionId}/cuelists`} onClick={finishToolbarAction}
+              className="flex px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50">Cue 表设置</Link>
+          </div>}
+        </ProductionToolbarBlock>
+        {insertCueAvailable && <ProductionToolbarBlock id="insert" priority={5}>
+          <button onClick={event => { event.stopPropagation(); insertCue(); }}
+            className="hidden md:block h-8 rounded bg-zinc-800 px-2 text-xs text-white hover:bg-zinc-900">插入 Cue</button>
+        </ProductionToolbarBlock>}
       </ProductionTopMenu>
 
       {(saveStates.size > 0 || readFailed) && (
@@ -1304,8 +1166,8 @@ export default function CuePage({
       })()}
 
       {/* ── Folded/mobile: floating insert Cue button (when pending selection) ── */}
-      {cueTagsFolded && insertCueAvailable && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+      {insertCueAvailable && (
+        <div className="md:hidden fixed bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
           <button
             onClick={e => { e.stopPropagation(); insertCue(); }}
             className="pointer-events-auto rounded-full bg-zinc-800 px-6 py-3 text-sm font-medium text-white shadow-2xl hover:bg-zinc-900 flex items-center gap-2"

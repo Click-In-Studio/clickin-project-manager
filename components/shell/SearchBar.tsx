@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react
 import { createPortal, flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ProductionSearchResults } from "@/lib/search-db";
-import { PRODUCTION_TOOLBAR_STAGE, PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID, useProductionToolbar } from "./ProductionTopMenu";
+import { PRODUCTION_TOOLBAR_STAGE, PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID, useProductionToolbar, useAnchoredMenu } from "./ProductionTopMenu";
 
 // ─── Event type labels ────────────────────────────────────────────────────────
 const EVENT_TYPE_LABEL: Record<string, string> = {
@@ -72,13 +72,16 @@ function ResultRow({
 
 interface SearchBarProps {
   productionId: string | null;
+  keepInline?: boolean;
   onOpenChange?: (open: boolean, stored: boolean) => void;
 }
 
-export default function SearchBar({ productionId, onOpenChange }: SearchBarProps) {
+export default function SearchBar({ productionId, onOpenChange, keepInline = false }: SearchBarProps) {
   const { stage: toolbarStage, hasStoredControls } = useProductionToolbar();
+  const searchStored = hasStoredControls && !keepInline;
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const floatingSearch = useAnchoredMenu<HTMLButtonElement>(keepInline && isOpen, "bottom");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductionSearchResults | null>(null);
   const [loading, setLoading] = useState(false);
@@ -105,7 +108,7 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
     setQuery("");
     setResults(null);
     if (!onOpenChange) return;
-    if (hasStoredControls) {
+    if (searchStored) {
       onOpenChange(false, true);
       return;
     }
@@ -113,13 +116,13 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
       transitionFrameRef.current = null;
       onOpenChange(false, false);
     });
-  }, [onOpenChange, hasStoredControls]);
+  }, [onOpenChange, searchStored]);
 
   const handleOpen = () => {
     if (transitionFrameRef.current !== null) {
       cancelAnimationFrame(transitionFrameRef.current);
     }
-    if (!onOpenChange || hasStoredControls) {
+    if (!onOpenChange || searchStored || keepInline) {
       if (onOpenChange) onOpenChange(true, true);
       setIsOpen(true);
       transitionFrameRef.current = requestAnimationFrame(() => {
@@ -143,13 +146,14 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)
+        && !floatingSearch.menuRef.current?.contains(e.target as Node)) {
         handleClose();
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [isOpen, handleClose]);
+  }, [isOpen, handleClose, floatingSearch.menuRef]);
 
   // Debounced search
   useEffect(() => {
@@ -193,28 +197,11 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
 
   if (!productionId) return null;
 
-  const searchControl = (
-    <div ref={containerRef} className="relative">
-      {/* ── Trigger button (idle) ── */}
-      {!isOpen && (
-        <button
-          type="button"
-          onClick={handleOpen}
-          aria-label="搜索"
-          className={hasStoredControls
-            ? "flex w-full items-center gap-2 border-b border-[var(--line)] px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
-            : "flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 text-[11px] text-[#667676] transition-colors hover:border-[#182a2a] hover:text-[#182a2a]"
-          }
-        >
-          <span className="text-[14px] leading-none">⌕</span>
-          {(hasStoredControls || toolbarStage < PRODUCTION_TOOLBAR_STAGE.searchCollapsed) && <span>搜索</span>}
-        </button>
-      )}
-
+  const searchPanel = <>
       {/* ── Active input ── */}
       {isOpen && (
-        <div className={hasStoredControls ? "relative flex items-center border-b border-[var(--line)] p-2" : "relative flex items-center"}>
-          <span className={`${hasStoredControls ? "left-4" : "left-2.5"} absolute text-[14px] text-[#667676] pointer-events-none leading-none`}>⌕</span>
+        <div className={searchStored ? "relative flex items-center border-b border-[var(--line)] p-2" : "relative flex items-center"}>
+          <span className={`${searchStored ? "left-4" : "left-2.5"} absolute text-[14px] text-[#667676] pointer-events-none leading-none`}>⌕</span>
           <input
             ref={inputRef}
             type="search"
@@ -222,7 +209,7 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && handleClose()}
             placeholder="搜索日程、人员、技术需求…"
-            className={`${hasStoredControls ? "w-full" : "w-[220px] md:w-[260px]"} h-9 pl-8 pr-3 border border-[#2f6670] rounded-lg bg-[var(--surface)] text-[11px] text-[#182a2a] outline-none shadow-[0_0_0_3px_rgba(47,102,112,0.12)] placeholder:text-[#667676]`}
+            className={`${searchStored || keepInline ? "w-full" : "w-[220px] md:w-[260px]"} h-9 pl-8 pr-3 border border-[#2f6670] rounded-lg bg-[var(--surface)] text-[11px] text-[#182a2a] outline-none shadow-[0_0_0_3px_rgba(47,102,112,0.12)] placeholder:text-[#667676]`}
           />
           {loading && (
             <span className="absolute right-2.5 text-[10px] text-[#667676] animate-pulse">…</span>
@@ -232,7 +219,7 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
 
       {/* ── Results dropdown ── */}
       {showDropdown && (
-        <div className={hasStoredControls
+        <div className={searchStored || keepInline
           ? "max-h-[50vh] w-full overflow-y-auto border-b border-[var(--line)] bg-[var(--surface)]"
           : "absolute left-0 top-full z-50 mt-2 max-h-[70vh] w-[320px] overflow-y-auto rounded-[13px] border border-[var(--line)] bg-[var(--surface)] shadow-[0_18px_55px_rgba(24,42,42,.18)]"
         }>
@@ -371,10 +358,35 @@ export default function SearchBar({ productionId, onOpenChange }: SearchBarProps
           )}
         </div>
       )}
+  </>;
+
+  const searchControl = (
+    <div ref={containerRef} className="relative">
+      {/* ── Trigger button (idle) ── */}
+      {(!isOpen || keepInline) && (
+        <button
+          ref={floatingSearch.anchorRef}
+          type="button"
+          onClick={isOpen ? handleClose : handleOpen}
+          aria-label="搜索"
+          className={searchStored
+            ? "flex w-full items-center gap-2 border-b border-[var(--line)] px-3 py-2 text-left text-sm text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            : "flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 text-[11px] text-[#667676] transition-colors hover:border-[#182a2a] hover:text-[#182a2a]"
+          }
+        >
+          <span className="text-[14px] leading-none">⌕</span>
+          {(searchStored || toolbarStage < PRODUCTION_TOOLBAR_STAGE.searchCollapsed) && <span>搜索</span>}
+        </button>
+      )}
+
+      {keepInline && isOpen
+        ? createPortal(<div ref={floatingSearch.menuRef} style={floatingSearch.style}
+            className="z-[60] w-[300px] rounded-xl border border-[var(--line)] bg-[var(--surface)] p-2 shadow-md">{searchPanel}</div>, document.body)
+        : searchPanel}
     </div>
   );
 
-  return hasStoredControls && overflowTarget
+  return searchStored && overflowTarget
     ? createPortal(searchControl, overflowTarget)
     : searchControl;
 }

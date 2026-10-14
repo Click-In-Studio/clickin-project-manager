@@ -734,46 +734,39 @@ span[data-stage-inline] {
   display: none;
 }
 
-/* 折叠槽只挂载一次：桌面仍定位到“更多”，手机占据主栏下方的真实空间。 */
-@media (max-width: 767px) {
-  .production-secondary-toolbar[data-secondary-toolbar-open="true"] {
-    position: relative !important;
-    left: auto !important;
-    top: auto !important;
-    visibility: visible !important;
-    width: 100%;
-    max-width: none !important;
-    max-height: 38vh !important;
-    overflow-y: auto !important;
-    flex-shrink: 0;
-    border-radius: 0;
-    border-width: 0 0 1px;
-    padding: 6px;
-    box-shadow: none;
-  }
-
-  .production-secondary-toolbar #production-page-toolbar-overflow-slot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .production-secondary-toolbar #production-page-toolbar-overflow-slot > button {
-    width: auto;
-    max-width: 100%;
-    border-radius: 6px;
-  }
-
-  .production-secondary-toolbar #production-page-toolbar-overflow-slot > p {
-    width: 100%;
-  }
-
-  .production-secondary-toolbar #production-page-toolbar-overflow-slot > div {
-    min-width: 0;
-    max-width: 100%;
-  }
+/* 所有宽度共用占据布局空间的第二栏；收起时保留尺寸用于测量。 */
+.production-toolbar-block {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: max-content;
+  margin-right: 4px;
+  min-height: 32px;
+}
+.production-secondary-toolbar {
+  position: relative;
+  z-index: 40;
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.production-secondary-toolbar-closed {
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+}
+.production-secondary-toolbar #production-page-toolbar-overflow-slot {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+}
+.production-secondary-toolbar #production-page-toolbar-search-overflow-slot:empty {
+  display: none;
 }
 
 /* 构作视图切换优先占位，工作区标题在最窄窗口截断。 */
@@ -1239,4 +1232,12 @@ span[data-stage-inline] {
   .agent-composer-voice.is-recording { background: #fef2f2; color: var(--danger); animation: pulse 1.5s ease-in-out infinite; }
   .agent-composer-voice.is-cancel { background: var(--danger); color: white; }
   .agent-attachment-limits { margin: 6px 10px; color: var(--muted); font-size: 10px; }
+}
+
+[data-toolbar-progressive] .production-top-menu-right {
+  margin-left: 0;
+}
+
+@media (max-width: 1023px) {
+  input[data-script-character-input] { font-size: 14px !important; }
 }

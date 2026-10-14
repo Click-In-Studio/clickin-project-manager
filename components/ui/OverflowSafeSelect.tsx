@@ -29,6 +29,7 @@ type Props = NativeProps & {
   searchableAfter?: number;
   /** 浮层内容的安全高度上限；实际高度还会受视口剩余空间限制。 */
   menuMaxHeight?: number;
+  menuMinWidth?: number;
   /** 仅为有特殊排版需求的调用方附加浮层样式，不改变共享默认外观。 */
   menuClassName?: string;
   /** 仅为有特殊排版需求的调用方附加选项样式，不改变共享默认外观。 */
@@ -100,6 +101,7 @@ export default function OverflowSafeSelect({
   style,
   searchableAfter = 8,
   menuMaxHeight = DEFAULT_MAX_HEIGHT,
+  menuMinWidth = 220,
   menuClassName,
   optionClassName,
   autoFocus,
@@ -147,7 +149,7 @@ export default function OverflowSafeSelect({
     const openUp = availableBelow < Math.min(menuMaxHeight, 180) && availableAbove > availableBelow;
     const available = Math.max(96, openUp ? availableAbove : availableBelow);
     const width = Math.min(
-      Math.max(rect.width, 220),
+      Math.max(rect.width, menuMinWidth),
       window.innerWidth - VIEWPORT_GUTTER * 2,
     );
     const left = Math.min(
@@ -162,7 +164,7 @@ export default function OverflowSafeSelect({
         ? { bottom: window.innerHeight - rect.top + MENU_GAP }
         : { top: rect.bottom + MENU_GAP }),
     });
-  }, [menuMaxHeight]);
+  }, [menuMaxHeight, menuMinWidth]);
 
   const close = useCallback((restoreFocus = false) => {
     setOpen(false);

@@ -346,9 +346,9 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/script/ScriptEditor.tsx": 5696, // #507 共同状态与生命周期收敛
   "components/ops/EventDetailClient.tsx": 421,
-  "components/ops/CuePage.tsx": 1451, // #655 失效的 Cue 面板跨表列出（+2）：表名标签与表名索引
+  "components/ops/CuePage.tsx": 1292, // 逐块工具栏删除旧整组折叠与重复菜单
   "components/ops/PlanningClient.tsx": 98,
-  "components/shell/AppShell.tsx": 861, // 移动端按当前路由显示页面名称、图标与面板展开状态（+12）
+  "components/shell/AppShell.tsx": 863, // 逐块工具栏：更多箭头、第二栏可达性与搜索占位（+2）
 };
 
 const FAMILY_FILE_CEILING = { component: 800, module: 400 } as const;
