@@ -15,6 +15,7 @@ import BoundaryActionMenu from "@/components/script/BoundaryActionMenu";
 import MarkerDeleteDialog, { type MarkerDeleteDialogState } from "@/components/script/MarkerDeleteDialog";
 import type { MarkerDeleteOperation, MarkerProjection } from "@/lib/script/script-marker-domain";
 import ChevronIcon from "@/components/ui/ChevronIcon";
+import styles from "./scene-details.module.css";
 
 type MetaFields = Pick<SceneDetail, "synopsis" | "actionLine" | "music" | "stageNotes" | "expectedDuration">;
 
@@ -62,7 +63,7 @@ function MetaField({
   };
 
   return (
-    <div className="space-y-1">
+    <div className="min-w-0 space-y-1">
       <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">{label}</label>
       {canEdit ? (
         multiline ? (
@@ -71,8 +72,8 @@ function MetaField({
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             disabled={saving}
-            rows={2}
-            className="h-10 w-full resize-y rounded border border-zinc-200 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-zinc-400 disabled:opacity-50 placeholder:text-zinc-300 sm:h-auto"
+            rows={3}
+            className="min-h-[4.5rem] w-full resize-y overflow-y-auto rounded border border-zinc-200 px-2 py-1.5 text-xs leading-relaxed outline-none focus:border-zinc-400 disabled:opacity-50 placeholder:text-zinc-300"
             placeholder="—"
           />
         ) : (
@@ -87,7 +88,7 @@ function MetaField({
           />
         )
       ) : (
-        <p className="text-xs text-zinc-600 whitespace-pre-wrap min-h-[1.25rem]">
+        <p className="text-xs leading-relaxed text-zinc-600 whitespace-pre-wrap wrap-anywhere min-h-[1.25rem]">
           {externalValue || <span className="text-zinc-300 italic">—</span>}
         </p>
       )}
@@ -309,8 +310,8 @@ function SceneEditRow({
       {expanded && (
         <tr className={`border-b border-zinc-100${indent ? " bg-zinc-50/40" : " bg-zinc-50/60"}`}>
           <td colSpan={4} className={`pb-4 pt-2${indent ? " pl-8 pr-4" : " px-4"}`}>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <div className="space-y-1">
+            <div className={`${styles.details} grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2`}>
+              <div className="min-w-0 space-y-1 sm:col-span-2">
                 <label className="text-xs font-semibold tracking-[0.08em] text-zinc-600 uppercase">预期时长</label>
                 {chapterDurationDisplay ? (
                   <p className="min-h-8 rounded border border-transparent px-2 py-1.5 text-xs text-zinc-600">
@@ -320,6 +321,7 @@ function SceneEditRow({
                   </p>
                 ) : (
                   <DurationInput
+                    className={styles.duration}
                     value={parseDuration(scene.expectedDuration)}
                     canEdit={canEdit && fieldPerms.expectedDuration}
                     onSave={async (seconds) => {
@@ -330,7 +332,6 @@ function SceneEditRow({
                   />
                 )}
               </div>
-              <div />
               <MetaField
                 label="简介"
                 value={scene.synopsis}

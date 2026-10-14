@@ -155,16 +155,16 @@ describe("构作列表拖动排序的落点", () => {
     expect(JSON.parse(String(putCalls()[0][1]?.body))).toMatchObject({ markerId: "c1", beforeMarkerId: null });
   });
 
-  it("窄屏元数据输入初始约一行、可纵向扩展，失焦仍保存", async () => {
+  it("元数据输入初始三行、可滚动和纵向扩展，失焦仍保存", async () => {
     await act(async () => {
       row("第一章").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const synopsis = container.querySelector<HTMLTextAreaElement>("textarea");
     expect(synopsis).not.toBeNull();
-    expect(synopsis?.rows).toBe(2);
-    expect(synopsis?.className).toContain("h-10");
+    expect(synopsis?.rows).toBe(3);
+    expect(synopsis?.className).toContain("min-h-[4.5rem]");
     expect(synopsis?.className).toContain("resize-y");
-    expect(synopsis?.className).toContain("sm:h-auto");
+    expect(synopsis?.className).toContain("overflow-y-auto");
 
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(synopsis, "新的场次简介");
