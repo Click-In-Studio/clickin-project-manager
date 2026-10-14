@@ -85,7 +85,7 @@ export default function Dramaturgy({
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/scene-table-views`);
-        const data = await res.json();
+        const data = await res.json().catch(() => { throw new Error("读取视图失败，请重试"); });
         if (!res.ok) throw new Error(data.error || "读取视图失败，请重试");
         setViewLoadError(null);
         if (data.views && data.views.length > 0) {
