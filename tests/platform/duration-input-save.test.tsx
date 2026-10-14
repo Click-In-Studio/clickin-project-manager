@@ -60,6 +60,20 @@ describe("时长输入的外部点击保存", () => {
     expect(container.querySelector("input")).toBeNull();
   });
 
+  it("同一批次连续外点和 Enter 只提交一次", async () => {
+    let finish!: () => void;
+    const save = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    await render(save);
+    await edit("90秒");
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      container.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(save).toHaveBeenCalledExactlyOnceWith(90);
+    await act(async () => { finish(); });
+  });
+
   it("编辑能力关闭后，旧监听器不再保存", async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     await render(save);

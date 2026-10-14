@@ -40,6 +40,7 @@ export default function DurationInput({
   const [isEditing, setIsEditing] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -71,7 +72,7 @@ export default function DurationInput({
 
   // 提交保存
   const commit = useCallback(async () => {
-    if (!canEdit || !isEditing || saving) return;
+    if (!canEdit || !isEditing || savingRef.current) return;
 
     const trimmed = textInput.trim();
     let finalValue: number | null = null;
@@ -95,6 +96,8 @@ export default function DurationInput({
       return;
     }
 
+    // 同步锁覆盖 React 尚未刷新保存状态时的连续提交。
+    savingRef.current = true;
     setSaving(true);
     setParseError(null);
     try {
@@ -104,9 +107,10 @@ export default function DurationInput({
       console.error("保存时长失败:", err);
       setParseError("保存时长失败，请重试");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
-  }, [canEdit, isEditing, onSave, saving, textInput, value]);
+  }, [canEdit, isEditing, onSave, textInput, value]);
 
   // 点击外部关闭编辑模式
   useEffect(() => {
