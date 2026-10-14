@@ -2,6 +2,8 @@ diff --git a/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs b/node_modules/@
 index 715f2f9..c5b676a 100644
 --- a/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs
 +++ b/node_modules/@openclaw/ai/dist/google-D6sIQ1bL.mjs
-@@ -37,0 +38,2 @@ function createClient(model, apiKey, optionsHeaders) {
+@@ -37 +37,3 @@ function createClient(model, apiKey, optionsHeaders) {
+-	const httpOptions = {};
++	const httpOptions = {};
 +	const fetcher = getAiTransportHost().buildModelFetch(model);
 +	if (fetcher) httpOptions.fetch = fetcher;
