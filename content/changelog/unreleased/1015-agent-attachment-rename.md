@@ -1,5 +1,5 @@
 ---
-kind: added
+kind: new
 title: AI 可以为对话附件改名
 page: ai/assistant/chat
 pr: 1015
