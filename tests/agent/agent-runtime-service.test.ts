@@ -31,16 +31,16 @@ const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 1
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
 type Step = (
-  { text: string; thinking?: string; wait?: Promise<void> }
+  { text: string; thinking?: string; wait?: Promise<void>; stopReason?: "stop" | "length" }
   | { calls: ToolCall[] }
   | { hang: true }
   | { error: string }
-) & { before?: () => void | Promise<void> };
+) & { before?: () => void | Promise<void>; usage?: AssistantMessage["usage"] };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
-  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
+  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string; maxTokens?: number }> = [];
   const streamFn: StreamFn = (_model, context, options) => {
-    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name), reasoning: options?.reasoning });
+    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name), reasoning: options?.reasoning, maxTokens: options?.maxTokens });
     const next = script.shift();
     if (!next) throw new Error("script exhausted");
     const stream = createAssistantMessageEventStream();
@@ -59,8 +59,9 @@ function scripted(script: Step[]) {
       }
       if ("text" in next && next.wait) await next.wait;
       const final: AssistantMessage = "text" in next
-        ? { ...base(), api: _model.api, provider: _model.provider, model: _model.id, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
+        ? { ...base(), api: _model.api, provider: _model.provider, model: _model.id, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: next.stopReason ?? "stop" }
         : { ...base(), api: _model.api, provider: _model.provider, model: _model.id, content: next.calls, stopReason: "toolUse" };
+      final.usage = next.usage ?? USAGE;
       stream.push({ type: "start", partial: { ...final, content: [] } });
       if ("text" in next) {
         const textIndex = next.thinking ? 1 : 0;
@@ -76,7 +77,7 @@ function scripted(script: Step[]) {
         stream.push({ type: "text_start", contentIndex: textIndex, partial: { ...final, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: "" }] } });
         for (const ch of next.text) stream.push({ type: "text_delta", contentIndex: textIndex, delta: ch });
       }
-      stream.push({ type: "done", reason: final.stopReason as "stop" | "toolUse", message: final });
+      stream.push({ type: "done", reason: final.stopReason as "stop" | "length" | "toolUse", message: final });
     });
     return stream;
   };
@@ -163,6 +164,71 @@ describe("agent-runtime service", () => {
     }
   }
 
+  it("长上下文的正常工具链超过旧成本阈值仍完成，不因模型返回调用而中途 abort", async () => {
+    const { userId } = await upsertFeishuUser(`test-budget-${shortId()}`, "长上下文预算测试", null, false);
+    const { prodId } = await makeProduction(userId);
+    await setProductionTier(prodId,"pro");
+    const key = createNewSessionKey(userId,prodId); sessions.push(key);
+    try {
+    await PgSessionStorage.create({ id: key,userId,productionId: prodId });
+    await getPool().query(`UPDATE agent_session SET model_selection=jsonb_set(model_selection,'{modelKey}','"inspiration"') WHERE id=$1`, [key]);
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const paidUsage = (input: number, output: number, cacheRead: number, usd: number) => ({ input,output,cacheRead,cacheWrite: 0,totalTokens: input+output+cacheRead,cost: { input: usd,output: 0,cacheRead: 0,cacheWrite: 0,total: usd } });
+    const fake = scripted([
+      { calls: [{ type: "toolCall",id: "cold_read",name: exposedName("my.productions"),arguments: {} }],usage: paidUsage(265953,163,0,0.2000775) },
+      { calls: [{ type: "toolCall",id: "cached_read",name: exposedName("my.productions"),arguments: {} }],usage: paidUsage(2428,267,263834,0.0226083) },
+      { text: "两次读取均已完成",usage: paidUsage(200,30,264000,0.0200625) },
+    ]);
+    runtimeOverrides.streamFn = fake.streamFn;
+    const { runId } = await startRun({ sessionId: key,userId,message: `核对我的项目。${"历史材料".repeat(66500)}` });
+    await waitForIdle(key);
+    expect(fake.seen).toHaveLength(3);
+    const lines = (await readEventsSince(key,0)).map(row => row.line);
+    expect(lines.filter(line => line.type === "tool-end")).toHaveLength(2);
+    expect(lines.some(line => line.type === "aborted")).toBe(false);
+    expect(lines.at(-1)).toEqual({ type: "final",text: "两次读取均已完成" });
+    const run = (await getPool().query("SELECT status,task_credits,task_budget_credits FROM agent_run WHERE id=$1", [runId])).rows[0];
+    expect(run.status).toBe("completed");
+    expect(Number(run.task_credits)).toBeGreaterThan(500000);
+    expect(Number(run.task_budget_credits)).toBeGreaterThan(Number(run.task_credits));
+    } finally { await cleanupProduction(prodId).catch(() => {}); }
+  });
+
+  it("费用已用尽时完成当前工具，拒绝下一模型请求并保留明确失败原因", async () => {
+    const { TASK_COST_LIMIT_CREDITS } = await import("@/lib/agent/runtime/cost-budget");
+    const key = newKey();
+    const fake = scripted([
+      { calls: [{ type: "toolCall",id: "last_allowed_tool",name: exposedName("my.productions"),arguments: {} }],before: async () => {
+        await getPool().query("UPDATE agent_run SET task_credits=$2 WHERE session_id=$1 AND status='running'", [key,TASK_COST_LIMIT_CREDITS]);
+      } },
+      { text: "不应请求" },
+    ]);
+    runtimeOverrides.streamFn = fake.streamFn;
+    const { runId } = await startRun({ sessionId: key,userId,message: "核对我的项目" });
+    await waitForIdle(key);
+    expect(fake.seen).toHaveLength(1);
+    const lines = (await readEventsSince(key,0)).map(row => row.line);
+    expect(lines.filter(line => line.type === "tool-end")).toHaveLength(1);
+    expect(lines.some(line => line.type === "aborted")).toBe(false);
+    const row = (await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0];
+    expect(row.status).toBe("failed"); expect(row.error).toContain("task-budget-exceeded");
+  });
+
+  it("四次相同工具结果后在下一模型请求前停止，已完成调用均保留", async () => {
+    const fake = scripted([...Array.from({ length: 4 }, (_,index) => ({ calls: [{ type: "toolCall" as const,id: `loop_${index}`,name: exposedName("my.productions"),arguments: {} }] })), { text: "不应调用" }]);
+    runtimeOverrides.streamFn = fake.streamFn;
+    const key = newKey();
+    const { runId } = await startRun({ sessionId: key,userId,message: "核对我的项目" });
+    await waitForIdle(key);
+    expect(fake.seen).toHaveLength(4);
+    const lines = (await readEventsSince(key,0)).map(row => row.line);
+    expect(lines.filter(line => line.type === "tool-end")).toHaveLength(4);
+    expect(lines.some(line => line.type === "aborted")).toBe(false);
+    const run = (await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0];
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("tool-loop-detected");
+  });
+
   it.each([false, true])("模型错误消息结束（已有工具调用=%s）记为失败，刷新历史保留原因", async (withTool) => {
     const reason = "模型服务当前不可用";
     const script: Step[] = withTool
@@ -177,6 +243,27 @@ describe("agent-runtime service", () => {
     expect((await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0])
       .toEqual({ status: "failed", error: reason });
     expect((await getHistory(key)).at(-1)).toEqual({ role: "notice", content: reason });
+  });
+
+  it.each(["", "已生成的部分正文"])("长度截断保留正文与思考，终态和重载均报告未完成：%s", async (text) => {
+    const { streamFn, seen } = scripted([{ text, thinking: "正在分析材料", stopReason: "length" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    const { runId } = await startRun({ sessionId: key, userId, message: "分析这份材料" });
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].maxTokens).toBe(256_000);
+    expect(lines.at(-1)).toMatchObject({ type: "error", error: expect.stringContaining("尚未完成") });
+    expect(lines.some(line => line.type === "final")).toBe(false);
+    const row = (await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0];
+    expect(row).toEqual({ status: "failed", error: expect.stringContaining("尚未完成") });
+    const history = await getHistory(key);
+    expect(history).toContainEqual({ role: "thinking", content: "正在分析材料" });
+    if (text) expect(history).toContainEqual({ role: "assistant", content: text });
+    expect(history.at(-1)).toEqual({ role: "notice", content: row.error });
+    const bubbles = lines.reduce<Bubble[]>((all, line) => applyStreamLine(all, line), []);
+    expect(bubbles.at(-1)).toEqual({ kind: "notice", text: row.error });
   });
 
   it("纯文本一轮：会话行自动建立并带关联；事件落表（delta 合并、final 收尾）→ 现有 reducer；历史投影；记账", async () => {

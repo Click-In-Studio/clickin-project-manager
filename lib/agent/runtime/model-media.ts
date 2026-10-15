@@ -15,7 +15,7 @@ import { parsePdf } from "@/lib/doc-extract/pdf";
 import { presignedGet } from "@/lib/r2";
 import type { MediaContent, Model } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import { nativeCapability, mediaBudget } from "./media-budget";
-import { COMPACTION_TOKEN_BUDGET, REQUEST_OUTPUT_TOKENS } from "./config";
+import { normalOutputTokens } from "./config";
 
 export interface MediaResource {
   id: string;
@@ -164,8 +164,8 @@ export async function prepareNativeMedia(attachment: MediaResource, input: Nativ
         : { kind: "attachment", sha256: createHash("sha256").update(data).digest("hex") },
       budget,
     };
-    const window = Math.min(COMPACTION_TOKEN_BUDGET, input.model.contextTokens ?? input.model.contextWindow);
-    if (budget.estimatedTokens + Math.min(REQUEST_OUTPUT_TOKENS, input.model.maxTokens) > window) return null;
+    const window = Math.min(input.model.contextWindow, input.model.contextTokens ?? input.model.contextWindow);
+    if (budget.estimatedTokens + normalOutputTokens(input.model) > window) return null;
     return result;
   } catch (error) {
     input.signal.throwIfAborted();

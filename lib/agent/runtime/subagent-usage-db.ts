@@ -1,5 +1,5 @@
 import { getPool } from "@/lib/pg";
-import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
+import { creditsFromUsd } from "@/lib/account/plan";
 import {
   getQuotaStatus,
   paidFromOf,
@@ -11,7 +11,7 @@ import { usdOfUsage } from "./billing";
 import type { SubagentJob } from "./subagent-db";
 import type { AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
 
-/** 同一条持久消息只结算一次；预算、用量与额外额度在同一事务落地。 */
+/** 同一条持久消息只结算一次；用量与额外额度在同一事务落地；任务预算已在请求边界结算。 */
 export async function recordChildUsage(
   job: SubagentJob,
   entryId: string,
@@ -23,7 +23,7 @@ export async function recordChildUsage(
     compaction?: boolean;
     modelId?: string;
   },
-): Promise<boolean> {
+): Promise<void> {
   const source = await getPool().query<{
     paid_from: import("@/lib/agent/ai-quota").PaidFrom | null;
   }>("SELECT paid_from FROM agent_run WHERE id=$1", [job.budget_run_id]);
@@ -76,15 +76,7 @@ export async function recordChildUsage(
           [job.id, usage.input, usage.output, usage.cacheRead],
         );
     }
-    const budget = await client.query<{ task_credits: string }>(
-      "UPDATE agent_run SET task_credits=task_credits+$2 WHERE id=$1 RETURNING task_credits",
-      [job.budget_run_id, inserted.rowCount ? credits : 0],
-    );
     await client.query("COMMIT");
-    return (
-      !!budget.rowCount &&
-      Number(budget.rows[0].task_credits) <= RUN_CREDIT_HARD_CAP
-    );
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -94,7 +86,7 @@ export async function recordChildUsage(
 }
 
 /** 恢复时从原始消息补结算；不依赖已被压缩的模型上下文。 */
-export async function checkpointChildUsage(job: SubagentJob): Promise<boolean> {
+export async function checkpointChildUsage(job: SubagentJob): Promise<void> {
   const entries = await getPool().query<{
     entry_id: string;
     message: AssistantMessage;
@@ -105,27 +97,16 @@ export async function checkpointChildUsage(job: SubagentJob): Promise<boolean> {
     AND e.payload->'message'->>'role'='assistant' AND NOT EXISTS(SELECT 1 FROM agent_subagent_usage u WHERE u.id=e.entry_id) ORDER BY e.seq`,
     [job.session_id, `ain_child_${job.id}`],
   );
-  const budget = await getPool().query<{ task_credits: string }>(
-    "SELECT task_credits FROM agent_run WHERE id=$1",
-    [job.budget_run_id],
-  );
-  let allowed =
-    !!budget.rowCount &&
-    Number(budget.rows[0].task_credits) <= RUN_CREDIT_HARD_CAP;
   for (const { entry_id, message } of entries.rows) {
     if (!message.usage) continue;
     const u = message.usage;
-    if (
-      !(await recordChildUsage(job, entry_id, {
-        input: u.input,
-        output: u.output,
-        cacheRead: u.cacheRead,
-        usd: usdOfUsage(u, resolveModel(job.model_selection.modelKey)),
-      }))
-    )
-      allowed = false;
+    await recordChildUsage(job, entry_id, {
+      input: u.input,
+      output: u.output,
+      cacheRead: u.cacheRead,
+      usd: usdOfUsage(u, resolveModel(job.model_selection.modelKey)),
+    });
   }
-  return allowed;
 }
 
 export async function recoverChildUsage(): Promise<void> {

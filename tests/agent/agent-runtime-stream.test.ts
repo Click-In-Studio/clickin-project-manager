@@ -69,6 +69,22 @@ async function collect(streamFn: StreamFn, tools: RuntimeTool[], prompt: string)
 }
 
 describe("判据④：harness 事件 → StreamLine → 现有 reducer", () => {
+  it.each(["", "已生成的部分正文"])("长度截断的实时气泡保留思考和正文，明确显示未完成：%s", (text) => {
+    const message: AssistantMessage = { ...base(), content: [
+      { type: "thinking", thinking: "正在分析" }, ...(text ? [{ type: "text" as const, text }] : []),
+    ], stopReason: "length" };
+    const lines: StreamLine[] = [];
+    const adapt = createStreamLineAdapter(line => lines.push(line));
+    adapt({ type: "message_end", message });
+    adapt({ type: "agent_end", messages: [message] });
+    expect(lines.at(-1)).toMatchObject({ type: "error", error: expect.stringContaining("尚未完成") });
+    expect(lines.some(line => line.type === "final")).toBe(false);
+    const bubbles = lines.reduce<Bubble[]>((all, line) => applyStreamLine(all, line), []);
+    expect(bubbles).toContainEqual({ kind: "thinking", text: "正在分析" });
+    if (text) expect(bubbles).toContainEqual({ kind: "assistant", text });
+    expect(bubbles.at(-1)).toMatchObject({ kind: "notice", text: expect.stringContaining("尚未完成") });
+  });
+
   it("纯文本回复：delta 为累计值、逐字增长、final 收尾成一个 assistant 气泡", async () => {
     const { lines, bubbles } = await collect(scriptedStream([{ text: "你好世界" }]), [], "hi");
     const deltas = lines.filter((l): l is Extract<StreamLine, { type: "delta" }> => l.type === "delta").map((l) => l.text);

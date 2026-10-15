@@ -13,7 +13,7 @@
 //
 // 3. **判定一次，run 内不打断**。轮内超限打断＝把一次已经花掉的模型调用扔掉，
 //    对用户是最差结局。代价是最后一次会扣穿（负 credit），透支上限由
-//    RUN_CREDIT_HARD_CAP 封顶——那道闸防的是工具死循环，不是超支。
+//    请求前的共享任务预算封顶；工具循环另按是否取得新结果检测。
 
 import type { PoolClient } from "pg";
 import { getPool } from "@/lib/pg";

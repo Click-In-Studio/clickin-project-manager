@@ -12,8 +12,6 @@ import {
 import { createMediaRuntime } from "./media-provider";
 import { modelProxyFetch } from "./model-proxy";
 
-export const COMPACTION_TOKEN_BUDGET = 128_000;
-export const REQUEST_OUTPUT_TOKENS = 8_192;
 const image: NativeMediaCapability = {
   kind: "image",
   mimeTypes: ["image/png", "image/jpeg", "image/webp", "image/gif"],
@@ -107,7 +105,6 @@ const entries: Entry[] = [
       input: ["text", "image"],
       nativeMedia: [image],
       contextWindow: 1_000_000,
-      contextTokens: COMPACTION_TOKEN_BUDGET,
       maxTokens: 384_000,
       cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
       compat: { maxTokensField: "max_tokens" },
@@ -133,7 +130,6 @@ const entries: Entry[] = [
       reasoning: true,
       input: ["text"],
       contextWindow: 1_000_000,
-      contextTokens: COMPACTION_TOKEN_BUDGET,
       maxTokens: 384_000,
       cost: { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
       compat: { maxTokensField: "max_tokens" },
@@ -162,7 +158,6 @@ const entries: Entry[] = [
       input: ["text", "image", "audio", "video"],
       nativeMedia: [image, omniAudio, omniVideo],
       contextWindow: 1_000_000,
-      contextTokens: COMPACTION_TOKEN_BUDGET,
       maxTokens: 131_072,
       cost: { input: 0.113, output: 0.382, cacheRead: 0.014, cacheWrite: 0 },
       compat: { maxTokensField: "max_tokens", supportsDeveloperRole: false },
@@ -189,7 +184,6 @@ const entries: Entry[] = [
       input: ["text", "image", "file", "audio", "video"],
       nativeMedia: googleMedia,
       contextWindow: 1_048_576,
-      contextTokens: COMPACTION_TOKEN_BUDGET,
       maxTokens: 65_536,
       // 优惠结束后按正式价格登记，不移动历史计价与 credit 锚点。
       cost:
@@ -216,6 +210,13 @@ export function hiddenModelCandidates(): Model[] {
 function entryForModel(model: Model): Entry | undefined {
   return [...entries, hiddenQwenEntry].find((entry) => entry.model.id === model.id);
 }
+/** 普通请求沿用对应官方 Harness 的输出策略；模型能力仍作为硬上限。 */
+export function normalOutputTokens(model: Model): number {
+  const requested = model.provider === "deepseek" ? 256_000
+    : model.provider === "qwen" ? 64_000 : model.maxTokens;
+  return Math.min(requested, model.maxTokens);
+}
+
 export function modelEntry(key: string): Entry {
   const entry = entries.find((item) => item.info.key === key);
   if (!entry) throw Object.assign(new Error("模型未登记"), { status: 400 });

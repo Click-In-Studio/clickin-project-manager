@@ -1,8 +1,8 @@
+import { toolProgressKey } from "./cost-budget";
 import { getPool } from "@/lib/pg";
 import { newRunId } from "./ids";
 import { RUNNER_OWNER } from "./config";
 import { ADMISSION_PRIORITY, type AdmissionResource, type AdmissionTicket, type InputWait } from "./admission-types";
-import type { AssistantMessage } from "../../../vendor/openclaw/packages/llm-core/src/types";
 
 export async function requestAdmission(runId: string, key: string, resource: AdmissionResource): Promise<AdmissionTicket> {
   const r = await getPool().query<AdmissionTicket>(
@@ -113,21 +113,21 @@ export async function continuationKey(runId: string): Promise<string> {
     WHERE r.id=$1 ORDER BY e.seq DESC LIMIT 1`, [runId]);
   return r.rows[0]?.entry_id ?? runId;
 }
-export async function completedChatMessages(runId: string): Promise<AssistantMessage[]> {
-  const rows = await getPool().query<{ result: AssistantMessage }>(
-    "SELECT result FROM agent_admission WHERE run_id=$1 AND resource='llm' AND state='done' AND operation_key LIKE 'llm:%' AND result IS NOT NULL", [runId],
-  );
-  return rows.rows.map((row) => row.result);
-}
 export async function completedToolResult(runId: string, callId: string): Promise<unknown> {
   return (await getPool().query("SELECT result FROM agent_tool_operation WHERE run_id=$1 AND tool_call_id=$2", [runId,callId])).rows[0]?.result;
 }
 export async function beginToolOperation(runId: string, callId: string): Promise<void> {
-  await getPool().query(`INSERT INTO agent_tool_operation(id,run_id,tool_call_id,execution_epoch)
-    SELECT $1,id,$3,execution_epoch FROM agent_run WHERE id=$2
+  await getPool().query(`INSERT INTO agent_tool_operation(id,run_id,tool_call_id,execution_epoch,input_entry_id)
+    SELECT $1,r.id,$3,r.execution_epoch,(SELECT e.entry_id FROM agent_session_entry e WHERE e.session_id=r.session_id AND e.payload->'message'->>'role'='user' ORDER BY e.seq DESC LIMIT 1) FROM agent_run r WHERE r.id=$2
     ON CONFLICT(run_id,tool_call_id) DO UPDATE SET execution_epoch=EXCLUDED.execution_epoch WHERE agent_tool_operation.result IS NULL`, [newRunId(),runId,callId]);
 }
-export async function saveToolResult(runId: string, callId: string, result: unknown): Promise<void> {
-  await getPool().query(`UPDATE agent_tool_operation o SET result=$3::jsonb FROM agent_run r
-    WHERE o.run_id=$1 AND o.tool_call_id=$2 AND r.id=o.run_id AND r.execution_epoch=o.execution_epoch AND r.owner=$4`, [runId,callId,JSON.stringify(result),RUNNER_OWNER]);
+export async function saveToolResult(runId: string, callId: string, result: unknown, name: string, args: unknown): Promise<void> {
+  await getPool().query(`UPDATE agent_tool_operation o SET result=$3::jsonb,progress_key=$5,completed_at=now() FROM agent_run r
+    WHERE o.run_id=$1 AND o.tool_call_id=$2 AND r.id=o.run_id AND r.execution_epoch=o.execution_epoch AND r.owner=$4`, [runId,callId,JSON.stringify(result),RUNNER_OWNER,toolProgressKey(name,args,result)]);
+}
+
+export async function saveToolFailure(runId: string, callId: string, name: string, args: unknown, error: unknown): Promise<void> {
+  await getPool().query(`UPDATE agent_tool_operation o SET progress_key=$3,completed_at=now() FROM agent_run r
+    WHERE o.run_id=$1 AND o.tool_call_id=$2 AND r.id=o.run_id AND r.execution_epoch=o.execution_epoch AND r.owner=$4`,
+    [runId,callId,toolProgressKey(name,args,{ error: error instanceof Error ? error.message : String(error) }),RUNNER_OWNER]);
 }

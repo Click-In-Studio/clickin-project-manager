@@ -1,4 +1,4 @@
-import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments } from "./model-attachments";
 import { restoreModelMedia, refreshMediaReferences, attachmentReadNeeded } from "./model-media-state";
 import { selectMediaCompactionModel } from "./media-compaction-model";
@@ -36,6 +36,7 @@ import type { SubagentSource } from "./subagent-types";
 import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
 import { estimateRequestBudget } from "./context-budget";
 import { readModelMedia } from "./model-read";
+import { assistantFailureReason } from "./stream-lines";
 
 const TIMEOUT_MS = 30 * 60_000;
 const TOOL_CAP = 100;
@@ -209,7 +210,6 @@ async function executeBody(
   let detached = false;
   let requested = job.context_request;
   let timedOut = false;
-  let costExceeded = false;
   let toolCalls = 0;
   let result = job.result ?? "";
   let status = "completed";
@@ -317,17 +317,9 @@ async function executeBody(
         await db.signalSubagentState(job.parent_session_id);
       },
       onUsage: async (cost) => {
-        if (!(await recordChildUsage(job, `acu_${newRunId()}`, {
-          input: cost.tokens,
-          output: 0,
-          cacheRead: 0,
-          usd: cost.usd,
-          compaction: true,
-          modelId: cost.model.id,
-        }))) {
-          costExceeded = true;
-          abort.abort();
-        }
+        await recordChildUsage(job, `acu_${newRunId()}`, {
+          input: cost.tokens, output: 0, cacheRead: 0, usd: cost.usd, compaction: true, modelId: cost.model.id,
+        });
       },
     });
   };
@@ -339,7 +331,7 @@ async function executeBody(
       messages: convertToLlm([...current.messages, pending]) };
     if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }).fits) return false;
     try {
-      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: REQUEST_OUTPUT_TOKENS }, trigger: "pressure", signal: abort.signal }, media);
+      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, media);
       return estimateRequestBudget(selectedModel, prepared).fits;
     } catch (error) {
       if (error instanceof CompactionBudgetError) return false;
@@ -354,7 +346,7 @@ async function executeBody(
     systemPrompt: SYSTEM,
     model: selectedModel,
     thinkingLevel: selection.thinkingLevel,
-    streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
+    streamOptions: { maxTokens: normalOutputTokens(selectedModel) },
     getApiKeyAndHeaders: async () => {
       // harness 在异步准备期间尚未建立自己的取消控制器，外部停止必须在请求前再检查。
       if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -413,7 +405,7 @@ async function executeBody(
         block: true,
         reason: "上下文请求已提交，请结束本轮等待主脑补给",
       };
-    if (++toolCalls > TOOL_CAP || costExceeded) {
+    if (++toolCalls > TOOL_CAP) {
       abort.abort();
       void harness.abort();
       return { block: true, reason: "子任务已达到执行上限" };
@@ -428,21 +420,11 @@ async function executeBody(
         .filter((p) => p.type === "text")
         .map((p) => (p as { text: string }).text)
         .join("\n") || result;
-    costTail = costTail.then(async () => {
-      if (!(await checkpointChildUsage(job))) {
-        costExceeded = true;
-        abort.abort();
-        void harness.abort();
-        void (await import("./service"))
-          .abortRun(job.parent_session_id, "任务成本硬顶触发")
-          .catch((e) => console.error("[subagent] 成本中止失败", e));
-      }
-    });
+    costTail = costTail.then(() => checkpointChildUsage(job));
   });
   try {
     if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
-    costExceeded = !(await checkpointChildUsage(job));
-    if (costExceeded) throw new Error("任务成本硬顶触发");
+    await checkpointChildUsage(job);
     const entries = await storage.getEntries();
     const entryId = `ain_child_${job.id}`;
     const present = entries.some((e) => e.id === entryId);
@@ -494,28 +476,24 @@ async function executeBody(
     await costTail;
     const messages = (await session.buildContext()).messages;
     const last = messages.at(-1);
-    if (last?.role === "assistant" && last.stopReason === "error")
-      throw new Error(last.errorMessage || "子 Agent 模型调用失败");
+    const failure = assistantFailureReason(last);
+    if (failure) throw new Error(failure);
     if (abort.signal.aborted) {
-      status = timedOut || costExceeded ? "failed" : "aborted";
+      status = timedOut ? "failed" : "aborted";
       error = timedOut
         ? "子任务执行超时"
-        : costExceeded
-          ? "任务成本硬顶触发"
-          : "用户停止";
+        : "用户停止";
     }
   } catch (err) {
     status =
-      timedOut || costExceeded
+      timedOut
         ? "failed"
         : abort.signal.aborted
           ? "aborted"
           : "failed";
     error = timedOut
       ? "子任务执行超时"
-      : costExceeded
-        ? "任务成本硬顶触发"
-        : err instanceof Error
+      : err instanceof Error
           ? err.message
           : String(err);
   } finally {
