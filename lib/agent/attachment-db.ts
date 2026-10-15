@@ -171,7 +171,6 @@ export async function markAttachmentReady(
   userId: string,
   verifiedSize: number,
   sourceMetadata?: Record<string, unknown>,
-  verifiedFile?: { fileName: string; mimeType: string; mediaKind: string | null },
 ): Promise<AgentAttachment | null> {
   if (!Number.isSafeInteger(verifiedSize) || verifiedSize < 0 || verifiedSize > AGENT_ATTACHMENT_MAX_BYTES) {
     throw Object.assign(new Error("附件实际大小超过 50 MiB 或无效"), { status: 413 });
@@ -199,15 +198,12 @@ export async function markAttachmentReady(
     const r = await client.query<Row>(
       `UPDATE agent_session_attachment a
        SET status = 'ready', ready_at = now(), file_size = $4,
-           file_name = COALESCE($6, file_name), mime_type = COALESCE($7, mime_type),
-           media_kind = CASE WHEN $7::text IS NULL THEN media_kind ELSE $8 END,
            source_metadata = COALESCE($5::jsonb, source_metadata),
            expires_at = LEAST(now() + interval '24 hours', absolute_expires_at)
        FROM agent_session s
        WHERE a.id = $1 AND a.session_id = $2 AND s.id = a.session_id AND s.user_id = $3 AND a.status = 'pending'
        RETURNING a.*`, [attachmentId, sessionId, userId, verifiedSize,
-        sourceMetadata ? JSON.stringify(sourceMetadata) : null,
-        verifiedFile?.fileName ?? null, verifiedFile?.mimeType ?? null, verifiedFile?.mediaKind ?? null],
+        sourceMetadata ? JSON.stringify(sourceMetadata) : null],
     );
     if (r.rows[0]) await client.query(
       `UPDATE agent_attachment_object SET status = 'present', byte_size = $2

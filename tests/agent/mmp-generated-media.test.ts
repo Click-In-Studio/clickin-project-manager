@@ -45,12 +45,18 @@ function png(width = 640, height = 512): Buffer {
 function client(bytes: Buffer, over: Record<string, unknown> = {}): MmpClient {
   const digest = createHash("sha256").update(bytes).digest("hex");
   return {
-    capabilities: async () => ({ protocol_version: "3.0", capabilities: [{ capability: CAPABILITY, nodes: ["n1"] }] }),
-    run: vi.fn(async () => ({
-      job_id: "n1-job", type: CAPABILITY.id, status: "done", media_ids: {}, cached: false,
+    resolveCapability: async () => ({ id: "media.deliver", purpose: "media.deliver",
+      input: { fields: [{ name: "media", kind: "media", cardinality: { min: 1, max: 32 } }] },
+      output: { fields: [{ name: "media", kind: "media", cardinality: { min: 1, max: 32 } }] } }),
+    capabilities: async () => ({ protocol_version: "3.1", capabilities: [{ capability: CAPABILITY, nodes: ["n1"] }] }),
+    run: vi.fn(async (job: Parameters<MmpClient["run"]>[0]) => job.type === "media.deliver" ? {
+      outputs: { media: [{ kind: "media", media_id: `sha256:${digest}`, content_type: "image/png", bytes: bytes.length,
+        sha256: (over.outputs as { picture?: { sha256?: string } })?.picture?.sha256 ?? digest, delivered: true }] },
+    } : ({
+      job_id: "n1-01K7MA00ECFN8H9R3CRHJSMX44", type: CAPABILITY.id, status: "done", media_ids: {}, cached: false,
       source: { tier: "gpu", engine: "test-engine", engine_version: "1", generated_at: "2026-10-13T00:00:00Z", degraded: false },
       outputs: {
-        picture: { kind: "media", content_type: "image/png", bytes: bytes.length, sha256: digest, delivered: true },
+        picture: { kind: "media", content_type: "image/png", bytes: bytes.length, sha256: digest, media_id: `sha256:${digest}` },
         facts: { kind: "json", value: { width: 640, height: 512, seed: 7 } },
       },
       usage: { served_from: "compute", tier: "gpu", engine: "test-engine", compute_ms: 123, wasted_ms: 0 },
@@ -87,11 +93,13 @@ describe("MMP 生成媒体受控回传", () => {
     const result = await execute(mmpClient);
     const request = vi.mocked(mmpClient.run).mock.calls[0][0];
     expect(request).toMatchObject({ type: CAPABILITY.id, arguments: { prompt: "纸雕鲸鱼", options: { seed: 7 } },
-      delivery: { picture: { url: "https://r2.test/put"} } });
+      });
+    expect(request).not.toHaveProperty("delivery");
+    expect(vi.mocked(mmpClient.run).mock.calls[1][0]).toMatchObject({ type: "media.deliver", node_id: "n1",
+      delivery: { media: [{ url: "https://r2.test/put" }] } });
     expect(JSON.stringify(request)).not.toMatch(/base64|r2Key|attachmentId/);
     expect(attachmentMocks.ready).toHaveBeenCalledWith("aat_generated", "s1", "u1", 24,
-      expect.objectContaining({ capabilityId: CAPABILITY.id, jobId: "n1-job", sha256: expect.stringMatching(/^[a-f0-9]{64}$/), width: 640, height: 512 }),
-      { fileName: "picture.png", mimeType: "image/png", mediaKind: "image" });
+      expect.objectContaining({ capabilityId: CAPABILITY.id, jobId: "n1-01K7MA00ECFN8H9R3CRHJSMX44", sha256: expect.stringMatching(/^[a-f0-9]{64}$/), width: 640, height: 512 }));
     expect(result).toMatchObject({ attachments: [{ id: "aat_generated", status: "ready" }],
       media: [] });
     expect(result.text).toContain("attachmentId=aat_generated");
@@ -100,7 +108,7 @@ describe("MMP 生成媒体受控回传", () => {
 
   it("digest 不符不产生 ready 附件，并进入可靠删除队列", async () => {
     const mmpClient = client(png(), { outputs: {
-      picture: { kind: "media", content_type: "image/png", bytes: 24, sha256: "0".repeat(64), delivered: true },
+      picture: { kind: "media", content_type: "image/png", bytes: 24, sha256: "0".repeat(64), media_id: `sha256:${createHash("sha256").update(png()).digest("hex")}` },
       facts: { kind: "json", value: { width: 640, height: 512 } },
     } });
     await expect(execute(mmpClient)).rejects.toThrow("digest 校验失败");

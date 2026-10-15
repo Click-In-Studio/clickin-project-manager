@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     ]);
     return NextResponse.json({
       usage,
-      attachments: attachments.filter((a) => !(a.sourceKind === "mmp" && a.sourceMetadata?.deliveryReservation === true)).map(({ id, fileName, mimeType, mediaKind, fileSize, status, expiresAt, releaseUntil, promotedAssetId, sourceToolCallId }) =>
+      attachments: attachments.map(({ id, fileName, mimeType, mediaKind, fileSize, status, expiresAt, releaseUntil, promotedAssetId, sourceToolCallId }) =>
         ({ id, fileName, mimeType, mediaKind, fileSize, status, expiresAt, releaseUntil, promotedAssetId, sourceToolCallId })),
     });
   }

@@ -99,7 +99,9 @@ export async function buildMmpToolSurface(ctx: ToolContext, opts: { client?: Mmp
   if (!client) return { tools: [], catalog: [], capabilities: [] };
   try {
     const registry = await client.capabilities();
-    const capabilities = registry.capabilities.map((entry) => entry.capability);
+    const capabilities = registry.capabilities.map((entry) => entry.capability)
+      // 交付是宿主协议步骤；模型只使用已授权的附件/资产引用，不接触 ref 或 PUT 地址。
+      .filter((capability) => capability.purpose !== "media.deliver");
     const tools = capabilities.map((capability) => makeTool(ctx, capability));
     return { tools, catalog: capabilities.map((capability, index) => catalogEntry(tools[index].mcpName, capability)), capabilities };
   } catch (error) {

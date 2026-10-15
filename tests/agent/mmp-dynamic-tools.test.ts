@@ -63,6 +63,15 @@ describe("MMP v3 capability binder", () => {
     }));
   });
 
+  it("宿主媒体交付步骤不进入模型工具面或召回目录", async () => {
+    const delivery = { ...capability("node.delivery", [mediaField]), purpose: "media.deliver" };
+    const client = { capabilities: async () => registry([TEXT_MEDIA, delivery]) } as unknown as MmpClient;
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: null, run: runHandle() }, { client });
+    expect(surface.capabilities.map((item) => item.id)).toEqual([TEXT_MEDIA.id]);
+    expect(surface.tools.map((item) => item.mcpName)).toEqual(["mmp.image.generate"]);
+    expect(surface.catalog.map((item) => item.name)).toEqual(["mmp.image.generate"]);
+  });
+
   it("长 capability id 的暴露名不超过常见 64 字符限制且保持稳定", () => {
     const id = `very_long_${"x".repeat(64)}`;
     const a = mmpCapabilityToolName(id);
