@@ -1,6 +1,10 @@
+import { estimateRequestBudget } from "./context-budget";
 import { assertModelSelection, sessionModelSelection, runModelSelection } from "./model-settings-db";
 import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
-import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
+import { prepareModelAttachments } from "./model-attachments";
+import { restoreModelMedia, refreshMediaReferences, attachmentReadNeeded } from "./model-media-state";
+import { selectMediaCompactionModel } from "./media-compaction-model";
+import { convertToLlm } from "../../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import { setToolObservationSources, addObservationTools } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait, type PrepareAdmittedRequest } from "./admission";
 import { cancelAdmissions, inputWaitReady, recoverAdmissions, completedChatMessages } from "./admission-db";
@@ -72,7 +76,7 @@ import {
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
-import { compactRequestContext } from "./request-compaction";
+import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
 
 /** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
  *  裸 abort 让 agent 只能瞎猜中止原因）。 */
@@ -423,7 +427,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   // usd 与 token 并行累计：token 是账本原貌，usd 是限流口径（见 billing.ts）。
   // compaction 单列：它是独立模型请求且不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
-  const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0 };
+  const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0, compactionModels: new Map<string, { modelId: string; tokens: number; usd: number }>() };
   const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,selectedModel),0);
   let message = input.message;
   let lastUser: string | null = message ?? null;
@@ -522,7 +526,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       };
       return [...messages.slice(0, idx), injected, ...messages.slice(idx)];
     };
-    const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal, calibration }) =>
+    const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) =>
       compactRequestContext({
         session,
         context,
@@ -531,7 +535,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         signal,
         trigger,
         maxTokens: options?.maxTokens,
-        streamOptions: options, calibration,
+        streamOptions: options, calibration, pendingMedia,
         completeSimple: llmRuntime().completeSimple,
         compactFn: runtimeOverrides.compactFn,
         shouldCompact: runtimeOverrides.shouldCompactFn,
@@ -540,10 +544,20 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
           // buildInjectContext 对未变化内容保持确定表达；临时 recall 仍只在消息尾部，
           // 不会因刷新 system 而重复注入或进入持久 transcript。
           const currentInject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
-          return { ...requestContext, systemPrompt: buildSystemPrompt(currentInject) };
+          const messages = await restoreModelMedia(requestContext.messages, mediaInput);
+          const name = exposedName("my.attachment_read");
+          const needsRead = await attachmentReadNeeded(messages, mediaInput);
+          const requestTools = (requestContext.tools ?? []).filter((tool) => tool.name !== name);
+          const read = toolByName.get(name);
+          if (needsRead && read) {
+            requestTools.push({ name: read.name, description: read.description, parameters: read.parameters });
+            addObservationTools("dynamic", [name]);
+          }
+          return { ...requestContext, messages: convertToLlm(messages), tools: requestTools, systemPrompt: buildSystemPrompt(currentInject) };
         },
         rebuildMessages: withInjectedNote,
-        prepareMessages: (messages) => restoreModelMedia(messages, mediaInput),
+        prepareMessages: (messages, summaryModel) => restoreModelMedia(messages, { ...mediaInput, model: summaryModel }),
+        selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, userId, productionId, runtimeOverrides.apiKey),
         onCompacting: async (active) => {
           const next = active ? "compacting" : "running";
           const previous = active ? "running" : "compacting";
@@ -557,6 +571,9 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         onUsage: async (cost) => {
           usage.compactionUsd += cost.usd;
           usage.compactionTokens += cost.tokens;
+          const key = `${cost.model.provider}:${cost.model.id}`;
+          const previous = usage.compactionModels.get(key) ?? { modelId: cost.model.id, tokens: 0, usd: 0 };
+          usage.compactionModels.set(key, { modelId: cost.model.id, tokens: previous.tokens + cost.tokens, usd: previous.usd + cost.usd });
           if (cost.usd && !(await (await import("./subagent-db")).addTaskCost(runId, cost.usd))) {
             costCapAborted = true;
             abort.abort();
@@ -564,6 +581,24 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
           }
         },
       });
+
+    runHandle.prepareMediaRead = async (media) => {
+      const current = await session.buildContext();
+      const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
+      const pending = { role: "user" as const, timestamp: 0, content: [media] };
+      const context = { systemPrompt: buildSystemPrompt(inject),
+        tools: tools.filter((tool) => activeToolNames.has(tool.name)).map(({ name, description, parameters }) => ({ name, description, parameters })),
+        messages: convertToLlm([...withInjectedNote(current.messages), pending]) };
+      // 即使清空所有历史也放不下，就不发起无效摘要；改走既有非原生读取。
+      if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }, { maxTokens: REQUEST_OUTPUT_TOKENS }).fits) return false;
+      try {
+        const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: REQUEST_OUTPUT_TOKENS }, trigger: "pressure", signal: abort.signal }, media);
+        return estimateRequestBudget(selectedModel, prepared, { maxTokens: REQUEST_OUTPUT_TOKENS }).fits;
+      } catch (error) {
+        if (error instanceof CompactionBudgetError) return false;
+        throw error;
+      }
+    };
 
     const harness = new CoreAgentHarness({
       env: NO_ENV,
@@ -615,11 +650,9 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       lastUser = message;
     }
 
-    // context hook 只保留一个：agent-core 的多个同类 hook 不串联前一项结果，而是
-    // 取最后一个非空返回值。分开注册会让注入说明覆盖已恢复的媒体 data，续轮请求
-    // 最终只剩持久引用并在 provider 边界失败。
+    // context hook 只保留一个；这里只刷新身份，严格预算与原件准备统一留在真实请求边界。
     harness.on("context", async ({ messages }) => ({
-      messages: withInjectedNote(await restoreModelMedia(messages, mediaInput)),
+      messages: withInjectedNote(await refreshMediaReferences(messages, mediaInput)),
     }));
 
     // 审批门（工具调用权限门原则①）：非只读工具先卡；deny 的理由随工具结果回模型。
@@ -899,7 +932,7 @@ function findLastUserIndex(messages: AgentMessage[]): number {
 async function recordUsage(
   userId: string,
   productionId: string | null,
-  usage: { input: number; output: number; cacheRead: number; usd: number; compactionUsd: number; compactionTokens: number },
+  usage: { input: number; output: number; cacheRead: number; usd: number; compactionUsd: number; compactionTokens: number; compactionModels: Map<string, { modelId: string; tokens: number; usd: number }> },
   paidFrom: PaidFrom | undefined,
   model: import("../../../vendor/openclaw/packages/llm-core/src/types").Model,
 ): Promise<void> {
@@ -932,11 +965,18 @@ async function recordUsage(
       [userId, productionId, model.id, credits, paid],
     );
   }
-  if (usage.compactionTokens > 0 || compactionCredits > 0) {
+  let cumulativeUsd = 0;
+  let landedCompactionCredits = 0;
+  for (const entry of usage.compactionModels.values()) {
+    cumulativeUsd += entry.usd;
+    const cumulativeCredits = creditsFromUsd(cumulativeUsd);
+    const billed = cumulativeCredits - landedCompactionCredits;
+    landedCompactionCredits = cumulativeCredits;
+    if (entry.tokens <= 0 && billed <= 0) continue;
     await pool.query(
       `INSERT INTO ai_usage (user_id, production_id, kind, model, tokens, billed_credits, paid_from)
        VALUES ($1, $2, 'chat_compaction', $3, $4, $5, $6)`,
-      [userId, productionId, model.id, usage.compactionTokens, compactionCredits, paid],
+      [userId, productionId, entry.modelId, entry.tokens, billed, paid],
     );
   }
   const total = credits + compactionCredits;

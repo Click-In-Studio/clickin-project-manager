@@ -14,7 +14,7 @@ export const MMP_FOCUS_USER_TURNS = 3;
 const FOCUS_RESOURCE_CAP = 8;
 
 const ASSET_READ_TOOLS = new Set([
-  "production.asset_preflight",
+  "production.asset_read",
   "production.doc_outline",
   "production.doc_read",
   "production.doc_search",

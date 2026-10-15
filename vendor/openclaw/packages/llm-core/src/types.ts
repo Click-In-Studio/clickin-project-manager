@@ -254,8 +254,9 @@ export interface MediaContent {
   mimeType: string;
   data?: string;
   attachmentId?: string;
+  assetId?: string;
   fileName?: string;
-  source?: { kind: "attachment"; sha256: string };
+  source?: { kind: "attachment"; sha256: string } | { kind: "asset"; fileId: string; sha256: string };
   budget?: {
     bytes: number; base64Chars: number; estimatedTokens: number; basis: string;
     width?: number; height?: number; pages?: number; durationSeconds?: number;

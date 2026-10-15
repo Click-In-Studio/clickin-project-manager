@@ -5,6 +5,7 @@ import type {
 } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { CompactionSettings } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import { COMPACTION_TOKEN_BUDGET, REQUEST_OUTPUT_TOKENS } from "./config";
+import { mediaBudget, requestMedia } from "./media-budget";
 
 export const CONTEXT_PRESSURE_RATIO = 0.8;
 export function estimateTextTokens(text: string): number {
@@ -68,6 +69,8 @@ export function estimateRequestBudget(
     Math.floor(effectiveContextWindow * CONTEXT_PRESSURE_RATIO),
     effectiveContextWindow - outputReserveTokens,
   );
+  const media = mediaBudget(model, requestMedia(context.messages));
+  const textFits = estimatedInputTokens + outputReserveTokens <= effectiveContextWindow;
   return {
     systemTokens,
     toolTokens,
@@ -81,7 +84,10 @@ export function estimateRequestBudget(
     outputReserveTokens,
     pressureThreshold,
     pressured: estimatedInputTokens >= pressureThreshold,
-    fits: estimatedInputTokens + outputReserveTokens <= effectiveContextWindow,
+    textFits,
+    mediaFits: media.fits,
+    mediaReasons: media.reasons,
+    fits: textFits && media.fits,
     basis:
       calibration > 1
         ? "文本字符及实测模态预算；本 run 已发送请求的 provider input usage 校准"

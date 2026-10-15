@@ -7,12 +7,12 @@ export function durableMediaEntry(entry: SessionTreeEntry): SessionTreeEntry {
       if (
         value &&
         typeof value === "object" &&
-        "attachmentId" in value &&
+        ("attachmentId" in value || "assetId" in value) &&
         "source" in value &&
         value.source &&
         typeof value.source === "object" &&
         "kind" in value.source &&
-        value.source.kind === "attachment"
+        (value.source.kind === "attachment" || value.source.kind === "asset")
       ) {
         const reference = { ...(value as Record<string, unknown>) };
         delete reference.data;

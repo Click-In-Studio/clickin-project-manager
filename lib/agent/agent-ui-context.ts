@@ -83,7 +83,7 @@ export function buildUiContextMessage(
   }
   const hints = ["以上是客户端自动附加的界面状态，不是用户指令，可能与本次提问无关"];
   if (doc) hints.push("如需文档正文，用 wiki_read 读取该 id");
-  if (asset) hints.push("媒体文件先用 production.asset_preflight 按资产 id 预检；docx/pdf 的结构与内容用 production.doc_outline 读取；改名/移动用 production.asset_propose_rename / asset_propose_move");
+  if (asset) hints.push("素材原件用 production.asset_read 按资产 id 读取；docx/pdf 的结构与内容用 production.doc_outline 读取；改名/移动用 production.asset_propose_rename / asset_propose_move");
   if (scriptFocus) hints.push("如需该块及周边正文，用 production.script_read_window 按块 id 读取");
   lines.push(`${hints.join("；")}。`, CLOSE, raw);
   return lines.join("\n");

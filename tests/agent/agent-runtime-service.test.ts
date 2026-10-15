@@ -1,3 +1,4 @@
+import { saveModelSelection } from "@/lib/agent/runtime/model-settings-db";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import sharp from "sharp";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
@@ -16,7 +17,7 @@ import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/eve
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
-import { CHAT_MODEL, llmRuntime } from "@/lib/agent/runtime/config";
+import { CHAT_MODEL, llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
@@ -57,8 +58,8 @@ function scripted(script: Step[]) {
       }
       if ("text" in next && next.wait) await next.wait;
       const final: AssistantMessage = "text" in next
-        ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
-        : { ...base(), content: next.calls, stopReason: "toolUse" };
+        ? { ...base(), api: _model.api, provider: _model.provider, model: _model.id, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
+        : { ...base(), api: _model.api, provider: _model.provider, model: _model.id, content: next.calls, stopReason: "toolUse" };
       stream.push({ type: "start", partial: { ...final, content: [] } });
       if ("text" in next) {
         const textIndex = next.thinking ? 1 : 0;
@@ -128,6 +129,8 @@ describe("agent-runtime service", () => {
       [prodId, denyingUserId, roleId],
     );
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("EMBEDDING_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     // 与 MMP 无关的 runtime 用例不碰 .env.local 指向的真实服务；媒体用例单独开启。
     runtimeOverrides.mmpClient = null;
@@ -314,6 +317,90 @@ describe("agent-runtime service", () => {
     } finally {
       vi.stubGlobal("fetch", oldFetch);
     }
+  });
+
+  it.each(["deepseek-flash", "resonance"] as const)("#967 大音频后切到 %s 续聊，摘要保留与显式原件重读分别成立", async (targetKey) => {
+    const pcmBytes = 8 * 1024 * 1024;
+    const wav = Buffer.alloc(44 + pcmBytes);
+    wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22);
+    wav.writeUInt32LE(48000, 24); wav.writeUInt32LE(192000, 28);
+    wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(pcmBytes, 40);
+    const jpeg = await sharp({ create: { width: 20, height: 20, channels: 3, background: "blue" } }).jpeg().toBuffer();
+    const key = newKey();
+    const sound = await createPendingAttachment({ sessionId: key, userId, fileName: "排练.wav", mimeType: "audio/wav", mediaKind: "audio", fileSize: wav.length });
+    await markAttachmentReady(sound.id, key, userId, wav.length);
+    const picture = targetKey === "resonance" ? await createPendingAttachment({ sessionId: key, userId, fileName: "舞台.jpg", mimeType: "image/jpeg", mediaKind: "image", fileSize: jpeg.length }) : null;
+    if (picture) await markAttachmentReady(picture.id, key, userId, jpeg.length);
+    const oldFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url) => new Response(new Uint8Array(picture && decodeURIComponent(new URL(String(url)).pathname).includes(picture.r2Key) ? jpeg : wav))));
+    const source = resolveModel("inspiration");
+    const complete = vi.spyOn(llmRuntime(), "completeSimple").mockResolvedValue({ ...base(), api: source.api, provider: source.provider, model: source.id,
+      content: [{ type: "text", text: "开场第二声敲击进入；录音保留，可按 attachmentId 复核。" }], stopReason: "stop" });
+    const { streamFn, seen } = scripted([
+      { text: "听到开场第二声敲击。" },
+      { text: "沿用第二声敲击进入的安排。" },
+      { calls: [{ type: "toolCall", id: `reread-${targetKey}`, name: exposedName("my.attachment_read"), arguments: { attachmentId: sound.id } }] },
+      { text: "已重新听到原件。" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    try {
+      await saveModelSelection(key, userId, { modelKey: "inspiration", thinkingLevel: "low", disabledSubagentModels: [] });
+      await startRun({ sessionId: key, userId, message: "听录音，记住开场位置。", attachmentIds: [sound.id] });
+      await collectUntilTerminal(key); await waitForIdle(key);
+      expect(JSON.stringify(seen[0].messages)).toContain(wav.toString("base64"));
+      let cursor = Math.max(...(await readEventsSince(key, 0)).map((row) => row.seq));
+      await saveModelSelection(key, userId, { modelKey: targetKey, thinkingLevel: "low", disabledSubagentModels: [] });
+      const switched = await startRun({ sessionId: key, userId, message: "继续沿用开场安排。", attachmentIds: picture ? [picture.id] : [] });
+      expect((await collectUntilTerminal(key, 10_000, cursor)).at(-1)).toEqual({ type: "final", text: "沿用第二声敲击进入的安排。" });
+      await waitForIdle(key);
+      expect(complete).toHaveBeenCalledOnce();
+      expect(complete.mock.calls[0][0].id).toBe(source.id);
+      expect(JSON.stringify(complete.mock.calls[0][1].messages)).toContain(wav.toString("base64"));
+      expect(JSON.stringify(seen[1].messages)).not.toContain(wav.toString("base64"));
+      expect(JSON.stringify(seen[1].messages)).toContain("第二声敲击");
+      if (picture) expect(JSON.stringify(seen[1].messages)).toContain(jpeg.toString("base64"));
+      expect(seen[1].tools).toContain(exposedName("my.attachment_read"));
+      const compactUsage = await getPool().query("SELECT model FROM ai_usage WHERE user_id=$1 AND kind='chat_compaction' AND created_at >= (SELECT started_at FROM agent_run WHERE id=$2)", [userId, switched.runId]);
+      expect(compactUsage.rows).toEqual([{ model: source.id }]);
+      cursor = Math.max(...(await readEventsSince(key, 0)).map((row) => row.seq));
+      await saveModelSelection(key, userId, { modelKey: "inspiration", thinkingLevel: "low", disabledSubagentModels: [] });
+      await startRun({ sessionId: key, userId, message: "请重读录音原件复核，不只依据摘要。" });
+      expect((await collectUntilTerminal(key, 10_000, cursor)).at(-1)).toEqual({ type: "final", text: "已重新听到原件。" });
+      await waitForIdle(key);
+      expect(JSON.stringify(seen[2].messages)).not.toContain(wav.toString("base64"));
+      expect(JSON.stringify(seen[3].messages)).toContain(wav.toString("base64"));
+      expect(seen[3].tools).not.toContain(exposedName("my.attachment_read"));
+      expect(complete).toHaveBeenCalledOnce();
+      const persisted = await getPool().query("SELECT payload FROM agent_session_entry WHERE session_id=$1", [key]);
+      expect(JSON.stringify(persisted.rows)).not.toContain(wav.toString("base64"));
+    } finally { complete.mockRestore(); vi.stubGlobal("fetch", oldFetch); }
+  });
+
+  it("#967 显式原件读取先整理拥挤历史，原件在下一次模型请求中保留", async () => {
+    const key = newKey();
+    await seedHistory(key);
+    const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: "blue" } }).png().toBuffer();
+    const attachment = await createPendingAttachment({ sessionId: key, userId, fileName: "原件.png", mimeType: "image/png", mediaKind: "image", fileSize: bytes.length });
+    await markAttachmentReady(attachment.id, key, userId, bytes.length);
+    const oldFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(bytes))));
+    const complete = vi.spyOn(llmRuntime(), "completeSimple").mockResolvedValue({ ...base(), content: [{ type: "text", text: "之前的材料已处理；继续复核原件。" }], stopReason: "stop" });
+    let checks = 0;
+    runtimeOverrides.shouldCompactFn = () => ++checks === 2;
+    const { streamFn, seen } = scripted([{ calls: [{ type: "toolCall", id: "native-read-with-compaction", name: exposedName("my.attachment_read"), arguments: { attachmentId: attachment.id } }] }, { text: "已看见原件" }]);
+    runtimeOverrides.streamFn = streamFn;
+    try {
+      await startRun({ sessionId: key, userId, message: "请读取附件原件复核。" });
+      expect((await collectUntilTerminal(key)).at(-1)).toEqual({ type: "final", text: "已看见原件" });
+      await waitForIdle(key);
+      expect(complete).toHaveBeenCalledOnce();
+      expect(JSON.stringify(complete.mock.calls[0][1].messages)).not.toContain(bytes.toString("base64"));
+      expect(JSON.stringify(seen[1].messages)).toContain(bytes.toString("base64"));
+      expect(seen[1].tools).not.toContain(exposedName("my.attachment_read"));
+      const entries = (await getPool().query("SELECT type,payload FROM agent_session_entry WHERE session_id=$1 ORDER BY seq", [key])).rows;
+      expect(entries.findIndex((entry) => entry.type === "compaction")).toBeLessThan(entries.findIndex((entry) => entry.payload.message?.toolCallId === "native-read-with-compaction"));
+    } finally { complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; vi.stubGlobal("fetch", oldFetch); }
   });
 
   it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {
@@ -1057,6 +1144,8 @@ describe("ask_user（#290）：提问 → 卡片 → 回答 → 工具结果", (
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-ask-${shortId()}`, null, false));
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("EMBEDDING_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1291,6 +1380,8 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-detach-${shortId()}`, null, false));
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("EMBEDDING_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
@@ -1388,6 +1479,8 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     ({ prodId } = await makeProduction(userId));
     await setProductionTier(prodId, "pro");
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("EMBEDDING_API_KEY", "test-key");
     runtimeOverrides.apiKey = "test-key";
     runtimeOverrides.mmpClient = null;
   });
