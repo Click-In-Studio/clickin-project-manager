@@ -239,7 +239,7 @@ async function main() {
     [PRODUCTION_ID],
   );
 
-  await seedLocalDemoScript(PRODUCTION_ID, versionId);
+  await seedLocalDemoScript(PRODUCTION_ID, versionId, "demo");
 
   await pool.query(
     `INSERT INTO tag_group (id, production_id, name, type, sort_order) VALUES
