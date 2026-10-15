@@ -346,7 +346,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 const MONOLITH_LINE_CEILING: Record<string, number> = {
   "components/script/ScriptEditor.tsx": 5696, // #507 共同状态与生命周期收敛
   "components/ops/EventDetailClient.tsx": 421,
-  "components/ops/CuePage.tsx": 1292, // 逐块工具栏删除旧整组折叠与重复菜单
+  "components/ops/CuePage.tsx": 1293, // 失效 Cue 拖拽入口补页面模式判定（+1）
   "components/ops/PlanningClient.tsx": 98,
   "components/shell/AppShell.tsx": 863, // 逐块工具栏：更多箭头、第二栏可达性与搜索占位（+2）
 };

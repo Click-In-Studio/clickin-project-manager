@@ -286,7 +286,7 @@ export default function CuePage({
 
   // ── Delete cue ────────────────────────────────────────────────────────────
   const deleteCue = useCallback(async (cue: Cue) => {
-    if (saveStates.has(cue.id)) return;
+    if (cueMode !== "edit" || saveStates.has(cue.id)) return;
     const finish = beginListWrite(cue.cueListId);
     try {
       if (await deleteCueRemote(productionId, cue.cueListId, cue.id, versionIdRef.current)) {
@@ -294,7 +294,7 @@ export default function CuePage({
         setSelection({ kind: "none" });
       }
     } finally { finish(); }
-  }, [productionId, saveStates, beginListWrite, removeCue]);
+  }, [cueMode, productionId, saveStates, beginListWrite, removeCue]);
 
   const dismissWarning = useCallback(async (cue: Cue) => {
     await updateCueField(cue, { warning: false });
@@ -302,15 +302,16 @@ export default function CuePage({
 
   // Re-anchor an orphaned cue to the current pending selection
   const reassignOrphanedCue = useCallback(async (cue: Cue) => {
-    if (selection.kind !== "pending" || !localEditableIds.has(cue.cueListId)) return;
+    if (cueMode !== "edit" || selection.kind !== "pending" || !localEditableIds.has(cue.cueListId)) return;
     await updateCueField(cue, { start: selection.start, end: selection.end, warning: false });
-  }, [selection, localEditableIds, updateCueField]);
+  }, [cueMode, selection, localEditableIds, updateCueField]);
 
   // Start dragging an orphaned cue into the script; ensure the list is visible so preview renders
   const startOrphanDrag = useCallback((e: React.MouseEvent, cue: Cue) => {
+    if (cueMode !== "edit") return;
     setVisibleListIds(prev => prev.has(cue.cueListId) ? prev : new Set([...prev, cue.cueListId]));
     startCueDrag(e, cue.id, "move");
-  }, [startCueDrag, setVisibleListIds]);
+  }, [cueMode, startCueDrag, setVisibleListIds]);
 
   const {
     scrollContainerRef, topSpacerRef, botSpacerRef,
@@ -984,7 +985,7 @@ export default function CuePage({
             {orphanedCues.map(cue => {
               const listIdx = listColorIndex.get(cue.cueListId) ?? 0;
               const isDragging = dragLive?.cueId === cue.id;
-              const canEdit = localEditableIds.has(cue.cueListId);
+              const canEdit = cueMode === "edit" && localEditableIds.has(cue.cueListId);
               const canReassign = selection.kind === "pending" && canEdit;
               return (
                 <div

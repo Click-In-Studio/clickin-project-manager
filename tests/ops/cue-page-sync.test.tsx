@@ -77,6 +77,23 @@ function select() {
   return container.querySelector('[data-chip-cue-id="cue-l1"] input[placeholder="名称"]') as HTMLInputElement;
 }
 describe('真实 CuePage 编辑与 SSE 接线', () => {
+  it('只读模式关闭失效 Cue 的删除和拖拽入口，恢复编辑后重新可用', async () => {
+    const orphan = { ...cue('l1', '失效灯光'), start: { kind: 'block', blockId: 'deleted', offset: 1 },
+      end: { kind: 'block', blockId: 'deleted', offset: 1 } } as Cue;
+    // initialCues 是首次加载快照，使用真实重挂载复现包含失效 Cue 的页面。
+    await act(async () => { root.render(null); });
+    await act(async () => { root.render(<CuePage {...props} initialCues={[orphan]} />); });
+    const deletion = () => [...container.querySelectorAll('button')].find(button => button.textContent === '删除');
+    expect(deletion()).toBeDefined();
+    const mode = container.querySelector<HTMLSelectElement>('select')!;
+    act(() => { mode.value = 'read'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(container.textContent).toContain('失效的 Cue');
+    expect(deletion()).toBeUndefined();
+    expect(container.querySelector('[data-chip-cue-id="cue-l1"]')!.textContent).not.toContain('⠿');
+    act(() => { mode.value = 'edit'; mode.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(deletion()).toBeDefined();
+    expect(container.querySelector('[data-chip-cue-id="cue-l1"]')!.textContent).toContain('⠿');
+  });
   it('聚焦草稿对账后提交仍传原值；失败保留草稿与明确提示', async () => {
     const input = select(); act(() => input.focus()); edit(input, '本地草稿');
     await trigger(); await settle(0, 200, [cue('l1', '线上新名称')]); await settle(1, 200, [cue('l2', '最新音响')]);
