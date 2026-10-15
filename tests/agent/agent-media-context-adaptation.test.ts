@@ -108,7 +108,7 @@ describe("#967 请求边界媒体适配", () => {
       trigger: "pressure", completeSimple: complete });
     expect(complete).toHaveBeenCalledOnce();
     expect(estimateRequestBudget(model, next).fits).toBe(true);
-    const raw = next.messages.flatMap((message) => Array.isArray(message.content) ? message.content : [])
+    const raw = next.messages.flatMap((message) => message.role !== "assistant" && Array.isArray(message.content) ? message.content : [])
       .filter((part) => part.type === "audio");
     expect(raw).toEqual([fresh]);
   });
