@@ -54,6 +54,7 @@ describe("MMP v3 capability binder", () => {
     const run = runHandle();
     const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run }, { client });
     expect(surface.tools.map((tool) => tool.mcpName)).toEqual(["mmp.image.generate"]);
+    expect(surface.tools[0].description).toContain("my.attachment_rename");
     expect(surface.catalog[0]).toMatchObject({ family: "mmp.image.generate", scope: "personal" });
     bridgeMocks.run.mockResolvedValueOnce({ text: "done", attachments: [{ id: "aat_output", fileName: "片段.wav", mimeType: "audio/wav", fileSize: 12 }], media: [] });
     await surface.tools[0].execute("call-1", { prompt: "纸雕鲸鱼" }, new AbortController().signal);

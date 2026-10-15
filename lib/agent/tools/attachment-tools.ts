@@ -1,4 +1,8 @@
+import { extname } from "node:path";
 import {
+  getReadyAttachmentForSession,
+  getAttachmentForSession,
+  renameAttachmentForSession,
   releaseAttachmentForRun,
 } from "@/lib/agent/attachment-db";
 import { getPool } from "@/lib/pg";
@@ -8,6 +12,34 @@ import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { createAsset } from "@/lib/asset/db";
 import { isAssetType, type AssetType } from "@/lib/asset/types";
 import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
+
+export async function renameSessionAttachment(input: {
+  userId: string; sessionId: string | null; attachmentId: string; fileName: string;
+}): Promise<string> {
+  if (!input.sessionId) throw new Error("当前运行没有会话上下文，无法重命名临时附件。");
+  const attachment = await getReadyAttachmentForSession(input.attachmentId, input.sessionId, input.userId);
+  if (!attachment) {
+    const unavailable = await getAttachmentForSession(input.attachmentId, input.sessionId, input.userId);
+    if (unavailable?.status === "promoted") throw new Error("该附件已存为资产，请使用资产改名工具。");
+    throw new Error("附件不存在、不属于当前会话，或已释放、过期，无法改名。");
+  }
+  let fileName = input.fileName.trim();
+  if (!fileName || fileName === "." || fileName === ".." || /[\\/\u0000-\u001f\u007f]/.test(fileName)) {
+    throw new Error("新文件名不能为空，不能包含路径分隔符或控制字符。");
+  }
+  const extension = extname(attachment.fileName);
+  const requestedExtension = extname(fileName);
+  if (extension && !requestedExtension) fileName += extension;
+  else if (requestedExtension.toLowerCase() !== extension.toLowerCase()) {
+    throw new Error(`改名必须保留原扩展名${extension || "（原文件无扩展名）"}，不会转换文件格式。`);
+  } else if (extension) {
+    fileName = fileName.slice(0, -requestedExtension.length) + extension;
+  }
+  if (fileName.length > 240) throw new Error("新文件名不能超过 240 个字符（含扩展名）。");
+  const updated = await renameAttachmentForSession(input.attachmentId, input.sessionId, input.userId, fileName);
+  if (!updated) throw new Error("附件已释放、过期或存为资产，无法改名；请重新确认附件状态。");
+  return `已将附件《${neutralizeInjectionTags(attachment.fileName)}》改名为《${neutralizeInjectionTags(updated.fileName)}》（attachmentId: ${updated.id}）。`;
+}
 
 export async function releaseSessionAttachment(input: {
   userId: string; sessionId: string | null; runId: string | null; attachmentId: string;

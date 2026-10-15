@@ -40,6 +40,7 @@ export async function buildAttachmentLifecycleBlock(input: {
     );
   }
   lines.push(
+    "可调用 my.attachment_rename 给有效临时附件改名；保留原扩展名，按内容与用途命名。",
     canSave
       ? "可调用 production.attachment_save_as_asset 将应长期保留的附件存入当前制作资产库；可调用 my.attachment_release 释放本轮已成功处理且不再需要的附件。"
       : "可调用 my.attachment_release 释放本轮已成功处理且不再需要的附件。",
@@ -47,6 +48,6 @@ export async function buildAttachmentLifecycleBlock(input: {
   );
   return {
     text: lines.join("\n"),
-    toolNames: ["my.attachment_release", ...(canSave ? ["production.attachment_save_as_asset"] : [])],
+    toolNames: ["my.attachment_rename", "my.attachment_release", ...(canSave ? ["production.attachment_save_as_asset"] : [])],
   };
 }

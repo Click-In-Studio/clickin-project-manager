@@ -21,6 +21,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "my-memory_write": "记录协作记忆",
   "my-memory_search": "检索我的记忆",
   "my-attachment_read": "读取会话附件与产物",
+  "my-attachment_rename": "重命名会话附件",
   "my-attachment_release": "释放临时附件",
   "production-info": "查询制作详情",
   "production-my_role": "查询我的职位信息",

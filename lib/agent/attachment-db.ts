@@ -239,6 +239,20 @@ export async function getReadyAttachmentForSession(attachmentId: string, session
   return (await getReadyAttachments([attachmentId], sessionId, userId))[0] ?? null;
 }
 
+/** 改名只更新有效临时附件的元数据，归属与生命周期在写入时再次检查。 */
+export async function renameAttachmentForSession(
+  attachmentId: string, sessionId: string, userId: string, fileName: string,
+): Promise<AgentAttachment | null> {
+  const r = await getPool().query<Row>(
+    `UPDATE agent_session_attachment a SET file_name = $4
+     FROM agent_session s
+     WHERE a.id = $1 AND a.session_id = $2 AND s.id = a.session_id AND s.user_id = $3
+       AND a.status = 'ready' AND a.expires_at > now()
+     RETURNING a.*`, [attachmentId, sessionId, userId, fileName],
+  );
+  return r.rows[0] ? mapRow(r.rows[0]) : null;
+}
+
 export async function getAttachmentForSession(attachmentId: string, sessionId: string, userId: string): Promise<AgentAttachment | null> {
   const r = await getPool().query<Row>(
     `SELECT a.* FROM agent_session_attachment a JOIN agent_session s ON s.id = a.session_id
