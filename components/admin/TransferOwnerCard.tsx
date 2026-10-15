@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useState } from "react";
 import { BASE_PATH } from "@/lib/base-path";
 import MemberPickerModal, { type PickerMember, type PickerDept } from "@/components/perm/MemberPickerModal";
@@ -64,7 +65,7 @@ export default function TransferOwnerCard({ productionId, currentOwnerName, memb
           }}
         >
           <span>{target ? target.name : "选择新 Owner…"}</span>
-          <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+          <ChevronIcon size={12} className="shrink-0 text-[var(--muted)]" />
         </button>
         {pickerOpen && (
           <MemberPickerModal

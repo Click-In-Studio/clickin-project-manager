@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -731,7 +732,7 @@ function ManagedElsewhere({ groups }: { groups: DeptPermissionGroup[] }) {
                 cursor: "pointer", textAlign: "left",
               }}
             >
-              <span style={{ fontSize: 10, color: "var(--muted)", width: 10 }}>{expanded ? "▾" : "▸"}</span>
+              <ChevronIcon direction={expanded ? "down" : "right"} size={12} className="shrink-0 text-[var(--muted)]" />
               <Badge tone="neutral">{TYPE_LABELS[g.resourceType] ?? g.resourceType}</Badge>
               <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {g.label}
