@@ -8,6 +8,7 @@
 // ⋯ 菜单的项表在 lib/node/tree-menu.ts（#511）：四 kind 同一套项同一顺序，不支持的
 // 灰掉给原因，不按 kind 消失。这里只做分派与渲染。
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -764,10 +765,10 @@ export default function WikiShell({
                       if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
                       return next;
                     })}
-                    className={`w-4 shrink-0 text-[10px] text-zinc-400 hover:text-zinc-600 ${hasChildren ? "" : "invisible"}`}
+                    className={`flex w-4 shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-600 ${hasChildren ? "" : "invisible"}`}
                     aria-label="展开/折叠"
                   >
-                    {expanded.has(item.id) ? "▾" : "▸"}
+                    <ChevronIcon direction={expanded.has(item.id) ? "down" : "right"} size={12} />
                   </button>
                   {renamingId === item.id ? (
                     <input

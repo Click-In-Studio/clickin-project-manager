@@ -1,5 +1,8 @@
 import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
-import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
+import { prepareModelAttachments } from "./model-attachments";
+import { restoreModelMedia, refreshMediaReferences, attachmentReadNeeded } from "./model-media-state";
+import { selectMediaCompactionModel } from "./media-compaction-model";
+import { convertToLlm } from "../../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import type { ModelKey } from "../model-types";
 import { setToolObservationSources } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, currentAdmissionScope, waitForInput, wrapTools, type PrepareAdmittedRequest } from "./admission";
@@ -30,8 +33,10 @@ import { subscribeSessionEvents } from "./events";
 import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
-import { compactRequestContext } from "./request-compaction";
 import { assistantFailureReason } from "./stream-lines";
+import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
+import { estimateRequestBudget } from "./context-budget";
+import { readModelMedia } from "./model-read";
 
 const TIMEOUT_MS = 30 * 60_000;
 const TOOL_CAP = 100;
@@ -276,11 +281,14 @@ async function executeBody(
     execute: async (_call, args) => {
       const id = String((args as { attachmentId: string }).attachmentId);
       if (!job.attachment_ids.includes(id)) throw new Error("附件不在此次交接范围内");
-      const prepared = await prepareModelAttachments("重读交接原件", [id], mediaInput);
-      return { content: [{ type: "text" as const, text: prepared.text }, ...prepared.media], details: undefined };
+      return readModelMedia({ userId: job.user_id, productionId: job.production_id, run: {
+        runId: job.id, sessionId: job.parent_session_id, signal: abort.signal,
+        publish: () => {}, setStatus: async () => {}, isDetached: () => detached,
+        prepareMediaRead,
+      } }, { attachmentId: id }, _call);
     } });
   setToolObservationSources({ resident: tools.map(t => t.name) });
-  const prepareRequest: PrepareAdmittedRequest = async ({ model, context, options, trigger, signal, calibration }) => {
+  const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => {
     const serviceRuntime = (await import("./service")).runtimeOverrides;
     return compactRequestContext({
       session,
@@ -290,8 +298,18 @@ async function executeBody(
       signal,
       trigger,
       maxTokens: options?.maxTokens,
-      streamOptions: options, calibration,
-      prepareMessages: (messages) => restoreModelMedia(messages, mediaInput),
+      streamOptions: options, calibration, pendingMedia,
+      refreshContext: async (context) => {
+        const messages = await restoreModelMedia(context.messages, mediaInput);
+        const name = exposedName("my.attachment_read");
+        const requestTools = (context.tools ?? []).filter((tool) => tool.name !== name);
+        const read = tools.find((tool) => tool.name === name);
+        if (read && await attachmentReadNeeded(messages, mediaInput, job.attachment_ids))
+          requestTools.push({ name: read.name, description: read.description, parameters: read.parameters });
+        return { ...context, messages: convertToLlm(messages), tools: requestTools };
+      },
+      prepareMessages: (messages, summaryModel) => restoreModelMedia(messages, { ...mediaInput, model: summaryModel }),
+      selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, job.user_id, job.production_id),
       completeSimple: llmRuntime().completeSimple,
       compactFn: serviceRuntime.compactFn,
       shouldCompact: serviceRuntime.shouldCompactFn,
@@ -306,12 +324,28 @@ async function executeBody(
           cacheRead: 0,
           usd: cost.usd,
           compaction: true,
+          modelId: cost.model.id,
         }))) {
           costExceeded = true;
           abort.abort();
         }
       },
     });
+  };
+  const prepareMediaRead = async (media: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => {
+    const pending = { role: "user" as const, timestamp: 0, content: [media] };
+    const current = await session.buildContext();
+    const context = { systemPrompt: SYSTEM,
+      tools: tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+      messages: convertToLlm([...current.messages, pending]) };
+    if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }).fits) return false;
+    try {
+      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, media);
+      return estimateRequestBudget(selectedModel, prepared).fits;
+    } catch (error) {
+      if (error instanceof CompactionBudgetError) return false;
+      throw error;
+    }
   };
   const harness = new CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>({
     env: {} as ExecutionEnv,
@@ -336,7 +370,7 @@ async function executeBody(
       completeSimple: llmRuntime().completeSimple,
     },
   });
-  harness.on("context", async ({ messages }) => ({ messages: await restoreModelMedia(messages, mediaInput) }));
+  harness.on("context", async ({ messages }) => ({ messages: await refreshMediaReferences(messages, mediaInput) }));
   ready({
     stop: async () => {
       abort.abort();

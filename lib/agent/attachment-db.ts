@@ -172,6 +172,9 @@ export async function markAttachmentReady(
   verifiedSize: number,
   sourceMetadata?: Record<string, unknown>,
 ): Promise<AgentAttachment | null> {
+  if (!Number.isSafeInteger(verifiedSize) || verifiedSize < 0 || verifiedSize > AGENT_ATTACHMENT_MAX_BYTES) {
+    throw Object.assign(new Error("附件实际大小超过 50 MiB 或无效"), { status: 413 });
+  }
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -234,6 +237,20 @@ export async function getReadyAttachments(attachmentIds: string[], sessionId: st
 
 export async function getReadyAttachmentForSession(attachmentId: string, sessionId: string, userId: string): Promise<AgentAttachment | null> {
   return (await getReadyAttachments([attachmentId], sessionId, userId))[0] ?? null;
+}
+
+/** 改名只更新有效临时附件的元数据，归属与生命周期在写入时再次检查。 */
+export async function renameAttachmentForSession(
+  attachmentId: string, sessionId: string, userId: string, fileName: string,
+): Promise<AgentAttachment | null> {
+  const r = await getPool().query<Row>(
+    `UPDATE agent_session_attachment a SET file_name = $4
+     FROM agent_session s
+     WHERE a.id = $1 AND a.session_id = $2 AND s.id = a.session_id AND s.user_id = $3
+       AND a.status = 'ready' AND a.expires_at > now()
+     RETURNING a.*`, [attachmentId, sessionId, userId, fileName],
+  );
+  return r.rows[0] ? mapRow(r.rows[0]) : null;
 }
 
 export async function getAttachmentForSession(attachmentId: string, sessionId: string, userId: string): Promise<AgentAttachment | null> {

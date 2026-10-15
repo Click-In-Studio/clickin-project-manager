@@ -18,7 +18,7 @@ beforeAll(async () => {
   const production = await makeProduction();
   demoId = production.prodId;
   demoVersionId = production.versionId;
-  await seedLocalDemoScript(demoId, demoVersionId);
+  await seedLocalDemoScript(demoId, demoVersionId, demoId);
   fresh = await makeProduction();
 });
 
@@ -60,6 +60,21 @@ async function snapshot(productionId: string, versionId: string) {
 }
 
 describe("本地演示剧本标记", () => {
+  it("两个演示剧本可同时存在，清理一个项目不影响另一个", async () => {
+    const before = await snapshot(demoId, demoVersionId);
+    const other = await makeProduction();
+    try {
+      await seedLocalDemoScript(other.prodId, other.versionId, other.prodId);
+      const state = await snapshot(other.prodId, other.versionId);
+      expect(state.blocks).toHaveLength(8);
+      expect(state.blocks.every(block => block.id.startsWith(`${other.prodId}-`))).toBe(true);
+      expect(state.blocks.some(block => before.blocks.some(existing => existing.id === block.id))).toBe(false);
+      expect(await snapshot(demoId, demoVersionId)).toEqual(before);
+    } finally {
+      await cleanupProduction(other.prodId);
+    }
+    expect(await snapshot(demoId, demoVersionId)).toEqual(before);
+  });
   it("seed 为所有章节和段落建立身份锚，并同步归属和派生详情", async () => {
     const { rows } = await getPool().query<{
       block_id: string; type: string; scene_id: string | null; anchor_id: string | null;

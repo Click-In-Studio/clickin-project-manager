@@ -13,6 +13,7 @@ import {
   productionHeaderStageForWidth,
   adjacentProductionToolbarStage,
   productionTopbarOverflow,
+  layoutProgressiveToolbar,
 } from "./toolbar-stage";
 
 const PRODUCTION_TOOLBAR_UNFOLD_BUFFER_PX = 16;
@@ -41,10 +42,9 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
   const closeTopOverflow = useCallback(() => setTopOverflowOpen(false), []);
   const topOverflowMenu = useAnchoredMenu<HTMLButtonElement>(topOverflowOpen, "bottom");
   const handleProductionSearchOpenChange = useCallback((open: boolean, stored: boolean) => {
-    productionSearchOpenRef.current = open;
-    if (open && !stored) closeTopOverflow();
+    productionSearchOpenRef.current = open && !stored;
     setProductionSearchPath(open && !stored ? pathname : null);
-  }, [pathname, closeTopOverflow]);
+  }, [pathname]);
   const productionToolbarContext = useMemo(() => ({
     stage: productionToolbarStage,
     closeOverflow: closeTopOverflow,
@@ -65,9 +65,15 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     if (!topbar) return;
     if (productionSearchOpenRef.current) return;
 
+    const progressiveStored = layoutProgressiveToolbar(topbar);
+    if (progressiveStored !== null) {
+      setProductionToolbarStage(PRODUCTION_TOOLBAR_STAGE.searchCollapsed);
+      setProductionToolbarHasStoredControls(progressiveStored);
+      return;
+    }
     const current = productionToolbarStageRef.current;
     if (!topbar.querySelector(`#${PRODUCTION_TOP_MENU_SLOT_ID}`)) return;
-    const overflowTarget = topbar.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
+    const overflowTarget = document.querySelector(`#${PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID}`);
     if (!!overflowTarget?.childElementCount !== productionToolbarHasStoredControlsRef.current) return;
 
     const overflow = productionTopbarOverflow(topbar);
@@ -106,6 +112,11 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     const mutationObserver = new MutationObserver(scheduleMeasure);
     resizeObserver.observe(topbar);
     mutationObserver.observe(topbar, { childList: true, characterData: true, subtree: true });
+    const overflowTarget = document.getElementById(PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID);
+    if (overflowTarget) {
+      mutationObserver.observe(overflowTarget, { childList: true, characterData: true, subtree: true });
+      resizeObserver.observe(overflowTarget);
+    }
     window.addEventListener("resize", scheduleMeasure);
     return () => {
       resizeObserver.disconnect();
@@ -122,8 +133,8 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
   }, [pathname]);
 
   useLayoutEffect(() => {
-    closeTopOverflow();
-  }, [productionToolbarStage, productionToolbarHasStoredControls, closeTopOverflow]);
+    if (!productionToolbarHasStoredControls) closeTopOverflow();
+  }, [productionToolbarHasStoredControls, closeTopOverflow]);
 
   useEffect(() => {
     setProductionSearchPath(null);
@@ -131,17 +142,6 @@ export function useProductionToolbarStage({ pathname }: { pathname: string }) {
     setTopOverflowOpen(false);
   }, [pathname]);
 
-  useEffect(() => {
-    if (!topOverflowOpen) return;
-    const handler = (event: MouseEvent) => {
-      const target = event.target;
-      if (topOverflowRef.current?.contains(target as Node)) return;
-      if (target instanceof Element && target.closest("[data-production-overflow-menu-child]")) return;
-      closeTopOverflow();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [topOverflowOpen, closeTopOverflow]);
 
   return {
     productionHeaderStage,

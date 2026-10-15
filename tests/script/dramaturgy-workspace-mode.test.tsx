@@ -228,11 +228,8 @@ describe("模式门与原有细粒度权限相交", () => {
     const dramaturgy = readFileSync("components/script/Dramaturgy.tsx", "utf8");
     const characters = readFileSync("components/script/CharactersManager.tsx", "utf8");
     const detail = readFileSync("components/script/CharacterDetail.tsx", "utf8");
-    for (const source of [dramaturgy, characters]) {
-      expect(source).toContain("toolbarStage >= PRODUCTION_TOOLBAR_STAGE.primaryStored");
-      expect(source).toContain("toolbarStage < PRODUCTION_TOOLBAR_STAGE.primaryStored");
-      expect(source).toContain("页面模式");
-    }
+    expect(dramaturgy).toContain('id="mode" priority={30}');
+    expect(characters).toContain('id="mode" priority={30}');
     expect(detail).toContain('className="truncate text-sm font-bold text-zinc-500"');
   });
 });

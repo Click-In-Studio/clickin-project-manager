@@ -1,117 +1,44 @@
+import { extname } from "node:path";
 import {
   getReadyAttachmentForSession,
   getAttachmentForSession,
-  recordAttachmentAccess,
+  renameAttachmentForSession,
   releaseAttachmentForRun,
 } from "@/lib/agent/attachment-db";
 import { getPool } from "@/lib/pg";
-import { getR2Object } from "@/lib/r2";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
-import { attachmentDocRead, attachmentFileOcr } from "./doc-tools";
-import { preflightAttachment } from "@/lib/mmp/attachment-preflight";
 import { resolveProductionActor } from "./production-tools";
 import { hasEffectiveGrant } from "@/lib/perm/grant-check";
 import { createAsset } from "@/lib/asset/db";
 import { isAssetType, type AssetType } from "@/lib/asset/types";
 import { enqueueAssetPostProcess } from "@/lib/job/asset-jobs";
 
-const TEXT_MAX_BYTES = 1024 * 1024;
-const TEXT_MAX_CHARS = 80_000;
-
-export async function readSessionAttachment(
-  userId: string,
-  productionId: string | null,
-  sessionId: string | null,
-  input: {
-    attachmentId: string;
-    mode?: "preflight" | "outline" | "read" | "search" | "ocr";
-    ranges?: Array<{ from: number; to: number }>;
-    query?: string;
-    pages?: number[];
-    tier?: "fast" | "full";
-    limit?: number;
-  },
-  runId?: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (!sessionId) return "当前运行没有会话上下文，无法读取临时附件。";
-  const attachment = await getReadyAttachmentForSession(input.attachmentId, sessionId, userId);
+export async function renameSessionAttachment(input: {
+  userId: string; sessionId: string | null; attachmentId: string; fileName: string;
+}): Promise<string> {
+  if (!input.sessionId) throw new Error("当前运行没有会话上下文，无法重命名临时附件。");
+  const attachment = await getReadyAttachmentForSession(input.attachmentId, input.sessionId, input.userId);
   if (!attachment) {
-    const unavailable = await getAttachmentForSession(input.attachmentId, sessionId, userId);
-    if (!unavailable) return "没有找到该临时附件，或它不属于当前会话。";
-    if (unavailable.status === "released") return "该临时附件已安排释放；用户可在宽限期内从聊天记录恢复后再读取。";
-    if (unavailable.status === "promoted") return `该临时附件已存为资产${unavailable.promotedAssetId ? `（资产 id: ${unavailable.promotedAssetId}）` : ""}，请改用资产读取工具。`;
-    return "该临时附件已过期或正在清理，原件不再可读。";
+    const unavailable = await getAttachmentForSession(input.attachmentId, input.sessionId, input.userId);
+    if (unavailable?.status === "promoted") throw new Error("该附件已存为资产，请使用资产改名工具。");
+    throw new Error("附件不存在、不属于当前会话，或已释放、过期，无法改名。");
   }
-  const done = async (output: string) => {
-    if (runId) await recordAttachmentAccess(runId, [attachment.id], "read");
-    return output;
-  };
-  const lower = attachment.fileName.toLowerCase();
-  const ref = {
-    fileId: attachment.id,
-    r2Key: attachment.r2Key,
-    fileSize: attachment.fileSize,
-    fileName: attachment.fileName,
-  };
-  // preflight 是通用 MMP 入口：不要先按宿主认识的文件种类分流。MMP v3
-  // 会用 purpose + Content-Type 决定当前和未来的媒体能力。
-  if (input.mode === "preflight") {
-    const preflight = await preflightAttachment({
-      attachmentId: attachment.id,
-      mediaKind: attachment.mediaKind,
-      mimeType: attachment.mimeType,
-      r2Key: attachment.r2Key,
-    }, { signal, usage: { userId, productionId } });
-    return done(neutralizeInjectionTags(preflight.contextText));
+  let fileName = input.fileName.trim();
+  if (!fileName || fileName === "." || fileName === ".." || /[\\/\u0000-\u001f\u007f]/.test(fileName)) {
+    throw new Error("新文件名不能为空，不能包含路径分隔符或控制字符。");
   }
-  if (lower.endsWith(".docx") || lower.endsWith(".pdf")) {
-    if (input.mode === "ocr") {
-      return done(await attachmentFileOcr(userId, productionId, ref, attachment.mimeType, input.pages ?? [1], {
-        tier: input.tier,
-        sessionId,
-        signal,
-      }));
-    }
-    return done(await attachmentDocRead(ref, {
-      mode: input.mode === "read" || input.mode === "search" ? input.mode : "outline",
-      ranges: input.ranges,
-      query: input.query,
-      limit: input.limit,
-    }, { sessionId }));
+  const extension = extname(attachment.fileName);
+  const requestedExtension = extname(fileName);
+  if (extension && !requestedExtension) fileName += extension;
+  else if (requestedExtension.toLowerCase() !== extension.toLowerCase()) {
+    throw new Error(`改名必须保留原扩展名${extension || "（原文件无扩展名）"}，不会转换文件格式。`);
+  } else if (extension) {
+    fileName = fileName.slice(0, -requestedExtension.length) + extension;
   }
-  const mediaKind = attachment.mediaKind ?? /^(audio|image|video)\//.exec(attachment.mimeType)?.[1] ??
-    ((/\.(png|jpe?g|tiff?|webp)$/.test(lower)) ? "image"
-      : (/\.(mp3|wav|flac|aiff?|m4a|ogg)$/.test(lower)) ? "audio"
-        : (/\.(mp4|webm|mov|mkv)$/.test(lower)) ? "video" : null);
-  if (mediaKind && input.mode !== "ocr") {
-    const preflight = await preflightAttachment({
-      attachmentId: attachment.id,
-      mediaKind: attachment.mediaKind,
-      mimeType: attachment.mimeType,
-      r2Key: attachment.r2Key,
-    }, { signal, usage: { userId, productionId } });
-    return done(neutralizeInjectionTags(preflight.contextText));
-  }
-  if (mediaKind === "image") {
-    return done(await attachmentFileOcr(userId, productionId, ref, attachment.mimeType, [1], {
-      tier: input.tier,
-      sessionId,
-      signal,
-    }));
-  }
-  if (attachment.mimeType.startsWith("text/") || /\.(md|txt|csv|json|xml|yaml|yml|log)$/.test(lower)) {
-    if (attachment.fileSize > TEXT_MAX_BYTES) return `《${neutralizeInjectionTags(attachment.fileName)}》超过纯文本单次读取上限 1 MB。`;
-    const object = await getR2Object(attachment.r2Key);
-    if (!object) return "附件原件不存在，请让用户重新上传。";
-    const text = object.body.toString("utf8").replace(/\u0000/g, "�");
-    const clipped = text.length > TEXT_MAX_CHARS ? `${text.slice(0, TEXT_MAX_CHARS)}\n…（已截断）` : text;
-    return done(neutralizeInjectionTags(`《${attachment.fileName}》：\n${clipped}`));
-  }
-  if (mediaKind === "audio") {
-    return done(neutralizeInjectionTags(`《${attachment.fileName}》是音频附件，原件已保留在当前会话中；当前没有可显式调用的音频读取能力。`));
-  }
-  return done(neutralizeInjectionTags(`《${attachment.fileName}》（${attachment.mimeType}，${attachment.fileSize} bytes）的原件已保留，但当前没有适合该格式的读取器。`));
+  if (fileName.length > 240) throw new Error("新文件名不能超过 240 个字符（含扩展名）。");
+  const updated = await renameAttachmentForSession(input.attachmentId, input.sessionId, input.userId, fileName);
+  if (!updated) throw new Error("附件已释放、过期或存为资产，无法改名；请重新确认附件状态。");
+  return `已将附件《${neutralizeInjectionTags(attachment.fileName)}》改名为《${neutralizeInjectionTags(updated.fileName)}》（attachmentId: ${updated.id}）。`;
 }
 
 export async function releaseSessionAttachment(input: {

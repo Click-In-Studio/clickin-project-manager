@@ -15,6 +15,7 @@
  * 本组件只在 owner 门内渲染（父组件按 canManageFlows 决定）；API 侧同一道门。
  */
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import styles from "@/components/ui/my-pages.module.css";
@@ -505,13 +506,13 @@ export default function ApprovalFlowDesigner({ productionId }: { productionId: s
                               aria-label={`上移 ${node.title}`}
                               disabled={index === 0}
                               onClick={() => reorderNode(index, index - 1)}
-                            >▲</button>
+                            ><ChevronIcon direction="up" size={12} /></button>
                             <button
                               type="button"
                               aria-label={`下移 ${node.title}`}
                               disabled={index === selectedTemplate.nodes.length - 1}
                               onClick={() => reorderNode(index, index + 1)}
-                            >▼</button>
+                            ><ChevronIcon direction="down" size={12} /></button>
                           </div>
                         </div>
 

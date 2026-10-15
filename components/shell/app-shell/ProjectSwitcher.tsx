@@ -114,7 +114,7 @@ export default function ProjectSwitcher({
         onMouseLeave={() => setBtnHovered(false)}
         style={{
           height: compact ? 36 : 44,
-          padding: compact ? "5px 7px" : "8px 12px",
+          padding: compact ? "5px 5px 5px 7px" : "8px 8px 8px 12px",
           display: "flex",
           alignItems: "center",
           gap: compact ? 4 : 10,
@@ -165,7 +165,7 @@ export default function ProjectSwitcher({
         ) : (
           <ChevronIcon
             direction={open ? "up" : "down"}
-            size={12}
+            size={10}
             className="shrink-0 text-[var(--muted)]"
           />
         )}

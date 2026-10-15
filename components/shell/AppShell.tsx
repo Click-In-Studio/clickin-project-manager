@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
@@ -276,11 +277,17 @@ export default function AppShell({ session, productions, canCreateProduction = f
           ? ["cues", "cuelists"]
           : path,
     );
-  const isCreationActive = CREATION_NAV.some((item) => isCreationItemActive(item.path));
-  const isProductionNavActive = PRODUCTION_NAV.some((item) => isModuleActive(item.path));
+  const currentCreationItem = CREATION_NAV.find((item) => isCreationItemActive(item.path));
+  const isCreationActive = !!currentCreationItem;
+  const currentProductionItem = PRODUCTION_NAV.find((item) => isModuleActive(item.path));
+  const isProductionNavActive = !!currentProductionItem;
   const isProductionOverviewItemActive = (item: (typeof PRODUCTION_OVERVIEW_NAV)[number]) =>
     item.activeModules.some((module) => module === activeModule);
-  const isProductionOverviewActive = PRODUCTION_OVERVIEW_NAV.some(isProductionOverviewItemActive);
+  const currentOverviewItem = PRODUCTION_OVERVIEW_NAV.find(isProductionOverviewItemActive);
+  const isProductionOverviewActive = !!currentOverviewItem;
+  const currentAdminItem = isAdminMode
+    ? adminNavGroups.flatMap((group) => group.items).find((item) => item.path === activeAdminModule)
+    : undefined;
   const isOverviewActive = OVERVIEW_NAV.some((item) => pathname.startsWith(item.path));
 
   const closeDrawer = () => setDrawerOpen(null);
@@ -380,6 +387,7 @@ export default function AppShell({ session, productions, canCreateProduction = f
           <SearchBar
             key={pathname}
             productionId={productionId}
+            keepInline={/\/(script|dramaturgy|cues)(\/|$)/.test(pathname)}
             onOpenChange={hasProductionTopMenu ? handleProductionSearchOpenChange : undefined}
           />
 
@@ -427,29 +435,37 @@ export default function AppShell({ session, productions, canCreateProduction = f
                   ref={topOverflowMenu.anchorRef}
                   type="button"
                   aria-label="更多工具"
+                  aria-controls="production-page-toolbar-overflow-slot"
                   aria-expanded={topOverflowOpen}
                   onClick={() => setTopOverflowOpen((open) => !open)}
                   className="flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border-0 bg-[var(--surface)] px-2 text-xs font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--surface-2)]"
                 >
-                  <span>更多</span><span aria-hidden="true">⋮</span>
+                  <span>更多</span><ChevronIcon direction={topOverflowOpen ? "up" : "down"} size={12} />
                 </button>
               )}
-              <div
-                ref={topOverflowMenu.menuRef}
-                style={topOverflowMenu.style}
-                data-production-overflow-menu="true"
-                className={productionToolbarHasStoredControls && topOverflowOpen
-                  ? "z-40 flex w-52 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md"
-                  : "hidden"
-                }
-              >
-                <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
-                <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
-              </div>
             </div>
           )}
         </div>
       </header>
+
+      {hasTopMenu && (
+        <div
+          ref={topOverflowMenu.menuRef}
+          aria-hidden={!topOverflowOpen}
+          inert={!topOverflowOpen}
+          data-production-overflow-menu="true"
+          data-secondary-toolbar-open={productionToolbarHasStoredControls && topOverflowOpen ? "true" : undefined}
+          role="region"
+          aria-label="更多工具栏"
+          className={productionToolbarHasStoredControls && topOverflowOpen
+            ? "production-secondary-toolbar"
+            : "production-secondary-toolbar production-secondary-toolbar-closed"
+          }
+        >
+          <div id={PRODUCTION_TOP_MENU_SEARCH_OVERFLOW_SLOT_ID} className="order-first shrink-0" />
+          <div id={PRODUCTION_TOP_MENU_OVERFLOW_SLOT_ID} className="order-last shrink-0" />
+        </div>
+      )}
 
       {/* Body: sidebar + workspace */}
       <div className="relative flex flex-1 min-h-0">
@@ -610,9 +626,10 @@ export default function AppShell({ session, productions, canCreateProduction = f
                 onClick={closeAiPopout}
               />
               <MobileTab
-                label="配置菜单"
-                symbol={<NavigationIcon name="settings" />}
-                active={drawerOpen === "admin"}
+                label={currentAdminItem?.label ?? "配置菜单"}
+                symbol={<NavigationIcon name={currentAdminItem?.icon ?? "settings"} />}
+                active={!!currentAdminItem}
+                expanded={drawerOpen === "admin"}
                 onClick={() => toggleDrawer("admin")}
               />
               {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
@@ -620,7 +637,8 @@ export default function AppShell({ session, productions, canCreateProduction = f
               <MobileTab
                 label="我"
                 symbol={avatarSymbol}
-                active={drawerOpen === "me"}
+                active={false}
+                expanded={drawerOpen === "me"}
                 onClick={() => toggleDrawer("me")}
               />
             </>
@@ -628,28 +646,32 @@ export default function AppShell({ session, productions, canCreateProduction = f
             /* Production mode */
             <>
               <MobileTab
-                label="概览"
-                symbol={<NavigationIcon name="overview" />}
-                active={isProductionOverviewActive || drawerOpen === "project-overview"}
+                label={currentOverviewItem ? productionTopMenuLabel ?? currentOverviewItem.label : "概览"}
+                symbol={<NavigationIcon name={currentOverviewItem?.icon ?? "overview"} />}
+                active={isProductionOverviewActive}
+                expanded={drawerOpen === "project-overview"}
                 onClick={() => toggleDrawer("project-overview")}
               />
               <MobileTab
-                label="创作"
-                symbol={<NavigationIcon name="creation" />}
-                active={isCreationActive || drawerOpen === "creation"}
+                label={currentCreationItem ? productionTopMenuLabel ?? currentCreationItem.label : "创作"}
+                symbol={<NavigationIcon name={currentCreationItem?.icon ?? "creation"} />}
+                active={isCreationActive}
+                expanded={drawerOpen === "creation"}
                 onClick={() => toggleDrawer("creation")}
               />
               {aiEntryVisible && <MobileAiAction open={aiPopoutOpen} onClick={toggleAiPopout} />}
               <MobileTab
-                label="制作"
-                symbol={<NavigationIcon name="production" />}
-                active={isProductionNavActive || drawerOpen === "production"}
+                label={currentProductionItem ? productionTopMenuLabel ?? currentProductionItem.label : "制作"}
+                symbol={<NavigationIcon name={currentProductionItem?.icon ?? "production"} />}
+                active={isProductionNavActive}
+                expanded={drawerOpen === "production"}
                 onClick={() => toggleDrawer("production")}
               />
               <MobileTab
                 label="我"
                 symbol={avatarSymbol}
-                active={drawerOpen === "me"}
+                active={false}
+                expanded={drawerOpen === "me"}
                 onClick={() => toggleDrawer("me")}
               />
             </>

@@ -1,9 +1,9 @@
+import { restoreModelMedia } from "@/lib/agent/runtime/model-media-state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { readFileSync } from "node:fs";
 import {
   prepareModelAttachments,
-  restoreModelMedia,
   type MediaInput,
 } from "@/lib/agent/runtime/model-attachments";
 import { llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
@@ -138,10 +138,9 @@ describe("原件准备与恢复", () => {
     )).toBe(true);
     state.rows = [{ ...sound, fileSize: 71_250_001 }];
     state.preflight.mockClear();
-    await expect(
-      prepareModelAttachments("听声音", ["sound"], { ...input, model }),
-    ).rejects.toThrow("超过本次传输预算");
-    expect(state.preflight).not.toHaveBeenCalled();
+    const oversized = await prepareModelAttachments("听声音", ["sound"], { ...input, model });
+    expect(oversized.media).toEqual([]);
+    expect(state.preflight).toHaveBeenCalledWith([expect.objectContaining({ attachmentId: "sound" })], expect.anything());
     expect(fetch).toHaveBeenCalledTimes(3);
   });
   it("读取真实 PNG 尺寸与版本，支持视觉时跳过 MMP；恢复时核对版本", async () => {
@@ -226,7 +225,7 @@ describe("原件准备与恢复", () => {
     });
     expect(state.preflight.mock.calls[0][0]).toEqual([]);
   });
-  it("归属不符不取原件；原生输入超限或读取失败明确报错，不转 MMP", async () => {
+  it("归属不符和原件读取失败明确报错；单件超限走 MMP", async () => {
     state.rows = [{ ...attachment(10), sessionId: "another" }];
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -235,14 +234,11 @@ describe("原件准备与恢复", () => {
     ).rejects.toThrow("不属于该会话");
     expect(fetch).not.toHaveBeenCalled();
     state.rows = [attachment(30 * 1024 * 1024)];
-    await expect(prepareModelAttachments(
-      "读图片",
-      ["picture"],
-      input,
-    )).rejects.toThrow("超过本次传输预算");
+    expect((await prepareModelAttachments("读图片", ["picture"], input)).media).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
-    expect(state.preflight).not.toHaveBeenCalled();
+    expect(state.preflight).toHaveBeenCalledWith([expect.objectContaining({ attachmentId: "picture" })], expect.anything());
     state.rows = [attachment(10)];
+    state.preflight.mockClear();
     fetch.mockResolvedValue(new Response(null, { status: 503 }));
     await expect(
       prepareModelAttachments("读图片", ["picture"], input),
@@ -255,7 +251,7 @@ describe("原件准备与恢复", () => {
     vi.stubGlobal("fetch", fetch);
     const result = await prepareModelAttachments("读图片", ["picture"], input);
     expect(result.media).toEqual([]);
-    expect(result.text).toContain("未接入此格式");
+    expect(result.text).toContain("不适合原生输入");
     expect(fetch).not.toHaveBeenCalled();
     expect(state.preflight).toHaveBeenCalledWith(
       [expect.objectContaining({ attachmentId: "picture" })],

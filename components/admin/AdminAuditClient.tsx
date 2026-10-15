@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
@@ -155,7 +156,7 @@ export default function AdminAuditClient({
               ×
             </span>
           ) : (
-            <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+            <ChevronIcon size={12} className="shrink-0 text-[var(--muted)]" />
           )}
         </button>
         <OverflowSafeSelect value={filters.type} onChange={e => applyFilter({ type: e.target.value })} style={FIELD}>

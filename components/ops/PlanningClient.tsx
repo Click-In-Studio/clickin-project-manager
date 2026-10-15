@@ -10,31 +10,22 @@
  * 部门 POC（policy 开关，活引用判定），与 API 同门；此处布尔仅控 UI 显隐。
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import CalendarView from "./planning/CalendarView";
 import PhaseManageModal from "./planning/PhaseManageModal";
 import TaskGanttView from "./planning/TaskGanttView";
 import TimetableView from "./planning/TimetableView";
-import { readPref, writePref } from "./planning/prefs";
 import type { Props } from "./planning/types";
 import styles from "@/components/ops/planning.module.css";
 
 // ─── 主组件：三视图 tab ────────────────────────────────────────────────────────
 
 export default function PlanningClient(props: Props) {
+  return <PlanningViews key={props.productionId} {...props} />;
+}
+
+function PlanningViews(props: Props) {
   const [mode, setMode] = useState<"calendar" | "gantt" | "timetable">("calendar");
-  const [modeRestored, setModeRestored] = useState(false);
-
-  useEffect(() => {
-    const saved = readPref(`planning-last-view:${props.productionId}`);
-    if (saved === "calendar" || saved === "gantt" || saved === "timetable") setMode(saved);
-    setModeRestored(true);
-  }, [props.productionId]);
-
-  useEffect(() => {
-    if (!modeRestored) return;
-    writePref(`planning-last-view:${props.productionId}`, mode);
-  }, [mode, modeRestored, props.productionId]);
   const [phaseModalOpen, setPhaseModalOpen] = useState(false);
   const { phasePerm } = props;
   const showPhaseManage =

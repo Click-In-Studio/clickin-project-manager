@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type Ref,
   useCallback,
+  useId,
   useContext,
   useLayoutEffect,
   useRef,
@@ -51,6 +52,30 @@ export function useProductionToolbar() {
   return useContext(ProductionToolbarContext);
 }
 
+/** 同一 portal 容器在两栏间移动，折叠不会重建控件或清空正在输入的内容。 */
+export function ProductionToolbarBlock({ id, priority, children }: {
+  id: string;
+  priority: number;
+  children: ReactNode;
+}) {
+  const instanceId = useId();
+  const markerRef = useRef<HTMLSpanElement>(null);
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const marker = markerRef.current;
+    if (!marker) return;
+    const element = document.createElement("div");
+    element.dataset.toolbarBlock = id;
+    element.dataset.toolbarInstance = instanceId;
+    element.dataset.toolbarPriority = String(priority);
+    element.className = "production-toolbar-block";
+    marker.after(element);
+    setHost(element);
+    return () => element.remove();
+  }, [id, priority, instanceId]);
+  return <><span hidden ref={markerRef} data-toolbar-marker={instanceId} />{host && createPortal(children, host)}</>;
+}
+
 const HIDDEN_ANCHORED_MENU_STYLE: CSSProperties = { position: "fixed", visibility: "hidden" };
 
 export function useAnchoredMenu<T extends HTMLElement>(open: boolean, placement: "bottom" | "left", positionKey?: string | null) {
@@ -65,6 +90,10 @@ export function useAnchoredMenu<T extends HTMLElement>(open: boolean, placement:
     const anchor = anchorRef.current;
     const menu = menuRef.current;
     if (!anchor || !menu) return;
+    if (anchor.closest("[inert]")) {
+      setPosition({ key: positionKey, style: HIDDEN_ANCHORED_MENU_STYLE });
+      return;
+    }
 
     const padding = 8;
     const gap = placement === "bottom" ? 10 : 6;
@@ -244,6 +273,7 @@ type Props = {
   barRef?: Ref<HTMLDivElement>;
   fallbackClassName?: string;
   onClick?: MouseEventHandler<HTMLDivElement>;
+  progressive?: boolean;
 };
 
 export default function ProductionTopMenu({
@@ -252,6 +282,7 @@ export default function ProductionTopMenu({
   barRef,
   fallbackClassName = "gap-0 px-4",
   onClick,
+  progressive = false,
 }: Props) {
   const { setHasStoredControls, stage } = useProductionToolbar();
   const hasOverflow = overflow !== null && overflow !== undefined;
@@ -270,9 +301,10 @@ export default function ProductionTopMenu({
   }, []);
 
   useLayoutEffect(() => {
+    if (progressive) return;
     setHasStoredControls(hasOverflow);
     return () => setHasStoredControls(false);
-  }, [hasOverflow, setHasStoredControls]);
+  }, [hasOverflow, progressive, setHasStoredControls]);
 
   if (targets === undefined) return null;
 
@@ -283,6 +315,7 @@ export default function ProductionTopMenu({
       ref={barRef}
       onClick={onClick}
       data-production-top-menu-root="true"
+      data-toolbar-progressive={progressive || undefined}
       data-production-toolbar-stage={stage}
       className={`relative flex flex-nowrap items-center ${
         portaled

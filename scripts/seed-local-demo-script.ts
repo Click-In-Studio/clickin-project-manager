@@ -4,8 +4,10 @@ import { patchCharacterMeta } from "../lib/script/script-scene-character-db";
 import { finalizeMarkerInvariantsInTx, markerStructureBlocksInTx } from "../lib/script/script-marker-tx";
 
 /** 演示项目的剧本造数；独立验证标记写入，不依赖演示项目其他模块。 */
-export async function seedLocalDemoScript(productionId: string, versionId: string): Promise<void> {
+export async function seedLocalDemoScript(productionId: string, versionId: string, idNamespace: string): Promise<void> {
   const pool = getPool();
+  // 同一命名空间保持可重复身份；回归项目使用自己的命名空间，不占用本机演示行。
+  const scopedId = (id: string) => `${idNamespace}${id.slice("demo".length)}`;
   const scenes = [
     { id: "demo-scene-1", name: "雾港清晨", synopsis: "林澈在旧码头收到一封没有署名的信。", action: "寻找寄信人", music: "序曲《潮声》", duration: "08:00" },
     { id: "demo-scene-2", name: "灯塔之下", synopsis: "旧友重逢，秘密逐渐浮出水面。", action: "确认彼此的选择", music: "二重唱《灯塔不会说谎》", duration: "12:00" },
@@ -32,14 +34,15 @@ export async function seedLocalDemoScript(productionId: string, versionId: strin
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [versionId]);
     const previousMarkerStructure = await markerStructureBlocksInTx(client, versionId);
     await upsertCharacterRowsInTx(client, productionId, versionId,
-      characters.map(([id, name], sortOrder) => ({ id, name, sortOrder, isAggregate: false })));
+      characters.map(([id, name], sortOrder) => ({ id: scopedId(id), name, sortOrder, isAggregate: false })));
     const rows = blocks.map(block => snapshotRowFromBlock({
-      id: block.block, type: block.type === "lyric" ? "dialogue" : block.type, content: block.content, characterIds: [...block.chars],
-      characterAnnotations: {}, lyric: block.type === "lyric", sceneId: block.scene,
-      rehearsalMark: null, ownerMarkerId: block.owner, markerMeta: block.meta,
-    }, { snapshotId: block.snapshot, blockId: block.block, lexKey: block.sort }));
+      id: scopedId(block.block), type: block.type === "lyric" ? "dialogue" : block.type, content: block.content, characterIds: block.chars.map(scopedId),
+      characterAnnotations: {}, lyric: block.type === "lyric", sceneId: scopedId(block.scene),
+      rehearsalMark: null, ownerMarkerId: block.owner === null ? null : scopedId(block.owner),
+      markerMeta: { ...block.meta, ...("parentMarkerId" in block.meta ? { parentMarkerId: scopedId(block.meta.parentMarkerId) } : {}) },
+    }, { snapshotId: scopedId(block.snapshot), blockId: scopedId(block.block), lexKey: block.sort }));
     await ensureSceneAnchorsInTx(client, productionId,
-      blocks.filter(block => block.type === "chapter_marker" || block.type === "scene_marker").map(block => block.block));
+      blocks.filter(block => block.type === "chapter_marker" || block.type === "scene_marker").map(block => scopedId(block.block)));
     await insertSnapshotRowsInTx(client, productionId, versionId, rows);
     // scene_version 只从标记派生；身份锚、归属和详情在同一事务内完成。
     await finalizeMarkerInvariantsInTx(client, productionId, versionId, { mode: "full", previousMarkerStructure });
@@ -51,6 +54,6 @@ export async function seedLocalDemoScript(productionId: string, versionId: strin
     client.release();
   }
   for (const [id, , gender, biography, roleType] of characters) {
-    await patchCharacterMeta(id, versionId, { ...(gender === null ? {} : { gender }), biography, roleType });
+    await patchCharacterMeta(scopedId(id), versionId, { ...(gender === null ? {} : { gender }), biography, roleType });
   }
 }

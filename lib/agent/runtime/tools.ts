@@ -57,8 +57,10 @@ export interface RunHandle {
   noteMutations?: (toolCallId: string, records: MutationRecord[]) => void;
   /** 本 agent_run 从外部 registry 生成的检索目录；find_tools 与主动召回共用。 */
   runtimeToolCatalog?: ToolCatalogEntry[];
-  /** run 中途出现新附件后，按 MIME 把匹配的动态 MMP 工具加入下一轮工具面。 */
+  /** 显式读取原件前，按完整请求预算整理历史；false 表示只能使用非原生读取。 */
+  prepareMediaRead?: (media: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => Promise<boolean>;
   modelContext?: () => Promise<import("../../../vendor/openclaw/packages/agent-core/src/types").AgentMessage[]>;
+  /** run 中途出现新附件后，按 MIME 把匹配的动态 MMP 工具加入下一轮工具面。 */
   warmAttachments?: (attachmentIds: string[]) => Promise<void>;
 }
 
@@ -106,7 +108,7 @@ export type ToolDefinition = {
   readOnly: boolean;
   /** production 工具在个人会话里拒绝（与 server.ts 的 NO_PRODUCTION 同款） */
   needsProduction?: boolean;
-  execute: (ctx: ToolContext & { productionId: string }, args: Record<string, unknown>, toolCallId: string) => Promise<string>;
+  execute: (ctx: ToolContext & { productionId: string }, args: Record<string, unknown>, toolCallId: string) => Promise<string | AgentToolResult<unknown>>;
   /** 结果判定为"错误"（isError）而非正常文本——ask_user 取消/过期用 */
   isErrorResult?: (out: string) => boolean;
   /** 写工具：成功后产生的变更（service 据此往 agent SSE 发 mutation 行） */
@@ -193,11 +195,11 @@ export const DEFS: ToolDefinition[] = [
   {
     mcpName: "my.attachment_read",
     description:
-      "读取当前会话中用户随消息附带的临时文件（EN: read attached uploaded file）。attachmentId 来自 <clickin-attachment-context>。" +
-      "纯文本直接读取；docx/pdf 默认先给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索；媒体文件会按 MMP 当前公布的 triage 能力读取预检上下文，只有确实需要识别文字时才对图片或扫描 PDF 用 mode=ocr。附件只在当前会话有效。",
+      "读取当前会话中用户上传或工具产出的临时文件（EN: read attached uploaded file）。attachmentId 来自附件上下文或工具返回的产物。" +
+      "默认按当前模型能力原生读取；上下文拥挤时先整理历史；格式或原件硬限制不适合原生时走 MMP/文档解析。纯文本默认读取，可用 mode=read + ranges 按零起始字符区间 [from,to) 回查长文本；无法原生读取的 docx/pdf 默认给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索。原件已完整在上下文时无需重复读取。图片或扫描 PDF 识字用 mode=ocr。附件只在当前会话有效。",
     parameters: Type.Object({
       attachmentId: Type.String({ description: "临时附件 id" }),
-      mode: Type.Optional(Type.Union([Type.Literal("preflight"), Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
+      mode: Type.Optional(Type.Union([Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
       ranges: Type.Optional(Type.Array(Type.Object({
         from: Type.Integer({ minimum: 0 }),
         to: Type.Integer({ minimum: 0 }),
@@ -208,22 +210,24 @@ export const DEFS: ToolDefinition[] = [
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
     }),
     readOnly: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).readSessionAttachment(
-      ctx.userId,
-      ctx.productionId,
-      ctx.run?.sessionId ?? null,
-      {
-        attachmentId: String(args.attachmentId),
-        mode: args.mode as "preflight" | "outline" | "read" | "search" | "ocr" | undefined,
-        ranges: Array.isArray(args.ranges) ? (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })) : undefined,
-        query: typeof args.query === "string" ? args.query : undefined,
-        pages: Array.isArray(args.pages) ? args.pages.map(Number) : undefined,
-        tier: args.tier === "full" ? "full" : args.tier === "fast" ? "fast" : undefined,
-        limit: typeof args.limit === "number" ? args.limit : undefined,
-      },
-      ctx.run?.runId,
-      ctx.run?.signal,
-    ),
+    execute: async (ctx, args, callId) => (await import("./model-read")).readModelMedia({ ...ctx, productionId: ctx.productionId || null }, {
+      ...args, attachmentId: String(args.attachmentId),
+    } as Parameters<typeof import("./model-read").readModelMedia>[1], callId),
+  },
+  {
+    mcpName: "my.attachment_rename",
+    description: "为当前会话的有效临时附件改名（EN: rename attachment file）。适用于用户上传、网页下载和模型生成的附件；生成结果应根据用途起有意义的名称，避免只保留 audio.flac 等通用名称。只改名称，保留扩展名，不转换格式；已存为资产的附件请使用资产改名工具。",
+    parameters: Type.Object({
+      attachmentId: Type.String({ description: "当前会话临时附件 id" }),
+      fileName: Type.String({ minLength: 1, maxLength: 240, description: "新文件名，保留原扩展名；省略扩展名时自动补上" }),
+    }),
+    readOnly: false,
+    reversibleNoConfirm: true,
+    mutates: (args) => ({ scope: "attachment", action: "updated", ids: [String(args.attachmentId)] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).renameSessionAttachment({
+      userId: ctx.userId, sessionId: ctx.run?.sessionId ?? null,
+      attachmentId: String(args.attachmentId), fileName: String(args.fileName),
+    }),
   },
   {
     mcpName: "my.attachment_release",
@@ -745,17 +749,12 @@ export const DEFS: ToolDefinition[] = [
     ),
   },
   {
-    mcpName: "production.asset_preflight",
-    description:
-      "对制作资产执行 MMP 当前公布的自动预检能力（EN: triage inspect audio image video asset）。" +
-      "适合用户从资产库或当前文件上下文提到音频、图片等媒体时先获取任务无关摘要，再判断是否需要更深入处理；能力与支持模态由 MMP 动态决定。",
-    parameters: Type.Object({
-      assetId: Type.String({ description: "资产 id（来自当前文件上下文、production.asset_list 或 production.wiki_tree）" }),
-    }),
+    mcpName: "production.asset_read",
+    description: "读取当前制作素材原件（EN: read asset media file）。assetId 来自 production.asset_list、Wiki 树或当前素材。" +
+      "默认按模型能力原生读取，历史占用导致放不下时先压缩；不支持或原件超出硬限制时用 MMP/文档解析。docx/pdf 的概览、分段阅读和搜索也可使用 doc_outline/doc_read/doc_search。",
+    parameters: Type.Object({ assetId: Type.String({ description: "当前制作素材 id" }) }),
     readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).assetPreflight(
-      ctx.userId, ctx.productionId, String(args.assetId), ctx.run?.signal,
-    ),
+    execute: async (ctx, args, callId) => (await import("./model-read")).readModelMedia({ ...ctx, productionId: ctx.productionId || null }, { assetId: String(args.assetId) }, callId),
   },
   {
     mcpName: "production.asset_list",
@@ -1177,23 +1176,12 @@ export function buildTools(ctx: ToolContext): RuntimeToolDef[] {
         args,
         toolCallId,
       );
-      if (d.isErrorResult?.(out)) throw new Error(out);
+      if (typeof out === "string" && d.isErrorResult?.(out)) throw new Error(out);
       if (audit) {
         const records = await audit.commit();
         if (records.length > 0) ctx.run?.noteMutations?.(toolCallId, records);
       }
-      if (d.mcpName === "my.attachment_read" && ctx.run && (!args.mode || args.mode === "read") && !args.ranges) {
-        const { runModelSelection } = await import("./model-settings-db");
-        const { prepareModelAttachments } = await import("./model-attachments");
-        const { resolveModel } = await import("./config");
-        const model = resolveModel((await runModelSelection(ctx.run.runId)).modelKey);
-        const ready = await (await import("../attachment-db")).getReadyAttachments([String(args.attachmentId)], ctx.run.sessionId, ctx.userId);
-        if (!ready.length || !model.nativeMedia?.some((capability) => capability.mimeTypes.includes(ready[0].mimeType))) return text(out);
-        const prepared = await prepareModelAttachments("", [String(args.attachmentId)], { sessionId: ctx.run.sessionId, userId: ctx.userId,
-          productionId: ctx.productionId, runId: ctx.run.runId, model, signal: ctx.run.signal });
-        return { content: [{ type: "text" as const, text: out }, ...prepared.media], details: undefined };
-      }
-      return text(out);
+      return typeof out === "string" ? text(out) : out;
     },
   }));
 }

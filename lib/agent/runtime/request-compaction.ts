@@ -21,6 +21,8 @@ import { compactionSettingsFor, estimateRequestBudget } from "./context-budget";
 import { usdOfUsage } from "./billing";
 
 export type CompactionTrigger = "pressure" | "context-overflow";
+export class CompactionBudgetError extends Error {}
+
 export interface RequestCompactionOptions {
   session: Session;
   context: Context;
@@ -31,14 +33,17 @@ export interface RequestCompactionOptions {
   trigger: CompactionTrigger;
   maxTokens?: number;
   calibration?: number;
+  /** 显式读取还未落工具结果，摘要只处理持久旧前缀。 */
+  pendingMedia?: MediaContent;
   completeSimple: AgentCoreCompletionRuntimeDeps["completeSimple"];
   compactFn?: typeof compact;
   shouldCompact?: (tokens: number, threshold: number) => boolean;
   refreshContext?: (context: Context) => Promise<Context>;
   rebuildMessages?: (messages: AgentMessage[]) => AgentMessage[];
-  prepareMessages?: (messages: AgentMessage[]) => Promise<AgentMessage[]>;
+  prepareMessages?: (messages: AgentMessage[], model: Model) => Promise<AgentMessage[]>;
+  selectSummaryModel?: (messages: AgentMessage[], context: Context) => Promise<{ model: Model; apiKey: string }>;
   onCompacting?: (active: boolean) => Promise<void>;
-  onUsage?: (usage: { usd: number; tokens: number }) => Promise<void>;
+  onUsage?: (usage: { usd: number; tokens: number; model: Model }) => Promise<void>;
 }
 function mediaParts(
   messages: AgentMessage[] | Context["messages"],
@@ -54,7 +59,7 @@ function mediaParts(
   );
 }
 function mediaKey(part: MediaContent): string {
-  return JSON.stringify([part.attachmentId, part.mimeType, part.source]);
+  return JSON.stringify([part.attachmentId, part.assetId, part.mimeType, part.source]);
 }
 function reference(part: MediaContent): MediaContent {
   const value = { ...part };
@@ -77,7 +82,7 @@ function classifyMedia(
       message.stopReason !== "error" &&
       message.stopReason !== "aborted"
     ) {
-      for (const part of pending) if (part.data) delivered.add(mediaKey(part));
+      for (const part of pending) delivered.add(mediaKey(part));
       pending = [];
     }
   }
@@ -91,8 +96,8 @@ function classifyMedia(
   for (const part of [...(previous?.media ?? []), ...mediaParts(messages)]) {
     const key = mediaKey(part);
     if (
-      part.attachmentId &&
-      part.source?.kind === "attachment" &&
+      (part.attachmentId || part.assetId) &&
+      part.source &&
       delivered.has(key)
     )
       references.set(key, reference(part));
@@ -114,7 +119,9 @@ export async function compactRequestContext(
     { maxTokens: options.maxTokens },
     options.calibration,
   );
+  const mediaAdaptation = !originalBudget.mediaFits;
   const triggered =
+    mediaAdaptation ||
     options.trigger === "context-overflow" ||
     (options.shouldCompact
       ? options.shouldCompact(
@@ -140,9 +147,9 @@ export async function compactRequestContext(
       apiKey: options.apiKey,
       maxTokens: options.maxTokens,
     } as SimpleStreamOptions,
-    prepareMessages: async (messages: AgentMessage[]) => {
+    prepareMessages: async (messages: AgentMessage[], model = options.model) => {
       const prepared = options.prepareMessages
-        ? await options.prepareMessages(messages)
+        ? await options.prepareMessages(messages, model)
         : messages;
       return options.rebuildMessages
         ? options.rebuildMessages(prepared)
@@ -164,6 +171,7 @@ export async function compactRequestContext(
   let usd = 0;
   let cacheRead = 0;
   let cacheWrite = 0;
+  let summaryExecutionModel = input.model;
   const summarizedMedia = new Set<string>();
   await input.onCompacting?.(true);
   try {
@@ -174,7 +182,7 @@ export async function compactRequestContext(
       compactionSettingsFor(
         input.model,
         input.options,
-        input.trigger === "context-overflow",
+        input.trigger === "context-overflow" || mediaAdaptation,
       ),
     );
     if (!preparation.ok) throw preparation.error;
@@ -197,16 +205,43 @@ export async function compactRequestContext(
         ? (previous.details as CompactionDetails)
         : undefined,
     );
+    value.mediaAdaptation = mediaAdaptation;
     value.mediaToKeep = classified.keep;
     value.mediaReferences = classified.references;
-    // 正常压力下沿用完整请求前缀；摘要超预算时只读完整旧前缀，不截断单条消息或媒体。
+    let summaryModel = input.model;
+    let summaryApiKey = input.apiKey;
+    let summaryContext = input.context;
+    const olderMessages = async (model: Model) => {
+      const prior = (await input.session.buildContext()).messages.filter((message) => message.role === "compactionSummary");
+      const retained = previous?.type === "compaction" ? (previous.details as CompactionDetails | undefined)?.media ?? [] : [];
+      return input.prepareMessages([
+        ...(retained.length ? [{ role: "user" as const, timestamp: 0, content: retained }] : []),
+        ...prior, ...value.messagesToSummarize, ...value.turnPrefixMessages,
+      ], model);
+    };
+    if (mediaAdaptation || input.pendingMedia) {
+      const older = await olderMessages(input.model);
+      summaryContext = { ...input.context, messages: convertToLlm(older) };
+      if (!estimateRequestBudget(input.model, summaryContext, input.options).fits) {
+        if (!input.selectSummaryModel) throw new Error("目标模型不支持待压缩媒体，缺少可读取原件的摘要模型");
+        const selection = await input.selectSummaryModel(older, summaryContext);
+        summaryModel = selection.model;
+        summaryApiKey = selection.apiKey;
+        summaryContext = { ...summaryContext, messages: convertToLlm(await olderMessages(summaryModel)) };
+      }
+    }
+    // 正常压力下保留完整请求前缀；媒体适配只读旧前缀，未处理的新输入留给目标模型。
     const completeSimple: AgentCoreCompletionRuntimeDeps["completeSimple"] =
       async (model, context, options) => {
         input.signal.throwIfAborted();
+        // 同模型保留显式档位；跨模型摘要独立使用已配置模型均支持的 low。
+        // undefined 会被 Gemini SDK 当成关闭思考，进而发送该模型不支持的 MINIMAL。
+        const reasoning = summaryModel === input.model ? input.options.reasoning ?? options?.reasoning : undefined;
         const summaryOptions = {
           ...input.options,
           ...options,
-          reasoning: input.options.reasoning,
+          reasoning: reasoning ?? (summaryModel.reasoning ? "low" : undefined),
+          apiKey: summaryApiKey,
         };
         let request = context;
         let budget = estimateRequestBudget(
@@ -217,22 +252,7 @@ export async function compactRequestContext(
         );
         if (!budget.fits) {
           const instruction = context.messages.at(-1)!;
-          const priorContext = (
-            await input.session.buildContext()
-          ).messages.filter((message) => message.role === "compactionSummary");
-          const priorMedia =
-            previous?.type === "compaction"
-              ? ((previous.details as CompactionDetails | undefined)?.media ??
-                [])
-              : [];
-          const older = await input.prepareMessages([
-            ...(priorMedia.length
-              ? [{ role: "user" as const, timestamp: 0, content: priorMedia }]
-              : []),
-            ...priorContext,
-            ...value.messagesToSummarize,
-            ...value.turnPrefixMessages,
-          ]);
+          const older = await olderMessages(model);
           request = {
             ...context,
             messages: [...convertToLlm(older), instruction],
@@ -266,6 +286,7 @@ export async function compactRequestContext(
         cacheWrite += message.usage.cacheWrite;
         await input.onUsage?.({
           usd: usdOfUsage(message.usage, model),
+          model,
           tokens:
             message.usage.input +
             message.usage.output +
@@ -277,15 +298,16 @@ export async function compactRequestContext(
             if (part.data) summarizedMedia.add(mediaKey(part));
         return message;
       };
+    summaryExecutionModel = summaryModel;
     const result = await (input.compactFn ?? compact)(
       value,
       {
-        systemPrompt: input.context.systemPrompt,
-        tools: input.context.tools,
-        messages: input.context.messages,
+        systemPrompt: summaryContext.systemPrompt,
+        tools: summaryContext.tools,
+        messages: summaryContext.messages,
       },
-      input.model,
-      input.options.apiKey,
+      summaryModel,
+      summaryApiKey,
       input.options.headers,
       "用中文写摘要，保留附件版本、回查定位和未处理资料。",
       input.signal,
@@ -331,9 +353,10 @@ export async function compactRequestContext(
       details: result.value.details,
     };
     const messages = await input.prepareMessages(
-      buildSessionContext([...path, candidate]).messages,
+      [...buildSessionContext([...path, candidate]).messages, ...(input.pendingMedia ? [{ role: "user" as const, timestamp: 0, content: [input.pendingMedia] }] : [])],
     );
-    const next = { ...input.context, messages: convertToLlm(messages) };
+    const candidateContext = { ...input.context, messages: convertToLlm(messages) };
+    const next = input.refreshContext ? await input.refreshContext(candidateContext) : candidateContext;
     const after = estimateRequestBudget(
       input.model,
       next,
@@ -341,10 +364,10 @@ export async function compactRequestContext(
       input.calibration,
     );
     afterTokens = after.estimatedInputTokens;
-    if (afterTokens >= before.estimatedInputTokens)
+    if (!mediaAdaptation && afterTokens >= before.estimatedInputTokens)
       throw new Error("压缩后完整请求没有缩减，未提交摘要");
     if (!after.fits)
-      throw new Error(
+      throw new CompactionBudgetError(
         "保留必要媒体后仍超过请求预算，未提交摘要；请缩小任务或附件范围",
       );
     input.signal.throwIfAborted();
@@ -359,7 +382,7 @@ export async function compactRequestContext(
     );
     outcome = "committed";
     await check.finish("ok");
-    return options.refreshContext ? await options.refreshContext(next) : next;
+    return next;
   } catch (error) {
     if (outcome !== "committed")
       outcome = input.signal.aborted
@@ -382,6 +405,9 @@ export async function compactRequestContext(
       JSON.stringify({
         model: input.model.id,
         api: input.model.api,
+        summaryModel: summaryExecutionModel.id,
+        summaryProvider: summaryExecutionModel.provider,
+        mediaAdaptation,
         trigger: input.trigger,
         beforeTokens: before.estimatedInputTokens,
         afterTokens,

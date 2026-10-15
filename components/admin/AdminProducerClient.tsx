@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useMemo, useState } from "react";
 import { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
@@ -242,7 +243,7 @@ export default function AdminProducerClient({
               }}
             >
               <span>{govUserId ? memberName(govUserId) : "选择成员…"}</span>
-              <span style={{ color: "var(--muted)", fontSize: 9 }}>▾</span>
+              <ChevronIcon size={12} className="shrink-0 text-[var(--muted)]" />
             </button>
             {govPickerOpen && (
               <MemberPickerModal

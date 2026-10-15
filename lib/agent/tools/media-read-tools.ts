@@ -1,0 +1,89 @@
+import { getR2Stream } from "@/lib/r2";
+import { preflightAttachment } from "@/lib/mmp/attachment-preflight";
+import { neutralizeInjectionTags } from "../agent-injection-safety";
+import { attachmentDocRead, attachmentFileOcr } from "./doc-tools";
+import type { MediaResource } from "../runtime/model-media";
+
+export interface MediaReadOptions {
+  mode?: "outline" | "read" | "search" | "ocr";
+  ranges?: Array<{ from: number; to: number }>;
+  query?: string;
+  pages?: number[];
+  tier?: "fast" | "full";
+  limit?: number;
+}
+
+/** 非原生读取共用现有文档/MMP 能力；完整文本与概览、片段、预检严格区分。 */
+export async function readResourceText(resource: MediaResource, options: MediaReadOptions,
+  context: { userId: string; productionId: string | null; sessionId: string | null; signal?: AbortSignal },
+): Promise<{ text: string; complete: boolean }> {
+  const lower = resource.fileName.toLowerCase();
+  const file = { fileId: resource.id, r2Key: resource.r2Key, fileSize: resource.fileSize, fileName: resource.fileName };
+  if (lower.endsWith(".docx") || lower.endsWith(".pdf")) {
+    const text = options.mode === "ocr"
+      ? await attachmentFileOcr(context.userId, context.productionId, file, resource.mimeType, options.pages ?? [1], {
+        tier: options.tier, sessionId: context.sessionId, signal: context.signal,
+      })
+      : await attachmentDocRead(file, { mode: options.mode === "search" ? "search" : options.mode === "read" && options.ranges?.length ? "read" : "outline",
+        ranges: options.ranges, query: options.query, limit: options.limit }, { sessionId: context.sessionId });
+    return { text, complete: false };
+  }
+  const mediaKind = resource.mediaKind ?? /^(audio|image|video)\//.exec(resource.mimeType)?.[1];
+  if (mediaKind === "image" && options.mode === "ocr") return {
+    text: await attachmentFileOcr(context.userId, context.productionId, file, resource.mimeType, options.pages ?? [1], {
+      tier: options.tier, sessionId: context.sessionId, signal: context.signal,
+    }), complete: false,
+  };
+  if (mediaKind) {
+    const outcome = await preflightAttachment({ attachmentId: resource.id, mediaKind: resource.mediaKind,
+      mimeType: resource.mimeType, r2Key: resource.r2Key }, {
+      signal: context.signal, usage: { userId: context.userId, productionId: context.productionId },
+    });
+    return { text: neutralizeInjectionTags(outcome.contextText) + "\n以上为 MMP 解析证据，当前模型未原生读取该原件。", complete: false };
+  }
+  if (resource.mimeType.startsWith("text/") || /\.(md|txt|csv|json|xml|yaml|yml|log)$/.test(lower)) {
+    if (resource.fileSize > 50 * 1024 * 1024) return { text: "纯文本超过文件读取上限 50 MiB，请缩小文件范围。", complete: false };
+    const ranges = options.ranges;
+    const validRanges = !ranges?.length || ranges.every(({ from, to }) => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to > from)
+      && ranges.reduce((sum, range) => sum + range.to - range.from, 0) <= 80_000;
+    const windows = validRanges ? ranges?.length ? ranges : [{ from: 0, to: 80_000 }] : [];
+    const selected = windows.map(() => [] as string[]);
+    const response = await getR2Stream(resource.r2Key);
+    if (!response?.body) return { text: "原件不存在，无法读取。", complete: false };
+    let length = 0, bytes = 0;
+    const collect = (text: string) => {
+      const end = length + text.length;
+      windows.forEach(({ from, to }, index) => {
+        const start = Math.max(from, length), stop = Math.min(to, end);
+        if (stop > start) selected[index].push(text.slice(start - length, stop - length).replace(/\u0000/g, "�"));
+      });
+      length = end;
+    };
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+    try {
+      while (true) {
+        context.signal?.throwIfAborted();
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        if (bytes > 50 * 1024 * 1024) throw new Error("纯文本实际大小超过 50 MiB");
+        collect(decoder.decode(chunk.value, { stream: true }));
+      }
+      collect(decoder.decode());
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    if (ranges?.length) {
+      if (!validRanges || ranges.some(({ to }) => to > length)) {
+        return { text: `文本共有 ${length} 个字符；区间需满足 0 ≤ from < to ≤ 总字符数，单次最多读取 80,000 字符。`, complete: false };
+      }
+      return { text: neutralizeInjectionTags(`《${resource.fileName}》共 ${length} 字符；零起始区间 [from,to)：\n`
+        + ranges.map(({ from, to }, index) => `[${from},${to})\n${selected[index].join("")}`).join("\n")), complete: ranges.some(({ from, to }) => from === 0 && to === length) };
+    }
+    return { text: neutralizeInjectionTags(`《${resource.fileName}》共 ${length} 字符：\n` + selected[0].join("") + (length > 80_000
+      ? "\n…（已截断；可用 mode=read + ranges 按零起始字符区间继续回查）" : "")), complete: length <= 80_000 };
+  }
+  return { text: neutralizeInjectionTags(`《${resource.fileName}》（${resource.mimeType}）原件仍保留，但当前没有适合该格式的读取器。`), complete: false };
+}

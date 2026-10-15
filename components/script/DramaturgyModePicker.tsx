@@ -20,10 +20,11 @@ export default function DramaturgyModePicker({
     <div className="relative shrink-0">
       <OverflowSafeSelect
         aria-label="页面模式"
+        menuMinWidth={96}
         value={mode}
         disabled={switching}
         onChange={(event) => onChange(event.target.value as DramaturgyWorkspaceMode)}
-        className="h-8 min-w-[88px] rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2.5 text-[11px] font-semibold text-[var(--ink)]"
+        className="h-8 min-w-[60px] rounded-lg border border-[var(--line)] bg-[var(--surface)] px-1.5 text-[11px] font-semibold text-[var(--ink)]"
       >
         <option value="read">只读</option>
         <option value="edit" disabled={!canEdit}>编辑</option>

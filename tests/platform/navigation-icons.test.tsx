@@ -133,7 +133,7 @@ describe("统一导航图标", () => {
       expect(link.getAttribute("href")).toBe(`/production/pro1${projectItems[index].path ? "/" + projectItems[index].path : ""}`);
       if (folded) expect(link.getAttribute("title")).toBe(projectItems[index].label);
     }
-    for (const [label, items] of [["概览", PRODUCTION_OVERVIEW_NAV], ["创作", CREATION_NAV], ["制作", PRODUCTION_NAV]] as const) {
+    for (const [label, items] of [["概览", PRODUCTION_OVERVIEW_NAV], ["创作", CREATION_NAV], ["任务", PRODUCTION_NAV]] as const) {
       const drawer = openDrawer(label);
       expect(Array.from(drawer.querySelectorAll("a")).map(iconName)).toEqual(items.map(i => i.icon));
       act(() => drawer.querySelector<HTMLAnchorElement>("a")!.click());
@@ -147,7 +147,7 @@ describe("统一导航图标", () => {
     const links = Array.from(container.querySelectorAll("aside nav a"));
     expect(links.map(iconName)).toEqual(adminItems.map(i => i.icon));
     if (folded) expect(links.map(l => l.getAttribute("title"))).toEqual(adminItems.map(i => i.label));
-    const drawer = openDrawer("配置菜单");
+    const drawer = openDrawer("项目概览");
     expect(Array.from(drawer.querySelectorAll("a")).map(iconName)).toEqual(adminItems.map(i => i.icon));
   });
 
@@ -185,5 +185,63 @@ describe("统一导航图标", () => {
     expect(container.querySelector("svg")).toBeNull();
     expect(container.querySelector(".animate-spin")).toBeTruthy();
     expect(container.textContent).toBe("4");
+  });
+});
+
+
+describe("移动端当前页面识别", () => {
+  const routes = [
+    ...projectItems.map(item => ({ path: item.path, label: item.label, icon: item.icon })),
+    ...adminItems.map(item => ({ path: `admin${item.path ? "/" + item.path : ""}`, label: item.label, icon: item.icon })),
+    { path: "characters", label: "构作", icon: "dramaturgy" },
+    { path: "cuelists", label: "Cue 表设置", icon: "cue" },
+    { path: "announcements", label: "我的通知", icon: "notification" },
+    { path: "events/event1/reqs/req1", label: "任务", icon: "task" },
+    { path: "events/event1/reports/report1", label: "报告", icon: "report" },
+    { path: "dramaturgy/inspiration/doc1", label: "构作", icon: "dramaturgy" },
+    { path: "wiki/doc1", label: "云文档", icon: "knowledge" },
+  ];
+
+  it.each(routes)("直达 $path 时只有当前页 $label 高亮，入口保留所属菜单", ({ path, label, icon }) => {
+    renderShell(`/production/pro1${path ? "/" + path : ""}`);
+    const nav = container.querySelector(".app-shell-bottom-nav")!;
+    const current = nav.querySelector<HTMLButtonElement>('[aria-current="page"]')!;
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    expect(current.textContent).toBe(label);
+    expect(iconName(current)).toBe(icon);
+    expect(current.className).toContain("bg-[#182a2a] text-white");
+    act(() => current.click());
+    expect(current.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".app-shell-bottom-drawer-surface a")).toBeTruthy();
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    act(() => current.click());
+    expect(container.querySelector(".app-shell-bottom-drawer")).toBeNull();
+  });
+
+  it("打开其他大类或我面板不转移高亮，切换路由及项目后关闭面板并更新当前页", () => {
+    renderShell("/production/pro1/dramaturgy");
+    for (const label of ["制作", "概览"]) {
+      openDrawer(label);
+      const nav = container.querySelector(".app-shell-bottom-nav")!;
+      expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+      expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe("构作");
+    }
+    renderShell("/production/pro1/script");
+    expect(container.querySelector(".app-shell-bottom-drawer")).toBeNull();
+    expect(container.querySelector('.app-shell-bottom-nav [aria-current="page"]')?.textContent).toBe("剧本");
+    renderShell("/production/pro1/dramaturgy");
+    expect(container.querySelector('.app-shell-bottom-nav [aria-current="page"]')?.textContent).toBe("构作");
+    openDrawer("制作");
+    renderShell("/production/pro2", { ...production, id: "pro2" });
+    expect(container.querySelector(".app-shell-bottom-drawer")).toBeNull();
+    expect(container.querySelector('.app-shell-bottom-nav [aria-current="page"]')?.textContent).toBe("我的工作");
+  });
+
+  it("不可见的配置项不生成当前页导航入口", () => {
+    renderShell("/production/pro1/admin/permissions", { ...production, planAdvancedPerms: false });
+    const nav = container.querySelector(".app-shell-bottom-nav")!;
+    expect(nav.textContent).toContain("配置菜单");
+    expect(nav.textContent).not.toContain("权限中心");
+    expect(nav.querySelector('[aria-current="page"]')).toBeNull();
   });
 });

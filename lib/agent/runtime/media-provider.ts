@@ -10,20 +10,11 @@ import type {
   Context,
   MediaContent,
   Model,
-  NativeMediaCapability,
   SimpleStreamOptions,
   TextContent,
 } from "../../../vendor/openclaw/packages/llm-core/src/types";
 
-export function mediaAdapterAvailable(
-  api: string,
-  capability: NativeMediaCapability,
-): boolean {
-  if (api === "google-generative-ai") return true;
-  if (api === "openai-completions")
-    return ["image", "audio", "video"].includes(capability.kind);
-  return false;
-}
+import { mediaAdapterAvailable, mediaBudget, requestMedia } from "./media-budget";
 
 function serializeMedia(
   model: Model,
@@ -67,55 +58,13 @@ function prepareSdkRequest(
 ): { model: SdkModel; context: SdkContext; options: SimpleStreamOptions } {
   const parts = new Map<string, Record<string, unknown>>();
   const nonce = randomUUID();
-  let totalBytes = 0;
-  let totalChars = 0;
-  let byteLimit = Infinity;
-  let charLimit = Infinity;
-  const budgets = new Map<
-    NativeMediaCapability,
-    { bytes: number; chars: number; count: number }
-  >();
-  const checkBudget = (media: MediaContent) => {
-    const capability = model.nativeMedia?.find(
-      (item) =>
-        item.kind === media.type && item.mimeTypes.includes(media.mimeType),
-    );
-    if (!capability)
-      throw new Error(
-        `原生媒体适配器不可用：${model.id}/${model.api} ${media.mimeType}`,
-      );
-    const prior = budgets.get(capability) ?? { bytes: 0, chars: 0, count: 0 };
-    const bytes = media.data
-      ? Buffer.byteLength(media.data, "base64")
-      : media.budget?.bytes;
-    if (bytes === undefined)
-      throw new Error("原生文件引用缺少媒体预算，不能发送");
-    const next = {
-      bytes: prior.bytes + bytes,
-      chars: prior.chars + (media.data?.length ?? 0),
-      count: prior.count + 1,
-    };
-    if (
-      bytes > capability.maxBytes ||
-      next.bytes > capability.maxRequestBytes ||
-      next.chars > capability.maxRequestBase64Chars ||
-      next.count > capability.maxCount
-    )
-      throw new Error("实际 provider 请求超过原生媒体字节数/base64/数量预算");
-    totalBytes += bytes;
-    totalChars += media.data?.length ?? 0;
-    byteLimit = Math.min(byteLimit, capability.maxRequestBytes);
-    charLimit = Math.min(charLimit, capability.maxRequestBase64Chars);
-    if (totalBytes > byteLimit || totalChars > charLimit)
-      throw new Error("混合模态实际请求超过媒体传输预算");
-    budgets.set(capability, next);
-  };
+  const budget = mediaBudget(model, requestMedia(context.messages));
+  if (!budget.fits) throw new Error(budget.reasons.join("；"));
   const translate = (content: Array<TextContent | MediaContent>) =>
     content.map((part): TextContent => {
       if (part.type === "text") return part;
       const marker = `clickin-media:${nonce}:${parts.size}`;
       const serialized = serializeMedia(model, part);
-      checkBudget(part);
       parts.set(marker, serialized);
       return { type: "text", text: marker };
     });
