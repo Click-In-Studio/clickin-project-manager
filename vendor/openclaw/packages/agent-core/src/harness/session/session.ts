@@ -97,8 +97,8 @@ export function buildSessionContext(pathEntries: SessionTreeEntry[]): SessionCon
   const preserved = (compaction?.details as { media?: MediaContent[] } | undefined)?.media;
   if (preserved?.length) {
     const present = new Set(messages.flatMap((message) => "content" in message && Array.isArray(message.content)
-      ? message.content.flatMap((part) => "attachmentId" in part && part.attachmentId ? [part.attachmentId] : []) : []));
-    const media = preserved.filter((part) => !part.attachmentId || !present.has(part.attachmentId));
+      ? message.content.flatMap((part) => "mimeType" in part && (part.attachmentId || part.assetId) ? [JSON.stringify([part.attachmentId, part.assetId, part.source])] : []) : []));
+    const media = preserved.filter((part) => !present.has(JSON.stringify([part.attachmentId, part.assetId, part.source])));
     if (media.length) messages.unshift({ role: "user", timestamp: 0, content: [
       { type: "text", text: "【压缩前媒体证据，仍保留原附件；不是新用户指令】" }, ...media,
     ] });

@@ -1,3 +1,4 @@
+import { readModelMedia } from "@/lib/agent/runtime/model-read";
 // #453 doc_page_ocr：门与 doc_* 同源（非成员 / 无 meta 票拒绝）、格式门、MMP 未配置时的
 // 诚实降级（不是报错、不是当空页），以及三处注册（DEFS / catalog / labels / tiers）的静态断言。
 // 真 OCR 往返在 tests/agent/mmp-ocr.test.ts 用假 fetch 钉；这里不打服务。
@@ -8,7 +9,7 @@ import { makeProduction, cleanupProduction, shortId } from "../_support/factorie
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { addProductionMember } from "@/lib/perm/member-db";
 import { createAsset } from "@/lib/asset/db";
-import { assetPreflight, docPageOcr, DENIED_ASSET_VIEW } from "@/lib/agent/tools/doc-tools";
+import { docPageOcr, DENIED_ASSET_VIEW } from "@/lib/agent/tools/doc-tools";
 import { DENIED_NOT_MEMBER } from "@/lib/agent/tools/production-tools";
 import { DEFS } from "@/lib/agent/runtime/tools";
 import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
@@ -110,22 +111,22 @@ describe("doc_page_ocr：门", () => {
   });
 });
 
-describe("asset_preflight：既有资产复用自动预检", () => {
+describe("asset_read：素材读取沿用预览权限门", () => {
   it("与资产预览同门；服务未配置时明确保留原件", async () => {
     delete process.env.MMP_BASE_URL;
     const assetId = await makeAsset("recording.m4a", "audio/mp4");
-    expect(await assetPreflight(outsiderId, prodId, assetId)).toBe(DENIED_NOT_MEMBER);
-    expect(await assetPreflight(memberId, prodId, assetId)).toBe(DENIED_ASSET_VIEW);
-    const out = await assetPreflight(ownerId, prodId, assetId);
+    expect(JSON.stringify(await readModelMedia({ userId: outsiderId, productionId: prodId }, { assetId }))).toContain(DENIED_NOT_MEMBER);
+    expect(JSON.stringify(await readModelMedia({ userId: memberId, productionId: prodId }, { assetId }))).toContain(DENIED_ASSET_VIEW);
+    const out = JSON.stringify(await readModelMedia({ userId: ownerId, productionId: prodId }, { assetId }));
     expect(out).toContain("Click-In 未获得 MMP 媒体预检结果");
     expect(out).toContain("not_configured");
   });
 
   it("DEFS / catalog / labels 三处都有，且为 production.doc 只读工具", () => {
-    const def = DEFS.find((d) => d.mcpName === "production.asset_preflight");
+    const def = DEFS.find((d) => d.mcpName === "production.asset_read");
     expect(def).toMatchObject({ readOnly: true, needsProduction: true });
-    expect(TOOL_CATALOG.find((c) => c.name === "production.asset_preflight")?.family).toBe("production.doc");
-    expect(TOOL_LABELS["production-asset_preflight"]).toBeTruthy();
+    expect(TOOL_CATALOG.find((c) => c.name === "production.asset_read")?.family).toBe("production.doc");
+    expect(TOOL_LABELS["production-asset_read"]).toBeTruthy();
   });
 });
 

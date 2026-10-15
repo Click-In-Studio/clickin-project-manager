@@ -1,3 +1,4 @@
+import { readModelMedia } from "@/lib/agent/runtime/model-read";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
@@ -9,7 +10,7 @@ import {
   recordAttachmentAccess,
   restoreReleasedAttachment,
 } from "@/lib/agent/attachment-db";
-import { readSessionAttachment, releaseSessionAttachment, saveSessionAttachmentAsAsset } from "@/lib/agent/tools/attachment-tools";
+import { releaseSessionAttachment, saveSessionAttachmentAsAsset } from "@/lib/agent/tools/attachment-tools";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
 import { deleteSessionRows } from "@/lib/agent/runtime/service";
 import { DEFS } from "@/lib/agent/runtime/tools";
@@ -138,7 +139,7 @@ describe("附件生命周期（#772）", () => {
   it("读取工具对已安排清理的附件返回明确状态", async () => {
     const { sessionId, attachment } = await readyAttachment();
     await getPool().query(`UPDATE agent_session_attachment SET status = 'deleting' WHERE id = $1`, [attachment.id]);
-    expect(await readSessionAttachment(userId, null, sessionId, { attachmentId: attachment.id }))
+    expect(JSON.stringify(await readModelMedia({ userId, productionId: null, run: { runId: "lifecycle-read", sessionId, signal: new AbortController().signal, publish: () => {}, setStatus: async () => {}, isDetached: () => false } }, { attachmentId: attachment.id })))
       .toContain("已过期或正在清理");
   });
 
