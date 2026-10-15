@@ -68,6 +68,20 @@ describe("MMP v3 capability binder", () => {
     expect(mmpCapabilityToolName(`${id}y`)).not.toBe(a);
   });
 
+  it("#967 triage 同样进入动态工具和召回目录，能力名称与参数不依赖宿主别名", async () => {
+    const triage = capability("triage.image", [mediaField], [
+      { name: "description", kind: "text", required: true, schema: { type: "string" } },
+    ]);
+    const client = { capabilities: async () => registry([triage]) } as unknown as MmpClient;
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run: runHandle() }, { client });
+    expect(surface.tools[0].mcpName).toBe("mmp.triage.image");
+    expect(surface.tools[0].description).toContain(triage.description);
+    expect(surface.catalog[0]).toMatchObject({ name: "mmp.triage.image", family: "mmp.triage.image" });
+    await surface.tools[0].execute("triage-call", { references: [{ assetId: "asset-1" }] }, new AbortController().signal);
+    expect(bridgeMocks.run).toHaveBeenCalledWith(expect.objectContaining({ capability: triage,
+      rawArguments: { references: [{ assetId: "asset-1" }] } }));
+  });
+
   it("registry discovery 失败只撤下动态能力面", async () => {
     const client = { capabilities: async () => { throw new Error("offline"); } } as unknown as MmpClient;
     await expect(buildMmpToolSurface({ userId: "u", productionId: null, run: runHandle() }, { client }))

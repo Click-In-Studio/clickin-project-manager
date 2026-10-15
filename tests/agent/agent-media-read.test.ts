@@ -58,16 +58,17 @@ describe("#967 附件与素材同构读取", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("显式读取先等待历史整理；确认无法容纳才走 MMP，摘要失败不伪装成成功", async () => {
+  it.each(["attachment", "asset"])("%s 显式读取先等待历史整理；确认无法容纳才走 MMP，摘要失败不伪装成成功", async (kind) => {
+    const args = kind === "asset" ? { assetId: "asset" } : { attachmentId: "att" };
     const prepare = vi.fn(async () => false);
     const ctx = { ...context, run: { ...run, prepareMediaRead: prepare } };
-    const fallback = await readModelMedia(ctx, { attachmentId: "att" });
+    const fallback = await readModelMedia(ctx, args);
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ type: "image", data: expect.any(String) }));
     expect(state.preflight).toHaveBeenCalledOnce();
     expect(fallback.content.every((part) => part.type === "text")).toBe(true);
     state.preflight.mockClear();
     prepare.mockRejectedValueOnce(new Error("摘要模型不可用"));
-    await expect(readModelMedia(ctx, { attachmentId: "att" })).rejects.toThrow("摘要模型不可用");
+    await expect(readModelMedia(ctx, args)).rejects.toThrow("摘要模型不可用");
     expect(state.preflight).not.toHaveBeenCalled();
   });
 
