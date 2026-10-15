@@ -52,7 +52,7 @@ describe("Agent 接流所有权", () => {
   let gets: Array<ReturnType<typeof watch>>;
   let getResponse: ((stream: ReturnType<typeof watch>, index: number) => Promise<Response>) | undefined;
   let historyMessages: unknown[];
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
   let originalScrollTo: typeof HTMLElement.prototype.scrollTo;
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -116,7 +116,7 @@ describe("Agent 接流所有权", () => {
     await act(async () => Array.from(container.querySelectorAll("button")).find(item => item.textContent?.includes("当前对话") || item.textContent?.includes("另一段对话"))!.click());
     await act(async () => Array.from(container.querySelectorAll("span")).filter(item => item.textContent === title).at(-1)!.click());
   }
-  const historyCalls = () => fetchMock.mock.calls.filter(([url]: [string]) => url.startsWith("/api/agent/chat/history?"));
+  const historyCalls = () => fetchMock.mock.calls.filter(([url]) => url.startsWith("/api/agent/chat/history?"));
   const count = (text: string) => (container.textContent ?? "").split(text).length - 1;
 
   it.each([true, false])("POST 与 running 通知交错时只接一条流，通知先到=%s", async (notifyFirst) => {
@@ -157,7 +157,9 @@ describe("Agent 接流所有权", () => {
   it("切换出去再回来时，旧 POST 延迟返回不得接入新流或清掉忙碌状态", async () => {
     await openIdle();
     await send();
-    const postSignal = fetchMock.mock.calls.find(([url]: [string]) => url === "/api/agent/chat/stream")![1].signal as AbortSignal;
+    const postSignal = fetchMock.mock.calls.find(([url]) => url === "/api/agent/chat/stream")![1]!.signal as AbortSignal;
+    await act(async () => root.render(<AgentPopout open={false} onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
+    await act(async () => root.render(<AgentPopout open onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
     await select("另一段对话");
     expect(postSignal.aborted).toBe(true);
     await select("当前对话");
@@ -169,6 +171,52 @@ describe("Agent 接流所有权", () => {
     expect(count("本轮过程正文")).toBe(1);
     expect(container.querySelector('button[aria-label="停止回复"]')).not.toBeNull();
     // 旧消费者收尾后仍不能让后台状态通知再次接流。
+    await act(async () => StatusStream.current.send("running"));
+    expect(gets).toHaveLength(1);
+  });
+
+  it("旧 GET 响应晚到时关闭它的正文，不影响切回后的新消费者", async () => {
+    await openIdle();
+    const delayed = deferred<Response>();
+    getResponse = (stream, index) => index === 0 ? delayed.promise : Promise.resolve(stream.response);
+    await act(async () => StatusStream.current.send("running"));
+    expect(gets).toHaveLength(1);
+    await select("另一段对话");
+    await act(async () => root.render(<AgentPopout open={false} onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
+    await act(async () => root.render(<AgentPopout open onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
+    await select("当前对话");
+    expect(gets).toHaveLength(2);
+    await act(async () => delayed.resolve(gets[0].response));
+    expect(gets[0].cancel).toHaveBeenCalledOnce();
+    await act(async () => gets[1].send(...events));
+    expect(count("本轮过程正文")).toBe(1);
+    expect(container.querySelector('button[aria-label="停止回复"]')).not.toBeNull();
+    await select("另一段对话");
+    expect(gets[1].cancel).toHaveBeenCalledOnce();
+    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
+  });
+
+  it("接流请求尚未返回时插话仍走 steer，不启动第二轮", async () => {
+    await openIdle();
+    await send();
+    fetchMock.mockImplementationOnce(async () => json({ ok: true }));
+    await send();
+    const requests = fetchMock.mock.calls.filter(([url]) => url === "/api/agent/chat/stream");
+    expect(JSON.parse(requests[0][1]!.body as string).steer).toBeUndefined();
+    expect(JSON.parse(requests[1][1]!.body as string).steer).toBe(true);
+    const stream = watch();
+    await act(async () => post.resolve(stream.response));
+    await act(async () => stream.send(...events));
+    expect(gets).toHaveLength(0);
+    expect(count("本轮确认卡")).toBe(1);
+  });
+
+  it("HTTP 失败后清掉接流状态，并保留服务端错误提示", async () => {
+    await openIdle();
+    await send();
+    await act(async () => post.resolve(new Response(JSON.stringify({ error: "会话暂不可用" }), { status: 503 })));
+    expect(container.textContent).toContain("会话暂不可用");
+    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
     await act(async () => StatusStream.current.send("running"));
     expect(gets).toHaveLength(1);
   });
@@ -206,6 +254,6 @@ describe("Agent 接流所有权", () => {
     await act(async () => root.unmount());
     mounted = false;
     expect(stream.cancel).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls.some(([url]: [string]) => url.includes("/abort"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("/abort"))).toBe(false);
   });
 });

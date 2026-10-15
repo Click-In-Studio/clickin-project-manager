@@ -33,6 +33,13 @@ function lastSessionStorageKey(productionId: string | null): string {
   return `clickin-ai-last-session:${productionId ?? "personal"}`;
 }
 
+type ChatOperation = {
+  key: string;
+  phase: "history" | "stream" | "idle";
+  controller: AbortController;
+  reader?: ReadableStreamDefaultReader<Uint8Array>;
+};
+
 type SessionSummary = {
   key: string;
   title: string;
@@ -138,6 +145,24 @@ export default function AgentPopout({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
+  // 请求发出前同步登记所有权，状态通知与 React 下一次渲染之间也不能重复接流。
+  const operationRef = useRef<ChatOperation | null>(null);
+  const cancelOperation = useCallback(() => {
+    const previous = operationRef.current;
+    operationRef.current = null;
+    previous?.controller.abort();
+    void previous?.reader?.cancel().catch(() => {});
+  }, []);
+  const beginOperation = useCallback((key: string, phase: ChatOperation["phase"]): ChatOperation => {
+    cancelOperation();
+    const operation: ChatOperation = { key, phase, controller: new AbortController() };
+    operationRef.current = operation;
+    return operation;
+  }, [cancelOperation]);
+  const isCurrentOperation = useCallback((operation: ChatOperation) =>
+    operationRef.current === operation && activeKeyRef.current === operation.key && !operation.controller.signal.aborted,
+  []);
+  useEffect(() => cancelOperation, [cancelOperation]);
   const pathname = usePathname();
   const router = useRouter();
   const isMobileViewport = useSyncExternalStore(
@@ -200,11 +225,15 @@ export default function AgentPopout({
   // 后台仍在跑，只是不该继续显示在这个范围的窗口里。
   useEffect(() => {
     if (activeKey && !inScope(activeKey)) {
+      cancelOperation();
+      activeKeyRef.current = null;
+      setStreaming(false);
+      setLoadingHistory(false);
       setActiveKey(null);
       setBubbles([]);
       setCompacting(false);
     }
-  }, [productionId, activeKey, inScope]);
+  }, [productionId, activeKey, inScope, cancelOperation]);
 
   // 按语境记住最后一次活跃的会话——重开 popout/刷新页面后自动接回去，
   // 不用每次都从空白开始。恢复逻辑见下面依赖 openSession 的那个 effect。
@@ -293,48 +322,54 @@ export default function AgentPopout({
   }, [input]);
 
   // 读一条 NDJSON/SSE 聊天流进气泡列表——"发送" 和 "接回运行中会话" 共用。
-  const consumeStream = useCallback(async (res: Response, forKey: string) => {
-    if (!res.ok || !res.body) {
-      const err = await res.json().catch(() => ({ error: `请求失败（${res.status}）` }));
-      setBubbles((prev) => [...prev, { kind: "notice", text: (err as { error?: string }).error || "请求失败" }]);
+  const consumeStream = useCallback(async (res: Response, operation: ChatOperation) => {
+    if (!isCurrentOperation(operation)) {
+      await res.body?.cancel().catch(() => {});
       return;
     }
-    setStreaming(true);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    let lastByteAt = Date.now();
-    let watchdogFired = false;
-    const watchdog = setInterval(() => {
-      if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
-        watchdogFired = true;
-        reader.cancel().catch(() => {});
-      }
-    }, 5_000);
-
-    let streamKey = forKey;
-    // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
-    // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
-    // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
+    let watchdog: ReturnType<typeof setInterval> | undefined;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-    const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
-      const handled = dispatchAgentMutation({
-        scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
-      });
-      if (handled || fallbackTimer) return;
-      fallbackTimer = setTimeout(() => { fallbackTimer = null; router.refresh(); }, 300);
-    };
-
-    const apply = (line: StreamLine) => {
-      if (activeKeyRef.current !== streamKey) return;
-      setBubbles((prev) => applyStreamLine(prev, line));
-    };
-
     try {
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({ error: `请求失败（${res.status}）` }));
+        if (isCurrentOperation(operation)) {
+          setBubbles((prev) => [...prev, { kind: "notice", text: (err as { error?: string }).error || "请求失败" }]);
+        }
+        return;
+      }
+      const reader = res.body.getReader();
+      operation.reader = reader;
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let lastByteAt = Date.now();
+      let watchdogFired = false;
+      watchdog = setInterval(() => {
+        if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
+          watchdogFired = true;
+          reader.cancel().catch(() => {});
+        }
+      }, 5_000);
+
+      // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
+      // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
+      // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
+      const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
+        const handled = dispatchAgentMutation({
+          scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
+        });
+        if (handled || fallbackTimer) return;
+        fallbackTimer = setTimeout(() => { fallbackTimer = null; if (isCurrentOperation(operation)) router.refresh(); }, 300);
+      };
+
+      const apply = (line: StreamLine) => {
+        if (!isCurrentOperation(operation)) return;
+        setBubbles((prev) => applyStreamLine(prev, line));
+      };
+
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || !isCurrentOperation(operation)) break;
         lastByteAt = Date.now();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -347,14 +382,7 @@ export default function AgentPopout({
           try {
             const line = JSON.parse(payload) as StreamLine;
             if (line.type === "ping") continue;
-            if (line.type === "session") {
-              if (typeof line.key === "string" && line.key && activeKeyRef.current === streamKey) {
-                streamKey = line.key;
-                activeKeyRef.current = line.key;
-                setActiveKey(line.key);
-              }
-              continue;
-            }
+            if (line.type === "session") continue;
             if (line.type === "compacting") {
               setCompacting(line.active);
               apply(line);
@@ -367,84 +395,115 @@ export default function AgentPopout({
           }
         }
       }
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "读取回复失败" }]);
+      }
     } finally {
       clearInterval(watchdog);
-      setStreaming(false);
-      setCompacting(false);
-      setBubbles((prev) =>
-        prev.map((b) =>
-          (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
-        )
-      );
-      // 释放/资产化由工具在服务端改状态；流结束后用附件表刷新历史 chip，避免
-      // 用户必须关掉再打开会话才看见「待释放 / 已存为资产」。
-      fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(streamKey)}`)
-        .then((statusRes) => statusRes.ok ? statusRes.json() : null)
-        .then((data: { attachments?: ChatAttachment[] } | null) => {
-          if (activeKeyRef.current !== streamKey || !data?.attachments) return;
-          const byId = new Map(data.attachments.map((item) => [item.id, item]));
-          setBubbles((prev) => prev.map((bubble) => {
-            if (bubble.kind === "user") return {
-              ...bubble,
-              attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
-            };
-            if (bubble.kind === "tool") return {
-              ...bubble,
-              attachments: data.attachments!.filter((item) => item.sourceToolCallId === bubble.id),
-            };
-            return bubble;
-          }));
-        })
-        .catch(() => {});
-      refreshSessions();
+      operation.reader?.releaseLock();
+      if (fallbackTimer && !isCurrentOperation(operation)) clearTimeout(fallbackTimer);
+      // 被替换的消费者既不能写气泡，也不能在 finally 清掉新流的忙碌状态。
+      if (isCurrentOperation(operation)) {
+        operation.phase = "idle";
+        setStreaming(false);
+        setCompacting(false);
+        setBubbles((prev) =>
+          prev.map((b) =>
+            (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
+          )
+        );
+        // 释放/资产化由工具在服务端改状态；流结束后用附件表刷新历史 chip，避免
+        // 用户必须关掉再打开会话才看见「待释放 / 已存为资产」。
+        fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(operation.key)}`)
+          .then((statusRes) => statusRes.ok ? statusRes.json() : null)
+          .then((data: { attachments?: ChatAttachment[] } | null) => {
+            if (!isCurrentOperation(operation) || !data?.attachments) return;
+            const byId = new Map(data.attachments.map((item) => [item.id, item]));
+            setBubbles((prev) => prev.map((bubble) => {
+              if (bubble.kind === "user") return {
+                ...bubble,
+                attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
+              };
+              if (bubble.kind === "tool") return {
+                ...bubble,
+                attachments: data.attachments!.filter((item) => item.sourceToolCallId === bubble.id),
+              };
+              return bubble;
+            }));
+          })
+          .catch(() => {});
+        refreshSessions();
+      }
     }
-  }, [refreshSessions, router]);
+  }, [refreshSessions, router, isCurrentOperation]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
+    // 同一会话的历史加载或接流尚未结束时，重复选择不再启动第二个消费者。
+    if (operationRef.current?.key === key && operationRef.current.phase !== "idle") return;
     const switchingSession = activeKeyRef.current !== key;
+    const operation = beginOperation(key, "history");
+    activeKeyRef.current = key;
     setActiveKey(key);
-    // 同一会话的后台同步保留当前内容，避免回复结束时清空消息并闪现加载提示。
+    setStreaming(false);
     if (switchingSession) setBubbles([]);
     setCompacting(status === "compacting");
     setLoadingHistory(true);
+    let handedOff = false;
+    const signal = operation.controller.signal;
     try {
-      const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
+      const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`, { signal });
+      if (!isCurrentOperation(operation)) return;
       if (res.ok) {
-        const data = (await res.json()) as {
-          messages: ChatTranscriptEntry[];
-        };
-        if (activeKeyRef.current !== key) return;
+        const data = (await res.json()) as { messages: ChatTranscriptEntry[] };
+        if (!isCurrentOperation(operation)) return;
         const history = data.messages.map((m) =>
-            m.role === "tool"
-              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
-              : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
-          ) as Bubble[];
+          m.role === "tool"
+            ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
+            : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
+        ) as Bubble[];
         setBubbles(history);
       }
       try {
-        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`);
+        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`, { signal });
         if (qres.ok) {
           const data = (await qres.json()) as { questions?: QuestionInfo[] };
-          if (activeKeyRef.current === key && data.questions?.length) {
-            setBubbles((prev) => mergeRestoredQuestions(prev,data.questions!));
+          if (isCurrentOperation(operation) && data.questions?.length) {
+            setBubbles((prev) => mergeRestoredQuestions(prev, data.questions!));
           }
         }
       } catch {
-        // 恢复失败不挡接流；进行中的问题还有实时事件这条路
+        // 恢复失败不挡接流；进行中的问题还有实时事件这条路。
+      }
+      if (!isCurrentOperation(operation)) return;
+      setLoadingHistory(false);
+      if (status === "queued" || status === "running" || status === "compacting") {
+        operation.phase = "stream";
+        setStreaming(true);
+        const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`, { signal });
+        handedOff = true;
+        void consumeStream(res, operation);
+      }
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "加载对话失败" }]);
       }
     } finally {
-      if (activeKeyRef.current === key) setLoadingHistory(false);
+      if (isCurrentOperation(operation)) {
+        setLoadingHistory(false);
+        if (!handedOff) {
+          operation.phase = "idle";
+          setStreaming(false);
+          setCompacting(false);
+        }
+      }
     }
-    if (status === "queued" || status === "running" || status === "compacting") {
-      const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`);
-      consumeStream(res, key);
-    }
-  }, [consumeStream]);
+  }, [beginOperation, consumeStream, isCurrentOperation]);
 
   const onSubagentParentRun = useCallback(
     async (status: "queued" | "running" | "compacting" | "done") => {
-      if (!activeKey || streaming || loadingHistory) return false;
+      if (!activeKey || streaming || loadingHistory || (operationRef.current && operationRef.current.phase !== "idle")) return false;
       await openSession(activeKey, status);
       return true;
     },
@@ -501,10 +560,14 @@ export default function AgentPopout({
     });
     if (!res.ok) return;
     const { key } = (await res.json()) as { key: string };
+    cancelOperation();
+    activeKeyRef.current = key;
     setActiveKey(key);
     setBubbles([]);
+    setStreaming(false);
+    setLoadingHistory(false);
     setCompacting(false);
-  }, [productionId]);
+  }, [productionId, cancelOperation]);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     const current = activeKeyRef.current;
@@ -652,22 +715,43 @@ export default function AgentPopout({
       scriptFocus: focusAttached ? scriptFocusActive : null,
     });
 
-    const res = await fetch("/api/agent/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionKey: key, message, attachmentIds: selectedAttachments.map((a) => a.id), steer: streaming || undefined }),
-    });
-    if (streaming) {
-      const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !out?.ok) {
-        setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
-        return false;
-      }
-    } else {
-      consumeStream(res, key);
+    const current = operationRef.current;
+    const steer = current?.key === key && current.phase === "stream";
+    const operation = steer ? current : beginOperation(key, "stream");
+    if (!steer) {
+      setLoadingHistory(false);
+      setStreaming(true);
     }
-    return res.ok;
-  }, [streaming, consumeStream, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+    try {
+      const res = await fetch("/api/agent/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionKey: key, message, attachmentIds: selectedAttachments.map((a) => a.id), steer: steer || undefined }),
+        signal: operation.controller.signal,
+      });
+      if (steer) {
+        const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!res.ok || !out?.ok) {
+          if (isCurrentOperation(operation)) {
+            setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
+          }
+          return false;
+        }
+      } else {
+        void consumeStream(res, operation);
+      }
+      return res.ok;
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "发送失败" }]);
+        if (!steer) {
+          operation.phase = "idle";
+          setStreaming(false);
+        }
+      }
+      return false;
+    }
+  }, [beginOperation, consumeStream, isCurrentOperation, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
 
   const send = useCallback(async () => {
     const raw = input.trim();
@@ -827,12 +911,16 @@ export default function AgentPopout({
     if (!confirm("删除这个对话？")) return;
     await fetch(`/api/agent/sessions/${encodeURIComponent(key)}`, { method: "DELETE" });
     if (activeKeyRef.current === key) {
+      cancelOperation();
+      activeKeyRef.current = null;
+      setStreaming(false);
+      setLoadingHistory(false);
       setActiveKey(null);
       setBubbles([]);
       setCompacting(false);
     }
     refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshSessions, cancelOperation]);
 
   const renameSession = useCallback(async (key: string, current: string) => {
     const title = prompt("重命名对话", current)?.trim();
