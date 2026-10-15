@@ -168,12 +168,10 @@ R2_ACCESS_KEY_ID=xxxxxxxx
 R2_SECRET_ACCESS_KEY=xxxxxxxx
 R2_BUCKET=click-in-test                 # 本地建议用独立测试 bucket
 
-# ── LLM（记忆蒸馏 lib/agent/llm-chat.ts；站内 AI 对话见 docs/AGENT_RUNTIME.md）──────
-LLM_PROVIDER=openai                     # openai（默认）或 deepseek
-OPENAI_API_KEY=sk-xxxxxxxx
-# OPENAI_MODEL=gpt-4o-mini             # 可选，默认 gpt-4o-mini
-# DEEPSEEK_API_KEY=sk-xxxxxxxx         # 使用 DeepSeek 时设置
-# DEEPSEEK_MODEL=deepseek-chat
+# ── 隐藏模型调用（票据识别、记忆蒸馏）────────────────────
+# 固定 DeepSeek deepseek-flash → 百炼 qwen3.8-flash，复用 runtime/config.ts 注册。
+# DEEPSEEK_API_KEY=sk-xxxxxxxx
+# EMBEDDING_API_KEY=sk-xxxxxxxx       # 同时供百炼生成模型与 embedding 使用
 
 INTERNAL_NOTIFY_SECRET=any-local-secret # 定时通知 cron 鉴权 Bearer token
 
@@ -633,7 +631,7 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 站内 AI 对话由自建运行时承担（`lib/agent/runtime/` + 独立进程 `agent-runner/`），怎么跑 / 怎么切 / 怎么回滚 / 工具注册表 / 无人值守写 / 审计 / 定时任务 / 用量限流全部见 [AGENT_RUNTIME.md](./AGENT_RUNTIME.md)，**设计新工具或新 skill 前先读那篇的「设计原则」一节**。
 
-老运行时保留下来的两个通用模块：`lib/agent/llm-chat.ts`（OpenAI-compatible 对话调用，记忆蒸馏在用）与 `lib/agent/memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。`docs/TOOL_SURFACE.md` 是网关时代的历史文档。
+老运行时保留下来的两个通用模块：`lib/agent/llm-chat.ts`（票据识别与记忆蒸馏的跨厂商生成、超时及输出校验）与 `lib/agent/memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。`docs/TOOL_SURFACE.md` 是网关时代的历史文档。
 
 ---
 

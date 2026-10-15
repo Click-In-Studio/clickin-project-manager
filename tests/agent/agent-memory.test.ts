@@ -9,7 +9,7 @@ import { readMemoryScope, mutateMemoryEntry, readDreamSnapshot, commitDream, Mem
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { distillUser, parseDreamOutput } from "@/lib/agent/memory/distill";
 import { searchMemory } from "@/lib/agent/memory/search";
-const chatMock = vi.fn(async (..._args: unknown[]) => '["简短说明"]');
+const chatMock = vi.fn(async (..._args: unknown[]) => ({ value: ["简短说明"], provider: "qwen", model: "qwen3.8-flash" }));
 vi.mock("@/lib/agent/llm-chat", async original => ({
   ...(await original<typeof import("@/lib/agent/llm-chat")>()), chat: (...args: unknown[]) => chatMock(...args),
 }));
@@ -28,7 +28,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await getPool().query("DELETE FROM agent_memory_scope WHERE user_id=$1", [userId]);
   await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id=$1", [userId]);
-  chatMock.mockReset().mockResolvedValue('["简短说明"]');
+  chatMock.mockReset().mockResolvedValue({ value: ["简短说明"], provider: "qwen", model: "qwen3.8-flash" });
   process.env.EMBEDDING_PROVIDER = "none";
 });
 afterAll(async () => {
@@ -172,6 +172,9 @@ describe("整理与幻觉控制", () => {
     await archive("重试材料");
     chatMock.mockRejectedValueOnce(new Error("provider down"));
     expect((await distillUser(userId)).status).toBe("error");
+    const pending = await readDreamSnapshot(userId, null, 24000);
+    expect(pending.inputs).toHaveLength(1);
+    expect((await readMemoryScope(userId, null)).entries).toHaveLength(0);
     const { LlmBudgetError } = await import("@/lib/agent/llm-chat");
     chatMock.mockRejectedValueOnce(new LlmBudgetError("length", false));
     expect(await distillUser(userId)).toMatchObject({ status: "distilled", inputChars: 12000, shrunk: true });

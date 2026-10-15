@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getJobHandlerDef } from "@/lib/job/handlers";
+import { recognitionModelVersionMatches } from "@/lib/ops/expense-recognition-types";
 import { parseRecognitionJson } from "@/lib/ops/expense-document-recognition";
 
 describe("财务凭证结构化识别", () => {
@@ -42,5 +43,17 @@ describe("财务凭证结构化识别", () => {
 
   it("生产 handler 注册表包含识别任务", () => {
     expect(getJobHandlerDef("expense_document_recognition")).not.toBeNull();
+  });
+});
+
+describe("隐藏识别模型的结构与来源", () => {
+  it.each(["{}", "[]", "null", '{"merchant":"胡乱输出"}'])("拒绝字段结构缺失：%s", raw => {
+    expect(() => parseRecognitionJson(raw)).toThrow();
+  });
+  it("备用模型成功不使策略相同的结果过期，旧单供应商结果可重新识别", () => {
+    const policy = "rules:v1|llm:hidden-v1:deepseek-flash>qwen3.8-flash";
+    expect(recognitionModelVersionMatches(`${policy}|served:qwen:qwen3.8-flash`, policy)).toBe(true);
+    expect(recognitionModelVersionMatches(`${policy}|served:rules`, policy)).toBe(true);
+    expect(recognitionModelVersionMatches("rules:v1|llm:deepseek:deepseek-chat", policy)).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { chat, configuredLlmModel } from "@/lib/agent/llm-chat";
+import { chat, HIDDEN_MODEL_POLICY, LlmUnavailableError } from "@/lib/agent/llm-chat";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 import { r2ByteSource } from "@/lib/asset/byte-source";
 import { PDF_EXTRACTOR_VERSION, parsePdf, readAll, type PdfDoc } from "@/lib/doc-extract/pdf";
@@ -15,10 +15,9 @@ const MAX_SOURCE_CHARS = 40_000;
 const MAX_OCR_PAGES = 12;
 
 export function expenseRecognitionVersions(): { parserVersion: string; modelVersion: string } {
-  const llm = configuredLlmModel();
   return {
     parserVersion: EXPENSE_RECOGNITION_PARSER_VERSION,
-    modelVersion: `rules:${CN_DIGITAL_INVOICE_RULES_VERSION}|llm:${llm.provider}:${llm.model}`,
+    modelVersion: `rules:${CN_DIGITAL_INVOICE_RULES_VERSION}|llm:${HIDDEN_MODEL_POLICY}`,
   };
 }
 
@@ -72,6 +71,15 @@ export function parseRecognitionJson(raw: string): ExpenseRecognitionResult {
   } catch {
     throw new Error("模型没有返回有效 JSON");
   }
+  const fields = ["documentType", "merchant", "occurredOn", "documentNumber", "totalAmount", "taxAmount", "currency"];
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || fields.some(key => {
+    const field = parsed[key] as Record<string, unknown> | null;
+    return !field || typeof field !== "object" || Array.isArray(field)
+      || !(field.value === null || typeof field.value === "string")
+      || !["high", "medium", "low"].includes(String(field.confidence))
+      || !(field.evidence === null || typeof field.evidence === "string");
+  }) || !Array.isArray(parsed.warnings) || parsed.warnings.some(warning => typeof warning !== "string"))
+    throw new Error("模型没有返回完整的凭证字段结构");
   const documentType = candidate(parsed.documentType);
   if (!documentType.value || !["invoice", "receipt", "other"].includes(documentType.value)) {
     documentType.value = "other";
@@ -221,7 +229,7 @@ documentType 的 value 只能是 invoice、receipt、other。occurredOn 用 YYYY
 不确定就返回 null 和 low，不要猜。warnings 是简短中文字符串数组。发票和收据都要识别，不要求存在发票专有字段。`;
 
 export async function recognizeExpenseDocument(file: RecognitionFile): Promise<{
-  result: ExpenseRecognitionResult; sourceKind: RecognitionSourceKind;
+  result: ExpenseRecognitionResult; sourceKind: RecognitionSourceKind; modelVersion: string;
 }> {
   const source = await sourceFor(file);
   if (!source.text.trim()) throw new RecognitionInputError("凭证中没有可识别的文字，请手动填写");
@@ -230,20 +238,20 @@ export async function recognizeExpenseDocument(file: RecognitionFile): Promise<{
       ...source.warnings,
       ...source.deterministicResult.warnings,
     ];
-    return { result: source.deterministicResult, sourceKind: source.sourceKind };
+    return { result: source.deterministicResult, sourceKind: source.sourceKind, modelVersion: `${expenseRecognitionVersions().modelVersion}|served:rules` };
   }
-  let response: string;
+  let generated;
   try {
-    response = await chat([
+    generated = await chat([
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: `文件名：${neutralizeInjectionTags(file.fileName)}\n<document_text>\n${neutralizeInjectionTags(source.text)}\n</document_text>` },
-    ], { maxTokens: 1800, temperature: 0, rejectTruncated: true });
+    ], { purpose: "expense-recognition", maxTokens: 1800, temperature: 0, parse: parseRecognitionJson });
   } catch (error) {
-    if (error instanceof Error && /API_KEY not set/.test(error.message))
-      throw new RecognitionUnavailableError("LLM 识别服务未配置");
+    if (error instanceof LlmUnavailableError)
+      throw new RecognitionUnavailableError(error.message);
     throw error;
   }
-  const result = parseRecognitionJson(response);
+  const result = generated.value;
   result.warnings = [...source.warnings, ...result.warnings];
-  return { result, sourceKind: source.sourceKind };
+  return { result, sourceKind: source.sourceKind, modelVersion: `${expenseRecognitionVersions().modelVersion}|served:${generated.provider}:${generated.model}` };
 }

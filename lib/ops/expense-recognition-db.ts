@@ -1,3 +1,4 @@
+import { recognitionModelVersionMatches } from "./expense-recognition-types";
 import { getPool } from "@/lib/pg";
 import type {
   ExpenseDocumentRecognition, ExpenseRecognitionResult, RecognitionSourceKind, RecognitionStatus,
@@ -25,7 +26,7 @@ export function recognitionFromRow(
     result: row.result,
     parserVersion: row.parser_version,
     modelVersion: row.model_version,
-    outdated: row.parser_version !== current.parserVersion || row.model_version !== current.modelVersion,
+    outdated: row.parser_version !== current.parserVersion || !recognitionModelVersionMatches(row.model_version, current.modelVersion),
     lastError: row.last_error,
     attempts: row.attempts,
     updatedAt: row.updated_at.toISOString(),
@@ -61,7 +62,7 @@ export async function queueExpenseDocumentRecognitionRow(
            last_error = NULL, started_at = NULL, finished_at = NULL, updated_at = now()
      WHERE $4::boolean
         OR expense_document_recognition.parser_version <> EXCLUDED.parser_version
-        OR expense_document_recognition.model_version <> EXCLUDED.model_version`,
+        OR split_part(expense_document_recognition.model_version, '|served:', 1) <> EXCLUDED.model_version`,
     [assetFileId, versions.parserVersion, versions.modelVersion, force],
   );
 }
@@ -80,13 +81,14 @@ export async function finishExpenseDocumentRecognition(
   assetFileId: string,
   sourceKind: RecognitionSourceKind,
   result: ExpenseRecognitionResult,
+  modelVersion: string,
 ): Promise<void> {
   await getPool().query(
     `UPDATE expense_document_recognition
-        SET status = 'succeeded', source_kind = $2, result = $3::jsonb,
+        SET status = 'succeeded', source_kind = $2, result = $3::jsonb, model_version = $4,
             last_error = NULL, finished_at = now(), updated_at = now()
       WHERE asset_file_id = $1`,
-    [assetFileId, sourceKind, JSON.stringify(result)],
+    [assetFileId, sourceKind, JSON.stringify(result), modelVersion],
   );
 }
 

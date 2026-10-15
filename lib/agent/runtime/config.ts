@@ -199,6 +199,23 @@ const entries: Entry[] = [
     },
   },
 ];
+// 隐藏调用共用供应商注册与凭据，不加入用户聊天模型目录。
+const hiddenQwenEntry: Entry = {
+  ...entries.find((entry) => entry.model.provider === "qwen")!,
+  model: {
+    ...entries.find((entry) => entry.model.provider === "qwen")!.model,
+    id: "qwen3.8-flash",
+    name: "隐藏任务备用",
+    input: ["text"],
+    nativeMedia: undefined,
+  },
+};
+export function hiddenModelCandidates(): Model[] {
+  return [modelEntry("deepseek-flash").model, hiddenQwenEntry.model];
+}
+function entryForModel(model: Model): Entry | undefined {
+  return [...entries, hiddenQwenEntry].find((entry) => entry.model.id === model.id);
+}
 export function modelEntry(key: string): Entry {
   const entry = entries.find((item) => item.info.key === key);
   if (!entry) throw Object.assign(new Error("模型未登记"), { status: 400 });
@@ -238,7 +255,7 @@ export function resolveModel(key: string): Model {
   return modelEntry(key).model;
 }
 export function modelApiKey(model: Model): string {
-  const entry = entries.find((item) => item.model.id === model.id);
+  const entry = entryForModel(model);
   const key = entry && process.env[entry.credential];
   if (!key)
     throw Object.assign(new Error("服务端未配置所选模型"), { status: 503 });
@@ -252,7 +269,7 @@ export function llmRuntime() {
   if (!runtime) {
     configureAiTransportHost({
       buildModelFetch: (model) => {
-        const entry = entries.find((item) => item.model.id === model.id);
+        const entry = entryForModel(model);
         const proxyUrl = entry?.proxyEnv && process.env[entry.proxyEnv];
         return proxyUrl ? modelProxyFetch(proxyUrl) : undefined;
       },

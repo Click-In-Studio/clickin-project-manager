@@ -14,8 +14,8 @@ const options = { purpose: "test", maxTokens: 1800, temperature: 0, parse: JSON.
 const reply = (text: string, stopReason = "stop") => ({
   content: [{ type: "text", text }], stopReason,
 });
-beforeEach(() => { vi.resetModules(); vi.clearAllMocks(); mocks.key.mockReturnValue("test"); });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+beforeEach(() => { vi.resetModules(); vi.resetAllMocks(); vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("test blocks real network"))); mocks.key.mockReturnValue("test"); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 async function freshChat() { return (await import("@/lib/agent/llm-chat")).chat; }
 
 describe("隐藏模型调用跨厂商接替", () => {

@@ -4,6 +4,7 @@ import { getPool } from "../pg";
 import type { PoolClient } from "pg";
 import { uid } from "../asset/db";
 import { expenseRecognitionVersions } from "./expense-document-recognition";
+import { recognitionModelVersionMatches } from "./expense-recognition-types";
 import type { ExpenseDocumentRecognition } from "./expense-recognition-types";
 import { isCurrencyCode, normalizeMoneyAmount } from "../money";
 
@@ -118,7 +119,7 @@ function rowToExpense(r: ExpenseRow): Expense {
     recognition: document.recognition ? {
       ...document.recognition,
       outdated: document.recognition.parserVersion !== versions.parserVersion
-        || document.recognition.modelVersion !== versions.modelVersion,
+        || !recognitionModelVersionMatches(document.recognition.modelVersion, versions.modelVersion),
     } : null,
   }));
   const last = r.escalation_chain[r.escalation_chain.length - 1];
