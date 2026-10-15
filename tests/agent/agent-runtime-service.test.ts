@@ -20,6 +20,7 @@ import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { CHAT_MODEL, llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
+import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
 
@@ -1517,11 +1518,12 @@ describe("§4.4 排水/脱离：等待态 run 交给下一个进程，不留痕�
 describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferredTool）", () => {
   let userId: string;
   let prodId: string;
+  let versionId: string;
   const sessions: string[] = [];
 
   beforeAll(async () => {
     ({ userId } = await upsertFeishuUser(`test-open-${shortId()}`, `runtime-deferred-${shortId()}`, null, false));
-    ({ prodId } = await makeProduction(userId));
+    ({ prodId, versionId } = await makeProduction(userId));
     await setProductionTier(prodId, "pro");
     vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
     vi.stubEnv("GEMINI_API_KEY", "test-key");
@@ -1538,10 +1540,79 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     await cleanupProduction(prodId).catch(() => {});
   });
 
+  it.each([
+    ["production.script_search", { query: "划桨" }, "production.script"],
+    ["production.script_read_section", { sectionId: "missing-section" }, "production.script"],
+    ["production.script_read_page", { page: 1 }, "production.script"],
+    ["production.scene_read", { sceneId: "missing-scene" }, "production.dramaturgy"],
+    ["production.scene_list", {}, "production.dramaturgy"],
+    ["production.character_list", {}, "production.dramaturgy"],
+  ] as const)("#1019 调用 %s 后同轮展开整族，下一轮按近期使用恢复", async (name, args, family) => {
+    const call: ToolCall = { type: "toolCall", id: `c_family_${name}`, name: exposedName(name), arguments: args };
+    const { streamFn, seen } = scripted([{ calls: [call] }, { text: "已核对" },
+      ...Array.from({ length: 4 }, () => ({ text: "接着讨论" }))]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(userId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+    const members = TOOL_CATALOG.filter(e => e.family === family).map(e => exposedName(e.name));
+    const otherWrite = exposedName(family === "production.script" ? "production.scene_propose_update" : "production.script_propose_rewrite");
+    if (["production.script_read_page", "production.scene_read"].includes(name)) {
+      expect(seen[0].tools).not.toContain(exposedName(name));
+    } else {
+      expect(seen[0].tools).toContain(exposedName(name));
+    }
+    expect(seen[0].tools).not.toContain(exposedName("production.script_read_window"));
+    expect(seen[0].tools).not.toContain(exposedName("production.scene_read"));
+    for (const member of members) expect(seen[1].tools).toContain(member);
+    expect(seen[1].tools).not.toContain(otherWrite);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    await waitForIdle(key);
+    for (const member of members) expect(seen[2].tools).toContain(member);
+    expect(seen[2].tools).not.toContain(otherWrite);
+    for (let i = 0; i < 3; i++) {
+      await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+      await waitForIdle(key);
+    }
+    expect(seen[5].tools).not.toContain(exposedName(family === "production.script" ? "production.script_propose_rewrite" : "production.scene_propose_update"));
+  });
+
+  it("#1019 入口展开的写工具仍等待审批，拒绝后无写入", async () => {
+    const sceneId = await makeScene(prodId, versionId);
+    const read: ToolCall = { type: "toolCall", id: "c_family_read", name: exposedName("production.script_search"), arguments: { query: "划桨" } };
+    const write: ToolCall = { type: "toolCall", id: "c_family_write", name: exposedName("production.script_propose_edit_blocks"),
+      arguments: { inserts: [{ afterBlockId: sceneId, type: "dialogue", content: "只多划一桨" }], summary: "增加台词" } };
+    const { streamFn, seen } = scripted([{ calls: [read] }, { calls: [write] }, { text: "保持原样" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(userId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    let approval: Extract<StreamLine, { type: "approval" }> | undefined;
+    try {
+      for (let i = 0; i < 200 && !approval; i++) {
+        approval = (await readEventsSince(key, 0)).map(row => row.line)
+          .find((line): line is Extract<StreamLine, { type: "approval" }> => line.type === "approval");
+        if (!approval) await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(seen[1].tools).toContain(write.name);
+      expect(approval?.approval?.toolCallId).toBe(write.id);
+      await resolveApproval(approval!.approval!.id, "deny", userId, "先保留原文");
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(lines.some(line => line.type === "mutation")).toBe(false);
+      expect(JSON.stringify(seen[2].messages)).toContain("先保留原文");
+    } finally {
+      await abortRun(key);
+    }
+  });
+
   it("首页闲聊（wiki 族不在工具面）→ 模型调 find_tools → 再按名调 wiki_tree（不在列表里也能解析执行）", async () => {
     const find: ToolCall = { type: "toolCall", id: "c_find", name: exposedName("find_tools"), arguments: { query: "看看有哪些文档" } };
     const tree: ToolCall = { type: "toolCall", id: "c_tree", name: exposedName("production.wiki_tree"), arguments: {} };
-    const { streamFn, seen } = scripted([{ calls: [find] }, { calls: [tree] }, { text: "文档列在上面了" }]);
+    const search: ToolCall = { type: "toolCall", id: "c_after_deferred", name: exposedName("production.script_search"), arguments: { query: "划桨" } };
+    const { streamFn, seen } = scripted([{ calls: [find] }, { calls: [tree] }, { calls: [search] }, { text: "文档列在上面了" }]);
     runtimeOverrides.streamFn = streamFn;
     const key = createNewSessionKey(userId, prodId);
     sessions.push(key);
@@ -1558,5 +1629,7 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     expect(treeBubble?.done).toBe(true);
     expect(treeBubble?.isError).toBeUndefined(); // 真执行了（不是 "Tool not found"）
     expect(seen[2].tools).toContain(exposedName("production.wiki_tree")); // 加载后本 run 后续可见
+    expect(seen[3].tools).toContain(exposedName("production.wiki_tree")); // 展开另一族不能丢失已延迟加载的工具
+    expect(seen[3].tools).toContain(exposedName("production.script_propose_rewrite"));
   });
 });
