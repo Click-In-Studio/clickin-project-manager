@@ -234,10 +234,13 @@ export async function compactRequestContext(
     const completeSimple: AgentCoreCompletionRuntimeDeps["completeSimple"] =
       async (model, context, options) => {
         input.signal.throwIfAborted();
+        // 同模型保留显式档位；跨模型摘要独立使用已配置模型均支持的 low。
+        // undefined 会被 Gemini SDK 当成关闭思考，进而发送该模型不支持的 MINIMAL。
+        const reasoning = summaryModel === input.model ? input.options.reasoning ?? options?.reasoning : undefined;
         const summaryOptions = {
           ...input.options,
           ...options,
-          reasoning: summaryModel === input.model ? input.options.reasoning : undefined,
+          reasoning: reasoning ?? (summaryModel.reasoning ? "low" : undefined),
           apiKey: summaryApiKey,
         };
         let request = context;

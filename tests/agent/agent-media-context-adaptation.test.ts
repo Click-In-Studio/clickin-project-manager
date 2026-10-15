@@ -3,7 +3,7 @@ import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/s
 import { InMemorySessionStorage } from "../../vendor/openclaw/packages/agent-core/src/index";
 import { convertToLlm } from "../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import type { AssistantMessage, MediaContent, Model } from "../../vendor/openclaw/packages/llm-core/src/types";
-import { resolveModel } from "@/lib/agent/runtime/config";
+import { configuredModels, llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import { compactRequestContext } from "@/lib/agent/runtime/request-compaction";
 import { estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
 import { restoreModelMedia, attachmentReadNeeded } from "@/lib/agent/runtime/model-media-state";
@@ -48,6 +48,37 @@ describe("#967 请求边界媒体适配", () => {
     const qwen = estimateRequestBudget(resolveModel("resonance"), { messages: [{ role: "user", timestamp: 1, content: [sound(8 * 1024 * 1024)] }] });
     expect(qwen.textFits).toBe(true);
     expect(qwen.mediaFits).toBe(false);
+  });
+
+  it("摘要默认 low 属于每个已配置思考模型的允许档位", () => {
+    for (const entry of configuredModels()) if (resolveModel(entry.key).reasoning)
+      expect(entry.thinkingLevels).toContain("low");
+  });
+
+  it.each([
+    { target: targetModel, reasoning: "max" as const, expected: "LOW" },
+    { target: sourceModel, reasoning: "medium" as const, expected: "MEDIUM" },
+    { target: sourceModel, reasoning: undefined, expected: "LOW" },
+  ])("#1011 真 SDK 序列化摘要思考档位：$target.id / $reasoning → $expected", async ({ target, reasoning, expected }) => {
+    const session = await setup(sound());
+    const payloads: unknown[] = [];
+    const complete = vi.fn(async (model: Model, context, options) => {
+      // 在实际 SDK 请求体生成后截停，不联网，也不以 fake completion 冒充参数验证。
+      const captured = await llmRuntime().completeSimple(model, context, { ...options, apiKey: "fixture-key",
+        onPayload: (payload) => { payloads.push(payload); throw new Error("参数已捕获，禁止联网"); },
+      });
+      expect(captured.stopReason).toBe("error");
+      expect(payloads).toHaveLength(1);
+      expect(payloads[0]).toMatchObject({ config: { thinkingConfig: { thinkingLevel: expected } } });
+      return answer(model, "开场后第二声敲击进入。保留原件身份，待复核时读取。");
+    });
+    await compactRequestContext({ session, context: { messages: convertToLlm((await session.buildContext()).messages) },
+      model: target, apiKey: "target-key", streamOptions: { reasoning }, signal: input.signal,
+      trigger: "context-overflow", completeSimple: complete,
+      selectSummaryModel: async () => ({ model: sourceModel, apiKey: "source-key" }),
+    });
+    expect(complete).toHaveBeenCalledOnce();
+    expect((await session.getBranch()).some((entry) => entry.type === "compaction")).toBe(true);
   });
 
   it.each([targetModel, resolveModel("resonance")])("旧音频触发适配，使用能读原件的历史模型并保留新图：$id", async (target) => {
