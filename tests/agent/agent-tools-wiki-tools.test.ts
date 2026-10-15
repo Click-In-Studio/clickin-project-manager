@@ -104,6 +104,7 @@ describe("功能正确性（owner 视角）", () => {
     const out = await wikiRead(ownerId, prodId, childId);
     expect(out).toContain(`[#wiki:${rootId}]`);
     expect(out).not.toContain("[[根文档]]");
+    expect(JSON.parse(out.split("\n\n")[0]).references).toContainEqual({ id: rootId, title: "根文档" });
   });
 
   it("wikiRead 保留已删除目标的原始 token，不改写定位原文", async () => {

@@ -10,7 +10,7 @@ import {
 } from "@/lib/node/db";
 import { getWiki, createWiki, updateWiki, deleteWiki, listWikiSharePeople, addWikiSharePerson, removeWikiSharePerson } from "@/lib/wiki/content";
 import { getAsset } from "@/lib/asset/db";
-import { listBacklinks, listOutgoingLinks, searchWiki, type WikiRef } from "@/lib/wiki/links";
+import { listBacklinks, listOutgoingLinks, searchWiki, extractWikiLinkTargets, type WikiRef } from "@/lib/wiki/links";
 import { canViewWiki, canEditWiki, canDeleteWiki, canShareWiki, listVisibleWikiIds } from "@/lib/wiki/perm";
 import { listEnumerableNodeIds, canPlaceNodeUnder, canWriteNodeContainer } from "@/lib/node/perm";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
@@ -173,11 +173,14 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
   try {
     const window = lineWindow(doc.body, range);
     const shell = await getNodeByWikiId(wikiId);
+    const targets = new Set(extractWikiLinkTargets(window.text));
+    const references = targets.size ? (await listOutgoingLinks(wikiId, productionId)).filter(ref => targets.has(ref.id)) : [];
     const metadata = {
       wikiId: doc.id, title: doc.title, tags: doc.tags, isPublic: shell?.isPublic ?? false,
       startLine: window.startLine, endLine: window.endLine, totalLines: window.totalLines,
       partial: window.startLine !== 1 || window.endLine !== window.totalLines,
-      sectionPath: sectionPath(doc.body, window.start),
+      sectionPath: sectionPath(doc.body, window.start + (window.text.split("\n")[0]?.length ?? 0)),
+      references,
     };
     // 定位元数据与正文分开；正文保留存储形态，确保搜索和 patch 逐字同源。
     return neutralizeInjectionTags(`${JSON.stringify(metadata)}\n\n${window.text}`);
