@@ -1,5 +1,6 @@
 ---
 kind: fixed
+pr: 1008
 title: 凭证识别和长期记忆整理可自动切换备用服务
 summary: AI 服务故障时自动尝试备用，减少凭证识别失败和长期记忆整理中断。
 page: production/finance/expenses
