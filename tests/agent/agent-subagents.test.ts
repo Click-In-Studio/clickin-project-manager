@@ -103,19 +103,17 @@ function model(
       usage,
       timestamp: Date.now(),
     };
-    options?.signal?.addEventListener(
-      "abort",
-      () => {
-        if (stopped) return;
-        stopped = true;
-        stream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...base, content: [], stopReason: "aborted" },
-        });
-      },
-      { once: true },
-    );
+    const abort = () => {
+      if (stopped) return;
+      stopped = true;
+      stream.push({
+        type: "error",
+        reason: "aborted",
+        error: { ...base, content: [], stopReason: "aborted" },
+      });
+    };
+    if (options?.signal?.aborted) abort();
+    else options?.signal?.addEventListener("abort", abort, { once: true });
     queueMicrotask(async () => {
       if (gate) await gate;
       if (stopped) return;
