@@ -2,6 +2,7 @@
 kind: fixed
 title: 长对话中正常查找和阅读不再被过早中止
 page: ai/assistant/chat
+pr: 1025
 order: 1
 ---
 

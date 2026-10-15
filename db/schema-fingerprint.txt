@@ -5,6 +5,7 @@ COL|agent_admission|operation_key|text|text|NO|
 COL|agent_admission|owner|text|text|YES|
 COL|agent_admission|ready_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_admission|remote_id|text|text|YES|
+COL|agent_admission|reservation_id|text|text|YES|
 COL|agent_admission|reserved_credits|bigint|int8|NO|0
 COL|agent_admission|resource|text|text|NO|
 COL|agent_admission|result|jsonb|jsonb|YES|

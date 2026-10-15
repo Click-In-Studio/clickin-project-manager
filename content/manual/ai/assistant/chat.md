@@ -7,7 +7,7 @@ who: 所有成员（项目会话需要专业档项目）
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/what-it-is, ai/skills/skills, ai/automation/schedules]
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 ## 这是什么

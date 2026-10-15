@@ -268,7 +268,7 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
             }
             if (event.type === "error") observedResult = event.error;
             if (event.type === "done" || event.type === "error") {
-              await settleRequestCost(scope.runId, ticket.id, creditsFromUsd(usdOfUsage(event.type === "done" ? event.message.usage : event.error.usage, model)));
+              await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(event.type === "done" ? event.message.usage : event.error.usage, model)));
               const contextOverflow = event.type === "error"
                 && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow);
               await observation?.finish(
@@ -337,10 +337,10 @@ export async function budgetedComplete(model: Model, context: Context, options: 
   const ticket = scope?.modelTicket;
   if (!scope || !ticket) return complete();
   const cost = estimateCostBudget(model, context, options);
-  await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
+  const costReservation = await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
   scope.signal.throwIfAborted();
   options.signal?.throwIfAborted();
   const result = await complete();
-  await settleRequestCost(scope.runId, ticket.id, creditsFromUsd(usdOfUsage(result.usage, model)));
+  await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(result.usage, model)));
   return result;
 }

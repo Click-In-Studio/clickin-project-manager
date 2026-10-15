@@ -33,10 +33,10 @@ describe("任务预算与循环检测分离", () => {
     const model = resolveModel("inspiration"); const estimate = estimateCostBudget(model, context(266000));
     expect(estimate.taskCredits).toBeGreaterThan(estimate.requestCredits * 2);
     const r = await run();
-    await reserveRequestCost(r.id, r.ticketId, estimate.requestCredits, estimate.taskCredits);
-    await settleRequestCost(r.id, r.ticketId, 454750);
-    await reserveRequestCost(r.id, r.ticketId, estimate.requestCredits, estimate.taskCredits);
-    await settleRequestCost(r.id, r.ticketId, 51354);
+    const cold = await reserveRequestCost(r.id, r.ticketId, estimate.requestCredits, estimate.taskCredits);
+    await settleRequestCost(r.id, r.ticketId, cold.reservationId, 454750);
+    const cached = await reserveRequestCost(r.id, r.ticketId, estimate.requestCredits, estimate.taskCredits);
+    await settleRequestCost(r.id, r.ticketId, cached.reservationId, 51354);
     const row = (await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [r.id])).rows[0];
     expect(Number(row.task_credits)).toBe(506104);
   });
@@ -52,25 +52,28 @@ describe("任务预算与循环检测分离", () => {
     expect(requests.filter(r => r.status === "fulfilled")).toHaveLength(1);
     const winner = children[requests.findIndex(r => r.status === "fulfilled")];
     const loser = children[requests.findIndex(r => r.status === "rejected")];
-    await Promise.all([settleRequestCost(winner.id,winner.ticketId,100000),settleRequestCost(winner.id,winner.ticketId,100000)]);
+    const held = requests.find(r => r.status === "fulfilled");
+    if (!held || held.status !== "fulfilled") throw new Error("未找到预留");
+    await Promise.all([settleRequestCost(winner.id,winner.ticketId,held.value.reservationId,100000),settleRequestCost(winner.id,winner.ticketId,held.value.reservationId,100000)]);
     await reserveRequestCost(loser.id,loser.ticketId,300000,500000);
     expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [root.id])).rows[0].task_credits)).toBe(100000);
   });
   it("恢复重试保守计算未知请求，且已结算结果不重复扣成本", async () => {
     const r = await run();
-    await reserveRequestCost(r.id,r.ticketId,100000,500000);
+    const original = await reserveRequestCost(r.id,r.ticketId,100000,500000);
     await getPool().query("UPDATE agent_admission SET owner='old',state='failed' WHERE id=$1", [r.ticketId]);
     await reattachAdmission(r.ticketId);
-    await reserveRequestCost(r.id,r.ticketId,100000,500000);
-    await settleRequestCost(r.id,r.ticketId,50000);
-    await settleRequestCost(r.id,r.ticketId,50000);
+    const retry = await reserveRequestCost(r.id,r.ticketId,100000,500000);
+    await settleRequestCost(r.id,r.ticketId,original.reservationId,90000);
+    await settleRequestCost(r.id,r.ticketId,retry.reservationId,50000);
+    await settleRequestCost(r.id,r.ticketId,retry.reservationId,50000);
     expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [r.id])).rows[0].task_credits)).toBe(150000);
   });
   it("旧执行者不能预留或结算新执行者的请求", async () => {
-    const r = await run(); await reserveRequestCost(r.id,r.ticketId,100000,500000);
+    const r = await run(); const held = await reserveRequestCost(r.id,r.ticketId,100000,500000);
     await getPool().query("UPDATE agent_admission SET owner='new' WHERE id=$1", [r.ticketId]);
     await expect(reserveRequestCost(r.id,r.ticketId,100000,500000)).rejects.toThrow("租约");
-    await settleRequestCost(r.id,r.ticketId,100000);
+    await settleRequestCost(r.id,r.ticketId,held.reservationId,100000);
     expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [r.id])).rows[0].task_credits)).toBe(0);
   });
   it("预算不足拒绝下一请求，但已完成工具保留；不设置 abort", async () => {

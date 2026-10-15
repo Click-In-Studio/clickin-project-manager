@@ -4012,6 +4012,7 @@ CREATE INDEX IF NOT EXISTS agent_observation_kind_idx ON agent_observation(kind,
 ALTER TABLE agent_run ADD COLUMN task_budget_credits BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE agent_admission ADD COLUMN reserved_credits BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE agent_admission ADD COLUMN charged_credits BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_admission ADD COLUMN reservation_id TEXT;
 ALTER TABLE agent_tool_operation ADD COLUMN progress_key TEXT;
 ALTER TABLE agent_tool_operation ADD COLUMN input_entry_id TEXT;
 ALTER TABLE agent_tool_operation ADD COLUMN completed_at TIMESTAMPTZ;

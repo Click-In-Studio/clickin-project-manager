@@ -1,6 +1,7 @@
 import type { Context } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import { getPool } from "@/lib/pg";
 import type { PoolClient } from "pg";
+import { newRunId } from "./ids";
 import { RUNNER_OWNER } from "./config";
 import { contextRepeatsWithoutProgress, repeatsWithoutProgress, TASK_COST_LIMIT_CREDITS } from "./cost-budget";
 
@@ -38,23 +39,24 @@ export async function reserveRequestCost(runId: string, ticketId: string, reques
     await client.query("UPDATE agent_run SET task_budget_credits=$2 WHERE id=$1", [root.id, budget]);
     const spent = Number(root.task_credits);
     const allowed = spent + reserved + requestCredits <= budget;
-    if (allowed) await client.query("UPDATE agent_admission SET reserved_credits=$2 WHERE id=$1", [ticketId, requestCredits]);
+    const reservationId = newRunId();
+    if (allowed) await client.query("UPDATE agent_admission SET reserved_credits=$2,reservation_id=$3 WHERE id=$1", [ticketId, requestCredits, reservationId]);
     await client.query("COMMIT");
     if (!allowed) throw new Error(BUDGET_ERROR);
-    return { budgetRunId: root.id, budgetCredits: budget, spentCredits: spent, reservedCredits: reserved, requestCredits };
+    return { reservationId, budgetRunId: root.id, budgetCredits: budget, spentCredits: spent, reservedCredits: reserved, requestCredits };
   } catch (error) { await client.query("ROLLBACK"); throw error; }
   finally { client.release(); }
 }
 
 /** 结算在向 harness 发送终态之前完成；重复结算不重复累加根预算。 */
-export async function settleRequestCost(runId: string, ticketId: string, actualCredits: number): Promise<void> {
+export async function settleRequestCost(runId: string, ticketId: string, reservationId: string, actualCredits: number): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const root = await lockBudget(client, runId);
     const settled = await client.query(
       `UPDATE agent_admission SET reserved_credits=0,charged_credits=charged_credits+$2
-       WHERE id=$1 AND reserved_credits>0 AND owner=$3 AND run_id=$4 RETURNING id`, [ticketId, actualCredits, RUNNER_OWNER, runId],
+       WHERE id=$1 AND reserved_credits>0 AND owner=$3 AND run_id=$4 AND reservation_id=$5 RETURNING id`, [ticketId, actualCredits, RUNNER_OWNER, runId, reservationId],
     );
     if (settled.rowCount) await client.query("UPDATE agent_run SET task_credits=task_credits+$2 WHERE id=$1", [root.id, actualCredits]);
     await client.query("COMMIT");

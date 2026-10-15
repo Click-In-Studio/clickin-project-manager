@@ -596,8 +596,8 @@ describe("持久子 Agent 基建", () => {
       )
     ).rows[0];
     const ticket = await acquire(child.id, "budget-test", "llm", new AbortController().signal);
-    await reserveRequestCost(child.id, ticket.id, 100, TASK_COST_LIMIT_CREDITS);
-    await settleRequestCost(child.id, ticket.id, TASK_COST_LIMIT_CREDITS);
+    const held = await reserveRequestCost(child.id, ticket.id, 100, TASK_COST_LIMIT_CREDITS);
+    await settleRequestCost(child.id, ticket.id, held.reservationId, TASK_COST_LIMIT_CREDITS);
     await expect(reserveRequestCost(child.id, ticket.id, 1, TASK_COST_LIMIT_CREDITS)).rejects.toThrow("task-budget-exceeded");
     await release(ticket);
     expect(
