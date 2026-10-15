@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   configuredModels,
+  normalOutputTokens,
   hiddenModelCandidates,
   modelApiKey,
   llmRuntime,
@@ -26,6 +27,29 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe("模型请求协议与目录", () => {
+  it.each([
+    ["deepseek-flash", 256_000], ["deepseek-pro", 256_000],
+    ["resonance", 64_000], ["inspiration", 65_536],
+  ])("%s 的真实 SDK 请求使用普通输出额度，不被统一压成 8192", async (key, output) => {
+    const model = resolveModel(key as Parameters<typeof resolveModel>[0]);
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      const google = model.api === "google-generative-ai";
+      const data = google
+        ? { candidates: [{ content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } }
+        : { id: "test", choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } };
+      return new Response(`data: ${JSON.stringify(data)}\n\n${google ? "" : "data: [DONE]\n\n"}`, { headers: { "content-type": "text/event-stream" } });
+    }));
+    const reply = await llmRuntime().completeSimple(model, {
+      messages: [{ role: "user", content: "请核对材料", timestamp: 1 }],
+    }, { apiKey: "test", reasoning: "low", maxTokens: normalOutputTokens(model), signal: AbortSignal.timeout(5000) });
+    expect(reply.stopReason).toBe("stop");
+    expect(model.api === "google-generative-ai"
+      ? (body.generationConfig as Record<string, unknown>).maxOutputTokens
+      : body.max_tokens).toBe(output);
+  });
+
   it("隐藏调用登记跨厂商真实模型，共用百炼凭据但不出现在聊天选择器", () => {
     vi.stubEnv("EMBEDDING_API_KEY", "test-qwen-key");
     const models = hiddenModelCandidates();

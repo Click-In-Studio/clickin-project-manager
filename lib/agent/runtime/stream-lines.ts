@@ -14,6 +14,14 @@ import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
 import type { AgentHarnessEvent } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AgentMessage } from "../../../vendor/openclaw/packages/agent-core/src/types";
 
+/** 长度截断与模型错误共用终态原因，实时流、历史和子任务保持一致。 */
+export function assistantFailureReason(message: AgentMessage | undefined): string | undefined {
+  if (message?.role !== "assistant") return undefined;
+  if (message.stopReason === "length") return "本次回复达到生成长度上限，尚未完成。已有内容已保留，请核对进度后再继续。";
+  if (message.stopReason === "error") return message.errorMessage || "模型请求失败，请重试";
+  return undefined;
+}
+
 /** 与 relay.boundToolPayload 同款大小闸（不 import relay：它拖着 gateway client 依赖树）。 */
 export function boundPayload(value: unknown): unknown {
   if (value === undefined || value === null) return undefined;
@@ -135,8 +143,9 @@ export function createStreamLineAdapter(emit: (line: StreamLine) => void): (even
           emit({ type: "aborted", text: segmentText });
           return;
         }
-        if (lastAssistant?.role === "assistant" && lastAssistant.stopReason === "error") {
-          emit({ type: "error", error: lastAssistant.errorMessage || "Agent run did not complete" });
+        const failure = assistantFailureReason(lastAssistant);
+        if (failure) {
+          emit({ type: "error", error: failure });
           return;
         }
         emit({ type: "final", text: segmentText });

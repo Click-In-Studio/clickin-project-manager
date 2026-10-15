@@ -1,4 +1,4 @@
-import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments } from "./model-attachments";
 import { restoreModelMedia, refreshMediaReferences, attachmentReadNeeded } from "./model-media-state";
 import { selectMediaCompactionModel } from "./media-compaction-model";
@@ -33,6 +33,7 @@ import { subscribeSessionEvents } from "./events";
 import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
+import { assistantFailureReason } from "./stream-lines";
 import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
 import { estimateRequestBudget } from "./context-budget";
 import { readModelMedia } from "./model-read";
@@ -339,7 +340,7 @@ async function executeBody(
       messages: convertToLlm([...current.messages, pending]) };
     if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }).fits) return false;
     try {
-      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: REQUEST_OUTPUT_TOKENS }, trigger: "pressure", signal: abort.signal }, media);
+      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, media);
       return estimateRequestBudget(selectedModel, prepared).fits;
     } catch (error) {
       if (error instanceof CompactionBudgetError) return false;
@@ -354,7 +355,7 @@ async function executeBody(
     systemPrompt: SYSTEM,
     model: selectedModel,
     thinkingLevel: selection.thinkingLevel,
-    streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
+    streamOptions: { maxTokens: normalOutputTokens(selectedModel) },
     getApiKeyAndHeaders: async () => {
       // harness 在异步准备期间尚未建立自己的取消控制器，外部停止必须在请求前再检查。
       if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -494,8 +495,8 @@ async function executeBody(
     await costTail;
     const messages = (await session.buildContext()).messages;
     const last = messages.at(-1);
-    if (last?.role === "assistant" && last.stopReason === "error")
-      throw new Error(last.errorMessage || "子 Agent 模型调用失败");
+    const failure = assistantFailureReason(last);
+    if (failure) throw new Error(failure);
     if (abort.signal.aborted) {
       status = timedOut || costExceeded ? "failed" : "aborted";
       error = timedOut
