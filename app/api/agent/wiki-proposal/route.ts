@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
       targetTags = target?.tags ?? null;
     }
 
-    const patchApproval = await getWikiPatchApproval(auth.userId, productionId, toolCallId);
+    const patchApproval = proposal.action === "update"
+      ? await getWikiPatchApproval(auth.userId, productionId, toolCallId) : null;
 
     return NextResponse.json({
       action: proposal.action,
@@ -62,7 +63,8 @@ export async function GET(req: NextRequest) {
       targetTags,
       parentTitle,
       title: proposal.title,
-      body: patchApproval && targetBody === null ? "" : proposal.body,
+      // update 正文可能由服务端拼出；即使审批行尚未建立，也必须按当前查看权限隐藏。
+      body: proposal.action === "update" && targetBody === null ? "" : proposal.body,
       tags: proposal.tags,
       summary: proposal.summary,
       hasPermission: proposal.hasPermission,

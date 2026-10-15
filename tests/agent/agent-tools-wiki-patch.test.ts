@@ -147,12 +147,27 @@ describe("局部读写真链路", () => {
     const tool = buildTools({ userId: ownerId, productionId: prodId }).find(t => t.mcpName === "production.wiki_search")!;
     expect(JSON.stringify(await tool.execute(shortId(), { query: doc.title }))).toContain(doc.title);
   });
+  it("patch 复用方言真门，非法引用不落提议也不改正文", async () => {
+    const doc = await createWiki({ productionId: prodId, title: "方言门", body: "原文", createdBy: ownerId });
+    const callId = `patch_${shortId()}`;
+    const prepared = await prepareWikiPatch(ownerId, prodId, callId, {
+      wikiId: doc.id, edits: [{ oldText: "原文", newText: "[[不存在的引用目标]]" }], summary: "非法引用",
+    });
+    expect(prepared.error).toContain("方言校验拒绝");
+    expect(await getWikiProposalByToolCallId(prodId, callId, ownerId)).toBeNull();
+    expect((await getWiki(doc.id, prodId))?.body).toBe("原文");
+  });
   it("收回查看权限后，服务端拼出的整篇提议与差异不再从详情泄露", async () => {
     const doc = await createWiki({ productionId: prodId, title: "临时公开", body: "秘密原文", createdBy: ownerId });
     await setNodePublic(doc.nodeId, prodId, true);
     const callId = `patch_${shortId()}`;
     const args: WikiPatchArgs = { wikiId: doc.id, edits: [{ oldText: "原文", newText: "新文" }], summary: "修改" };
     const prepared = await prepareWikiPatch(memberId, prodId, callId, args);
+    await setNodePublic(doc.nodeId, prodId, false);
+    const cookie = `${SESSION_COOKIE}=${createSession({ userId: memberId, name: "测试", avatarUrl: null, isAdmin: false })}`;
+    const request = () => new NextRequest(`http://localhost/api/agent/wiki-proposal?productionId=${prodId}&toolCallId=${callId}`, { headers: { Cookie: cookie } });
+    // 预持久化和审批建行之间，同样不能通过 update.body 回读服务端拼出的全文。
+    expect(await (await GET(request())).json()).toMatchObject({ body: "", patchDiff: null, targetBody: null });
     const memberSession = `as_${shortId()}`;
     extraSessions.push(memberSession);
     const memberRun = `ar_${shortId()}`;
@@ -160,9 +175,7 @@ describe("局部读写真链路", () => {
     await getPool().query("INSERT INTO agent_run (id,session_id) VALUES ($1,$2)", [memberRun, memberSession]);
     await createApproval({ runId: memberRun, sessionId: memberSession, toolCallId: callId,
       tool: exposedName("production.wiki_propose_patch"), args, card: approvalCard("production-wiki_propose_patch", args), preview: prepared.preview });
-    await setNodePublic(doc.nodeId, prodId, false);
-    const cookie = `${SESSION_COOKIE}=${createSession({ userId: memberId, name: "测试", avatarUrl: null, isAdmin: false })}`;
-    const response = await GET(new NextRequest(`http://localhost/api/agent/wiki-proposal?productionId=${prodId}&toolCallId=${callId}`, { headers: { Cookie: cookie } }));
+    const response = await GET(request());
     expect(await response.json()).toMatchObject({ body: "", patchDiff: null, patchCounts: null, targetBody: null });
   });
   it("公开可读并不授予编辑权限，预览和执行均按编辑门判定", async () => {
