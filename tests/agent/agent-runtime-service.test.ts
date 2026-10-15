@@ -20,6 +20,7 @@ import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { CHAT_MODEL, llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
+import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
 
@@ -1536,6 +1537,33 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     delete runtimeOverrides.apiKey;
     vi.unstubAllEnvs();
     await cleanupProduction(prodId).catch(() => {});
+  });
+
+  it.each([
+    ["production.script_search", { query: "划桨" }, "production.script"],
+    ["production.script_read_section", { sectionId: "missing-section" }, "production.script"],
+    ["production.scene_list", {}, "production.dramaturgy"],
+    ["production.character_list", {}, "production.dramaturgy"],
+  ] as const)("#1019 调用 %s 后同轮展开整族，下一轮按近期使用恢复", async (name, args, family) => {
+    const call: ToolCall = { type: "toolCall", id: `c_family_${name}`, name: exposedName(name), arguments: args };
+    const { streamFn, seen } = scripted([{ calls: [call] }, { text: "已核对" }, { text: "接着讨论" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = createNewSessionKey(userId, prodId);
+    sessions.push(key);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    await collectUntilTerminal(key);
+    await waitForIdle(key);
+    const members = TOOL_CATALOG.filter(e => e.family === family).map(e => exposedName(e.name));
+    const otherWrite = exposedName(family === "production.script" ? "production.scene_propose_update" : "production.script_propose_rewrite");
+    expect(seen[0].tools).toContain(exposedName(name));
+    expect(seen[0].tools).not.toContain(exposedName("production.script_read_window"));
+    expect(seen[0].tools).not.toContain(exposedName("production.scene_read"));
+    for (const member of members) expect(seen[1].tools).toContain(member);
+    expect(seen[1].tools).not.toContain(otherWrite);
+    await startRun({ sessionId: key, userId, message: "你好呀", pageKey: "prod:home" });
+    await waitForIdle(key);
+    for (const member of members) expect(seen[2].tools).toContain(member);
+    expect(seen[2].tools).not.toContain(otherWrite);
   });
 
   it("首页闲聊（wiki 族不在工具面）→ 模型调 find_tools → 再按名调 wiki_tree（不在列表里也能解析执行）", async () => {

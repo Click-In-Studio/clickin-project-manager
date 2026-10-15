@@ -104,3 +104,37 @@ describe("tool tiers：正向闭包与会话内已用工具", () => {
     expect(withUsed.active).toContain("production.wiki_read");
   });
 });
+
+describe("剧本与构作常驻入口及调用后整族加载（#1019）", () => {
+  const entries = ["production.script_search", "production.script_read_section", "production.scene_list", "production.character_list"];
+  const familyNames = (family: string) => TOOL_CATALOG.filter(e => e.family === family).map(e => e.name);
+  const tier = (used: string[] = [], hasProduction = true) => tieredToolNames({
+    hasProduction, pageKey: null, prompt: null, recalled: [], used, available: ALL,
+  });
+
+  it("无召回时仅四个入口常驻，不提前带出窗口、方言或写工具", () => {
+    const result = tier();
+    for (const name of entries) expect(result.hot).toContain(name);
+    expect(result.active.filter(n => [...familyNames("production.script"), ...familyNames("production.dramaturgy")].includes(n)).sort()).toEqual([...entries].sort());
+  });
+
+  it.each(entries)("近期调用 %s 恢复所属整族，跨族依赖不触发另一族展开", name => {
+    const result = tier([name]);
+    const family = TOOL_CATALOG.find(e => e.name === name)!.family;
+    for (const member of familyNames(family)) expect(result.active).toContain(member);
+    const otherWrite = family === "production.script" ? "production.scene_propose_update" : "production.script_propose_rewrite";
+    expect(result.active).not.toContain(otherWrite);
+  });
+
+  it("窗口外没有近期调用时退回入口，个人会话不暴露制作工具", () => {
+    expect(tier().active).not.toContain("production.script_propose_rewrite");
+    expect(tier(entries, false).active.some(n => n.startsWith("production."))).toBe(false);
+  });
+
+  it("显式召回单个剧本工具仍补齐读取依赖", () => {
+    const result = tieredToolNames({ hasProduction: true, pageKey: null, prompt: null,
+      recalled: ["production.script_search"], available: ALL });
+    expect(result.active).toContain("production.script_read_window");
+    expect(result.active).toContain("production.script_dialect_ref");
+  });
+});
