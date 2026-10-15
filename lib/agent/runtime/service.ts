@@ -1045,6 +1045,14 @@ async function preflight(g: GateInput): Promise<PreflightResult> {
   let hasPermission: boolean | undefined;
   const preview: Record<string, unknown> = {};
 
+  if (bare === "production-wiki_propose_patch" && g.productionId) {
+    const { prepareWikiPatch } = await import("@/lib/agent/tools/wiki-patch-tools");
+    const prepared = await prepareWikiPatch(g.userId, g.productionId, g.toolCallId,
+      g.args as import("@/lib/agent/tools/wiki-patch-tools").WikiPatchArgs);
+    if (prepared.error) return { block: true, reason: prepared.error, preview };
+    return { hasPermission: prepared.hasPermission, preview: prepared.preview ?? {}, notes: prepared.notes };
+  }
+
   // wiki propose 五兄弟：先方言校验 + 预持久化（与插件路径同一份 prepare）；
   // 校验拒绝 → 直接 block，说明书随理由回模型，卡片根本不弹
   const wikiAction = WIKI_PROPOSE_ACTIONS[bare];

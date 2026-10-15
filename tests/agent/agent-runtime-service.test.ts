@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
+import { createWiki, getWiki, updateWiki } from "@/lib/wiki/content";
 import { getPool } from "@/lib/pg";
 import { makeProduction, setProductionTier, cleanupProduction, makeScene, shortId } from "../_support/factories";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
@@ -546,6 +547,36 @@ describe("agent-runtime service", () => {
     const approval = await getPool().query<{ status: string; executed_at: Date | null }>(`SELECT status, executed_at FROM agent_approval WHERE id = $1`, [approvalId]);
     expect(approval.rows[0].status).toBe("allowed");
     expect(approval.rows[0].executed_at).not.toBeNull();
+  });
+
+  it.each(["allow", "deny", "changed"] as const)("局部修改经过真实运行时审批门：%s", async (decision) => {
+    const doc = await createWiki({ productionId: prodId, title: "局部修改", body: "# 安排\n原文\n保留", createdBy: userId });
+    const key = newKey();
+    const callId = `c_patch_${shortId()}`;
+    const args = { wikiId: doc.id, edits: [{ oldText: "原文", newText: "新文", startLine: 2, endLine: 2 }], summary: "修改时间" };
+    const { streamFn, seen } = scripted([
+      { calls: [{ type: "toolCall", id: callId, name: exposedName("production.wiki_propose_patch"), arguments: args }] },
+      { text: "处理完成" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    await startRun({ sessionId: key, userId, message: "局部修改文档", pageKey: "prod:wiki" });
+    let approvalId: string | undefined;
+    for (let i = 0; i < 200 && !approvalId; i++) {
+      const line = (await readEventsSince(key, 0)).map(r => r.line).find(l => l.type === "approval") as Extract<StreamLine, { type: "approval" }> | undefined;
+      approvalId = line?.approval?.id;
+      if (!approvalId) await new Promise(r => setTimeout(r, 25));
+    }
+    expect(approvalId).toBeTruthy();
+    expect((await getWiki(doc.id, prodId))?.body).toContain("原文");
+    if (decision === "changed") await updateWiki(doc.id, prodId, { body: "人工更新" }, userId);
+    await resolveApproval(approvalId!, decision === "deny" ? "deny" : "allow-once", userId);
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect((await getWiki(doc.id, prodId))?.body).toBe(decision === "allow" ? "# 安排\n新文\n保留" : decision === "changed" ? "人工更新" : "# 安排\n原文\n保留");
+    expect(lines.some(l => l.type === "mutation")).toBe(decision === "allow");
+    const context = JSON.stringify(seen[1].messages);
+    expect(context).toContain(decision === "allow" ? "已局部修改" : decision === "changed" ? "已发生变化" : "Denied by user");
+    expect(context).not.toContain('"body":"# 安排');
   });
 
   it("每次模型请求刷新权威前缀：当前指令、记忆删除和项目资格立即生效，工具顺序保持稳定", async () => {
