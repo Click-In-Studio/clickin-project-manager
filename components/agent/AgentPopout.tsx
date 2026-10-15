@@ -893,7 +893,7 @@ export default function AgentPopout({
                 待补充 {activeSession.pendingQuestionCount}
               </span>
             )}
-            <span className="shrink-0 text-[10px] text-[var(--muted)]">{pickerOpen ? "▲" : "▼"}</span>
+            <ChevronIcon direction={pickerOpen ? "up" : "down"} size={12} className="shrink-0 text-[var(--muted)]" />
           </button>
           <button
             type="button"

@@ -10,6 +10,7 @@
 // 手柄自己的 hover 状态——菜单一打开鼠标就离开手柄了，手柄随即隐藏，若还读
 // 它的 target 会拿到空。
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/core";
@@ -30,7 +31,7 @@ function Item({
 }: {
   onClick: () => void;
   children: React.ReactNode;
-  hint?: string;
+  hint?: React.ReactNode;
   danger?: boolean;
   /** 有值 = 灰掉，值就是给用户看的原因（§13.4：aria-disabled + title，不用 disabled
    *  属性——disabled 的按钮不冒鼠标事件，title 里的原因读不到） */
@@ -130,7 +131,7 @@ export default function BlockMenu({
       ) : (
         <>
           {canTurnInto(block?.node ?? null) && (
-            <Item onClick={() => setPage("turn")} hint="▸">转换为</Item>
+            <Item onClick={() => setPage("turn")} hint={<ChevronIcon direction="right" size={12} />}>转换为</Item>
           )}
           {/* 嵌入块 → 引用 chip（#692）：图片块的「转换为」就是这一项。外链图不在
               素材库里，灰掉给原因 */}

@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { Z_INDEX } from "@/lib/z-index";
 
 import {
@@ -302,9 +303,7 @@ export default function OverflowSafeSelect({
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {selected?.label ?? "请选择"}
         </span>
-        <span aria-hidden="true" style={{ flexShrink: 0, color: "var(--muted)", fontSize: 10 }}>
-          {open ? "▴" : "▾"}
-        </span>
+        <ChevronIcon direction={open ? "up" : "down"} size={12} className="shrink-0 text-[var(--muted)]" />
       </button>
 
       {open && position && typeof document !== "undefined" && createPortal(
