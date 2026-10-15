@@ -22,6 +22,7 @@ export function parseDreamOutput(raw: string): string[] {
   const value: unknown = JSON.parse(raw);
   if (!Array.isArray(value) || value.some(v => typeof v !== "string" || !v.trim() || v.length > 1000)) throw new Error("dream 输出不是合法的条目数组");
   const entries = value as string[];
+  if (new Set(entries).size !== entries.length) throw new Error("dream 输出包含重复条目");
   if (entries.reduce((n, v) => n + v.length, 0) > 3000) throw new Error("dream 输出超过预算");
   return entries;
 }
@@ -32,13 +33,13 @@ export async function distillUser(userId: string, productionId: string | null = 
       if (!snapshot.inputs.length) return { userId, productionId, status: "no-new-data" };
       const context = productionId ? await buildProductionContextMarkdown(userId, productionId) : null;
       try {
-        const raw = await chat([
+        const generated = await chat([
           { role: "system", content: DREAM_RULES },
           { role: "user", content: JSON.stringify({ scope: productionId ? "个人项目" : "个人通用", projectBackground: context,
             baseline: snapshot.entries.map(e => ({ body: e.body, source: e.source, userEdited: e.userEdited })),
             materials: snapshot.inputs.map(e => e.text) }) },
-        ], { maxTokens: 8000, temperature: 0.3, rejectTruncated: true });
-        const accepted = await commitDream(snapshot, parseDreamOutput(raw));
+        ], { purpose: "memory-distill", maxTokens: 8000, temperature: 0.3, parse: parseDreamOutput });
+        const accepted = await commitDream(snapshot, generated.value);
         return { userId, productionId, status: accepted ? "distilled" : "conflict", entries: snapshot.inputs.length, inputChars: INPUT_STEPS[i], shrunk: i > 0 };
       } catch (err) {
         if (!(err instanceof LlmBudgetError)) throw err;

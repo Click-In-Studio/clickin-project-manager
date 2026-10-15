@@ -1,178 +1,108 @@
-// LLM interface — OpenAI-compatible.
-// Switch provider via LLM_PROVIDER env var: "openai" (default) | "deepseek"
-// Each provider reads its own key and model env vars.
+import type { Context, Model } from "../../vendor/openclaw/packages/llm-core/src/types";
+import { hiddenModelCandidates, llmRuntime, modelApiKey } from "./runtime/config";
 
-export type Message = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
-
-export type ChatOptions = {
-  model?: string;
-  /**
-   * 正文预算。**推理模型上它是 CoT + 正文的总预算**——思维链先花，正文用剩下的。
-   * 按正文长度估的值会被 CoT 吃光，见下面 REASONING_RETRY_MAX_TOKENS 的补救。
-   */
-  maxTokens?: number;
+export type Message = { role: "system" | "user"; content: string };
+export type ChatOptions<T> = {
+  purpose: string;
+  maxTokens: number;
   temperature?: number;
-  /**
-   * true = 被截断（finish_reason='length'）的回答按失败处理，不返回半截内容。
-   * 用于"输出会覆盖既有数据"的调用点（如记忆蒸馏覆盖写 MEMORY.md）——
-   * 半截摘要写进去等于把长期记忆替换成一段残文，比报错糟得多。
-   */
-  rejectTruncated?: boolean;
+  parse: (raw: string) => T;
 };
+export type ChatResult<T> = { value: T; provider: string; model: string };
+export const HIDDEN_MODEL_POLICY = "hidden-v1:deepseek-flash>qwen3.8-flash";
+const COOLDOWN_MS = 60_000;
+const TOTAL_TIMEOUT_MS = 35_000;
+// 只影响隐藏调用；主聊天继续尊重用户选择。每个服务进程各自记录故障。
+const unavailableUntil = new Map<string, number>();
 
-/**
- * 推理模型把预算烧在 CoT 上时的重试预算（DeepSeek reasoner 系列上限 8K）。
- *
- * 2026-08-17 线上：DEEPSEEK_MODEL=deepseek-v4-pro 是推理模型，蒸馏传
- * maxTokens=2000，实测 reasoning_tokens=1874（94%）、finish_reason=length、
- * content 为空 → 每次蒸馏都报 "LLM returned empty response"。调用方按正文估
- * 预算没有错，错在这个参数在推理模型上语义不同——所以由这一层兜。
- */
-const REASONING_RETRY_MAX_TOKENS = 8000;
-
-/**
- * 预算不够导致的失败（finish_reason='length'）。与"模型真的没输出"分开，
- * 调用方才能对症处理——蒸馏的处理是**缩小输入**重来，而不是加大预算重试：
- * 预算有模型上限，输入没有，硬顶会变成天天失败、offset 永不推进。
- */
 export class LlmBudgetError extends Error {
   constructor(message: string, readonly truncated: boolean) {
     super(message);
     this.name = "LlmBudgetError";
   }
 }
-
-type RawChoice = {
-  message?: { content?: string; reasoning_content?: string };
-  finish_reason?: string;
-};
-
-type RawCompletion = {
-  choices?: RawChoice[];
-  error?: { message: string };
-  usage?: { completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } };
-};
-
-type Attempt = {
-  content: string;
-  reasoning: string;
-  finishReason: string;
-  maxTokens: number;
-  reasoningTokens: number;
-};
-
-type ProviderConfig = {
-  baseUrl: string;
-  apiKey: string;
-  defaultModel: string;
-};
-
-export function configuredLlmModel(): { provider: "openai" | "deepseek"; model: string } {
-  const provider = process.env.LLM_PROVIDER === "deepseek" ? "deepseek" : "openai";
-  return {
-    provider,
-    model: provider === "deepseek"
-      ? process.env.DEEPSEEK_MODEL ?? "deepseek-chat"
-      : process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-  };
-}
-
-function getProviderConfig(): ProviderConfig {
-  const { provider, model } = configuredLlmModel();
-
-  if (provider === "deepseek") {
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) throw new Error("DEEPSEEK_API_KEY not set");
-    return {
-      baseUrl:      "https://api.deepseek.com/v1",
-      apiKey,
-      defaultModel: model,
-    };
+export class LlmUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmUnavailableError";
   }
+}
+class OutputError extends Error {}
+class ProviderError extends Error {}
 
-  // Default: openai
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY not set");
+function contextOf(messages: Message[]): Context {
   return {
-    baseUrl:      "https://api.openai.com/v1",
-    apiKey,
-    defaultModel: model,
+    systemPrompt: messages.filter(m => m.role === "system").map(m => m.content).join("\n\n"),
+    messages: messages.filter(m => m.role === "user").map(m => ({
+      role: "user" as const, content: m.content, timestamp: Date.now(),
+    })),
   };
 }
 
-export async function chat(
-  messages: Message[],
-  options: ChatOptions = {},
-): Promise<string> {
-  const { baseUrl, apiKey, defaultModel } = getProviderConfig();
-  const model = options.model ?? defaultModel;
-  const requested = options.maxTokens ?? 1000;
-
-  async function attempt(maxTokens: number): Promise<Attempt> {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization:  `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens:  maxTokens,
-        temperature: options.temperature ?? 0.7,
-      }),
+async function attempt<T>(model: Model, context: Context, options: ChatOptions<T>, timeoutMs: number): Promise<ChatResult<T>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let status: number | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(new ProviderError("模型请求超时"));
+      controller.signal.addEventListener("abort", onAbort, { once: true });
     });
-
-    const data = await res.json() as RawCompletion;
-    if (data.error) throw new Error(`LLM error (${model}): ${data.error.message}`);
-
-    const choice = data.choices?.[0];
-    return {
-      content:        choice?.message?.content?.trim() ?? "",
-      reasoning:      choice?.message?.reasoning_content?.trim() ?? "",
-      finishReason:   choice?.finish_reason ?? "",
-      maxTokens,
-      reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
-    };
+    let apiKey: string;
+    try { apiKey = modelApiKey(model); } catch { throw new ProviderError("模型凭据未配置"); }
+    const response = await Promise.race([
+      llmRuntime().completeSimple(model, context, {
+        apiKey, signal: controller.signal, timeoutMs, maxRetries: 0,
+        maxTokens: options.maxTokens, temperature: options.temperature ?? 0,
+        onResponse: response => { status = response.status; },
+      }),
+      aborted,
+    ]);
+    if ((status && status >= 400) || response.stopReason === "error" || response.stopReason === "aborted")
+      throw new ProviderError(`供应商请求失败${status ? ` HTTP ${status}` : ""}`);
+    if (response.stopReason === "length") throw new LlmBudgetError("模型输出超出预算", true);
+    const raw = response.content.filter(part => part.type === "text").map(part => part.text).join("").trim();
+    if (!raw) throw new OutputError("模型输出为空");
+    let value: T;
+    try { value = options.parse(raw); } catch { throw new OutputError("模型输出未通过业务校验"); }
+    return { value, provider: model.provider, model: model.id };
+  } catch (error) {
+    if (error instanceof ProviderError || error instanceof OutputError || error instanceof LlmBudgetError) throw error;
+    throw new ProviderError(status ? `供应商请求失败 HTTP ${status}` : "供应商网络或请求异常");
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) controller.signal.removeEventListener("abort", onAbort);
   }
+}
 
-  const usable = (a: Attempt) =>
-    a.content !== "" && !(options.rejectTruncated && a.finishReason === "length");
-
-  let a = await attempt(requested);
-  // 预算被思维链吃光 → 用推理模型的上限重试一次。只在确认是推理模型
-  // （回了 reasoning_content）且确实被截断时重试，普通模型不会多花这一次。
-  if (!usable(a) && a.reasoning !== "" && a.finishReason === "length" && requested < REASONING_RETRY_MAX_TOKENS) {
-    console.warn(
-      `[llm] ${model} 的思维链用掉 ${a.reasoningTokens}/${requested} tokens，正文被挤没；`
-      + `按 ${REASONING_RETRY_MAX_TOKENS} 重试一次`,
-    );
-    a = await attempt(REASONING_RETRY_MAX_TOKENS);
+/** 只重试无副作用的生成与校验；调用方在成功后单独提交业务事务。 */
+export async function chat<T>(messages: Message[], options: ChatOptions<T>): Promise<ChatResult<T>> {
+  const deadline = Date.now() + TOTAL_TIMEOUT_MS;
+  const context = contextOf(messages);
+  const failures: Error[] = [];
+  const candidates = hiddenModelCandidates();
+  for (const model of candidates) {
+    if ((unavailableUntil.get(model.provider) ?? 0) > Date.now()) continue;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const started = Date.now();
+    try {
+      const result = await attempt(model, context, options, Math.min(remaining, model.provider === "deepseek" ? 12_000 : 20_000));
+      unavailableUntil.delete(model.provider);
+      console.info("[hidden-llm]", { purpose: options.purpose, provider: model.provider, model: model.id, outcome: "success", elapsedMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error("供应商请求异常");
+      failures.push(failure);
+      const kind = failure instanceof LlmBudgetError ? "budget" : failure instanceof OutputError ? "invalid_output" : "provider_unavailable";
+      if (kind === "provider_unavailable") unavailableUntil.set(model.provider, Date.now() + COOLDOWN_MS);
+      // 不记录正文、凭据或供应商原始响应；配置错误与故障接替仍需可见。
+      console.warn("[hidden-llm]", { purpose: options.purpose, provider: model.provider, model: model.id, outcome: kind, elapsedMs: Date.now() - started, error: failure.message });
+    }
   }
-
-  if (usable(a)) return a.content;
-
-  // 报错要能一眼看出是预算问题还是模型真没输出——原来一律 "empty response"，
-  // 线上排查时完全看不出跟推理模型的预算语义有关。
-  const detail = [
-    `model=${model}`,
-    `finish_reason=${a.finishReason || "?"}`,
-    `max_tokens=${a.maxTokens}`,
-    a.reasoning !== "" ? `reasoning_tokens=${a.reasoningTokens}` : null,
-    `content_len=${a.content.length}`,
-  ].filter(Boolean).join(" ");
-
-  // 预算问题单独成类型：调用方要靠它判断"该缩输入"，字符串匹配不可靠
-  if (a.finishReason === "length") {
-    throw new LlmBudgetError(
-      a.content === ""
-        ? `LLM returned empty response (${detail})`
-        : `LLM response truncated (${detail})`,
-      a.content !== "",
-    );
-  }
-  throw new Error(`LLM returned empty response (${detail})`);
+  // 必须所有候选都明确是预算问题，才能允许蒸馏缩小输入或跳过材料。
+  if (failures.length === candidates.length && failures.every(error => error instanceof LlmBudgetError))
+    throw new LlmBudgetError("全部备选模型输出超出预算", true);
+  throw new LlmUnavailableError("智能处理服务暂不可用，请稍后重试");
 }

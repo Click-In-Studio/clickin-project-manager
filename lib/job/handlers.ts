@@ -123,7 +123,7 @@ registerJobHandler("expense_document_recognition", {
     await markExpenseDocumentRecognitionProcessing(assetFileId);
     try {
       const recognized = await recognizeExpenseDocument(file);
-      await finishExpenseDocumentRecognition(assetFileId, recognized.sourceKind, recognized.result);
+      await finishExpenseDocumentRecognition(assetFileId, recognized.sourceKind, recognized.result, recognized.modelVersion);
       return { assetFileId, sourceKind: recognized.sourceKind };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

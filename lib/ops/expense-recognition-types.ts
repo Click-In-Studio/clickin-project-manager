@@ -31,3 +31,8 @@ export type ExpenseDocumentRecognition = {
   attempts: number;
   updatedAt: string;
 };
+
+/** 策略版本决定是否过期，实际生成厂商只用于溯源。 */
+export function recognitionModelVersionMatches(stored: string, current: string): boolean {
+  return stored.split("|served:")[0] === current;
+}

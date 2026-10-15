@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/agent/llm-chat", () => ({
   chat: mocks.chat,
-  configuredLlmModel: () => ({ provider: "openai", model: "fake-model" }),
+  HIDDEN_MODEL_POLICY: "hidden-v1:deepseek-flash>qwen3.8-flash",
+  LlmUnavailableError: class LlmUnavailableError extends Error {},
 }));
 
 vi.mock("@/lib/asset/byte-source", () => ({
@@ -125,7 +126,7 @@ describe("中国数电发票确定性解析", () => {
       { x: 20, y: 60, w: 300, text: "本次消费合计 25.00元 请妥善保管消费凭证" },
     ];
     mocks.parsePdf.mockResolvedValue(receipt);
-    mocks.chat.mockResolvedValue(JSON.stringify({
+    mocks.chat.mockResolvedValue({ provider: "qwen", model: "qwen3.8-flash", value: {
       documentType: { value: "receipt", confidence: "high", evidence: "收据" },
       merchant: { value: "示例商店", confidence: "high", evidence: "示例商店" },
       occurredOn: { value: null, confidence: "low", evidence: null },
@@ -134,11 +135,12 @@ describe("中国数电发票确定性解析", () => {
       taxAmount: { value: null, confidence: "low", evidence: null },
       currency: { value: "CNY", confidence: "high", evidence: "元" },
       warnings: [],
-    }));
+    }});
 
     const recognized = await recognizeExpenseDocument({ ...file, fileName: "示例收据.pdf" });
 
     expect(recognized.result.documentType.value).toBe("receipt");
     expect(mocks.chat).toHaveBeenCalledTimes(1);
+    expect(recognized.modelVersion).toContain("|served:qwen:qwen3.8-flash");
   });
 });

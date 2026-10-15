@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   configuredModels,
+  hiddenModelCandidates,
+  modelApiKey,
   llmRuntime,
   resolveModel,
   validateModelSelection,
@@ -24,6 +26,14 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 describe("模型请求协议与目录", () => {
+  it("隐藏调用登记跨厂商真实模型，共用百炼凭据但不出现在聊天选择器", () => {
+    vi.stubEnv("EMBEDDING_API_KEY", "test-qwen-key");
+    const models = hiddenModelCandidates();
+    expect(models.map(model => model.id)).toEqual(["deepseek-flash", "qwen3.8-flash"]);
+    expect(models.map(model => model.provider)).toEqual(["deepseek", "qwen"]);
+    expect(modelApiKey(models[1])).toBe("test-qwen-key");
+    expect(configuredModels().map(model => model.key)).toEqual(["deepseek-flash", "deepseek-pro", "resonance", "inspiration"]);
+  });
   it("只登记已实现的模态与思考档，别名不改变真实 API id", () => {
     expect(resolveModel("resonance").id).toBe("qwen3.8-omni-flash");
     expect(resolveModel("inspiration").id).toBe("gemini-3.8-flash");
