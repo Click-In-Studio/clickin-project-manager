@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireUser, toErrorResponse } from "@/lib/agent/chat/http";
 import { getWikiProposalByToolCallId } from "@/lib/wiki/proposal-db";
+import { getWikiPatchApproval } from "@/lib/agent/wiki-patch-db";
 import { getWiki } from "@/lib/wiki/content";
 import { resolveProductionActor } from "@/lib/agent/tools/production-tools";
 import { canViewWiki } from "@/lib/wiki/perm";
@@ -49,15 +50,19 @@ export async function GET(req: NextRequest) {
       targetTags = target?.tags ?? null;
     }
 
+    const patchApproval = await getWikiPatchApproval(auth.userId, productionId, toolCallId);
+
     return NextResponse.json({
       action: proposal.action,
+      patchDiff: targetBody !== null ? patchApproval?.preview.patchDiff ?? null : null,
+      patchCounts: targetBody !== null ? patchApproval?.preview.patchCounts ?? null : null,
       targetWikiId: proposal.targetWikiId,
       targetTitle,
       targetBody,
       targetTags,
       parentTitle,
       title: proposal.title,
-      body: proposal.body,
+      body: patchApproval && targetBody === null ? "" : proposal.body,
       tags: proposal.tags,
       summary: proposal.summary,
       hasPermission: proposal.hasPermission,

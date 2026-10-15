@@ -158,6 +158,8 @@ export async function updateWiki(
     title?: string; body?: string; mentions?: Mention[]; tags?: string[];
     /** 协作：客户端 base 正文——与行内现值不同时在行锁事务内做行级三路合并 */
     mergeBase?: string;
+    /** 局部修改审批的正文前置条件；与 UPDATE 同一条 SQL 判断，避免检查后竞态。 */
+    expectedBody?: string;
     origin?: string;
   },
   authorUserId: string,
@@ -197,8 +199,14 @@ export async function updateWiki(
     }
   } else {
     if (patch.body !== undefined) push("body = ", patch.body);
-    await getPool().query(
-      `UPDATE wiki SET ${sets.join(", ")} WHERE id = $1::uuid AND production_id = $2`, vals);
+    let expected = "";
+    if (patch.expectedBody !== undefined) {
+      vals.push(patch.expectedBody);
+      expected = ` AND body = $${vals.length}`;
+    }
+    const changed = await getPool().query(
+      `UPDATE wiki SET ${sets.join(", ")} WHERE id = $1::uuid AND production_id = $2${expected}`, vals);
+    if (patch.expectedBody !== undefined && changed.rowCount !== 1) throw new Error("WIKI_BODY_CHANGED");
   }
 
   if (patch.tags !== undefined) {

@@ -148,6 +148,10 @@ function prodTool(mcpName: string, description: string, fn: (uid: string, pid: s
   return { mcpName, description, parameters: NONE, readOnly: true, needsProduction: true, execute: (ctx) => fn(ctx.userId, ctx.productionId) };
 }
 
+const LINE_RANGE = {
+  startLine: Type.Optional(Type.Integer({ minimum: 1, description: "起始行，1 开始；首尾包含，来自 wiki_search 的行号" })),
+  endLine: Type.Optional(Type.Integer({ minimum: 1, description: "结束行，首尾包含；省略则到文末" })),
+};
 const WIKI_ID = Type.String({ description: "文档 id（来自 wiki_tree/wiki_search 的结果）" });
 
 /** 导出仅供测试防漂移（selfScribe 不扩散等约束钉在 tests 里）。 */
@@ -311,15 +315,25 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.wiki_read",
-    description: `按 id 读取一篇文档的完整内容（标题/标签/正文）（EN: wiki read document content）。${WIKI_DIALECT_POINTER_READ}`,
-    parameters: Type.Object({ wikiId: WIKI_ID }), readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId)),
+    description: `按 id 读取文档；可用 startLine/endLine 聚焦搜索命中附近，不传则完整读取。返回独立范围元数据和纯 Markdown 正文，不给正文逐行加号。局部读取不能代替全文理解；检查全文关联或矛盾时应扩大范围或读全文（EN: wiki read document content range focus）。${WIKI_DIALECT_POINTER_READ}`,
+    parameters: Type.Object({ wikiId: WIKI_ID, ...LINE_RANGE }), readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId), args),
   },
   {
     mcpName: "production.wiki_search",
-    description: "全文搜索当前对话关联制作的文档库（标题+正文），只返回当前用户有权限看到的结果。",
-    parameters: Type.Object({ query: Type.String({ description: "搜索关键词" }) }), readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(args.query)),
+    description: "搜索文档库（标题+正文）；指定 wikiId 则在该文档内搜索，返回命中起止行号、原文及前后文，供范围 read/patch 定位。文内支持 literal 精确、regex 正则、fuzzy 模糊候选；模糊仅用于找位置，禁止用于写入。正则使用 JavaScript 语法，flags 支持 i/m/s/u，不支持零长度匹配。",
+    parameters: Type.Object({
+      query: Type.String({ description: "关键词或正则表达式（不带 / 分隔符）" }),
+      wikiId: Type.Optional(WIKI_ID), ...LINE_RANGE,
+      matchMode: Type.Optional(Type.Union([Type.Literal("literal"), Type.Literal("regex"), Type.Literal("fuzzy")])),
+      flags: Type.Optional(Type.String({ description: "仅 regex：不重复的 i/m/s/u" })),
+      contextLines: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "每个命中前后各取几行，默认 2" })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "最多返回多少处，默认 20；片段超长时用范围 read 读完整" })),
+    }), readOnly: true, needsProduction: true,
+    execute: async (ctx, args) => {
+      const { query, ...options } = args;
+      return (await import("@/lib/agent/tools/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(query), options);
+    },
   },
   {
     mcpName: "production.wiki_dialect_ref",
@@ -349,7 +363,7 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.wiki_propose_update",
-    description: `提议修改一篇既有文档的标题和/或正文（只传要改的字段，不传的保持不变）（EN: wiki update edit document），需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
+    description: `提议修改一篇既有文档的标题和/或完整正文（只传要改的字段，不传的保持不变）；局部修改、补充或全文词语替换优先使用 wiki_propose_patch，避免回传整篇正文（EN: wiki update edit document），需要人工在聊天栏确认；确认后若你没有编辑这篇文档的权限，调用会被直接拦截并转入审批流。${WIKI_DIALECT_POINTER_WRITE}`,
     parameters: Type.Object({
       wikiId: Type.String({ description: "要修改的文档 id（来自 wiki_tree/wiki_search 的结果）" }),
       title: Type.Optional(Type.String({ description: "新标题；不改标题就整个省略这个字段" })),
@@ -365,6 +379,28 @@ export const DEFS: ToolDefinition[] = [
         wikiId: String(args.wikiId), title: optString(args.title), body, summary: String(args.summary ?? ""),
       });
     },
+  },
+  {
+    mcpName: "production.wiki_propose_patch",
+    description: `局部修改既有文档（EN: wiki patch replace edit document），只提交原文与新文，长文档不要为小改动输出全文。支持字面量或 JavaScript 正则；默认唯一匹配，显式 occurrence=all 可替换全部，零命中始终报错。可用 search 行号限定范围；范围基于本批修改前正文，多项不得重叠。禁止模糊匹配或自动纠正。插入时匹配邻近原文并在 newText 中保留它，删除用空 newText。需要人工确认，期间正文变化则拒绝执行。${WIKI_DIALECT_POINTER_WRITE}`,
+    parameters: Type.Object({
+      wikiId: WIKI_ID,
+      edits: Type.Array(Type.Object({
+        oldText: Type.String({ minLength: 1, description: "原文或正则表达式；regex 不带 / 分隔符" }),
+        newText: Type.String({ description: "替换文本；literal 原样写入，regex 支持 $$、$&、$1–$99、$<名称> 捕获组" }),
+        ...LINE_RANGE,
+        matchMode: Type.Optional(Type.Union([Type.Literal("literal"), Type.Literal("regex")])),
+        flags: Type.Optional(Type.String({ description: "仅 regex：不重复的 i/m/s/u" })),
+        occurrence: Type.Optional(Type.Union([Type.Literal("single"), Type.Literal("all")])),
+        expectedMatches: Type.Optional(Type.Integer({ minimum: 1, description: "预期命中数量；不符则整批报错" })),
+      }), { minItems: 1, maxItems: 100 }),
+      summary: Type.String({ description: "一句话说明改了什么、为什么" }),
+    }),
+    readOnly: false, unattended: "deny", needsProduction: true, mutates: WIKI_MUTATES.updated,
+    isErrorResult: result => !result.startsWith("已局部修改文档"),
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent/tools/wiki-patch-tools")).wikiProposePatch(
+      ctx.userId, ctx.productionId, toolCallId, args as import("@/lib/agent/tools/wiki-patch-tools").WikiPatchArgs,
+    ),
   },
   {
     mcpName: "production.wiki_propose_delete",

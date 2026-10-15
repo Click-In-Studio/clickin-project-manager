@@ -100,19 +100,19 @@ describe("功能正确性（owner 视角）", () => {
     expect(out).toContain("它链接到谁");
   });
 
-  it("wikiRead 把 id 形态链接换成可读标题", async () => {
+  it("wikiRead 保留原始引用形态，供精确 patch 往返", async () => {
     const out = await wikiRead(ownerId, prodId, childId);
-    expect(out).toContain("[[根文档]]");
-    expect(out).not.toContain(`[#wiki:${rootId}]`);
+    expect(out).toContain(`[#wiki:${rootId}]`);
+    expect(out).not.toContain("[[根文档]]");
   });
 
-  it("wikiRead 对已删除目标的 token 优雅降级", async () => {
+  it("wikiRead 保留已删除目标的原始 token，不改写定位原文", async () => {
     const ghostId = "00000000-0000-4000-8000-000000000000";
     const doc = await createWiki({
       productionId: prodId, title: "指向幽灵的文档", body: `坏链接：[#wiki:${ghostId}]`, createdBy: ownerId,
     });
     const out = await wikiRead(ownerId, prodId, doc.id);
-    expect(out).toContain("[[已删除的文档]]");
+    expect(out).toContain(`[#wiki:${ghostId}]`);
   });
 
   it("wikiSearch 命中标题与正文，按可见性过滤", async () => {

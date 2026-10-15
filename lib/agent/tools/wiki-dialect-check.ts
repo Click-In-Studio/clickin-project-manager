@@ -2,8 +2,8 @@ import { mapMarkdownOutsideCode, markdownOutsideCode } from "../../editor/markdo
 import { richTableProblems } from "../../editor/table-dialect";
 // 正文方言校验 + [[标题]] 反解（#333 T2 / P1）。
 //
-// 为什么需要反解而不是一律拒绝：wiki_read 给模型看的正文里，id 链接被换成
-// [[标题]] 显示形态（lib/agent/tools/wiki-tools.ts resolveBodyLinksForDisplay），而
+// 为什么需要反解而不是一律拒绝：历史读取结果或用户输入可能带有
+// [[标题]] 显示形态（当前 wiki_read 保留原始引用地址，供精确 patch），而
 // 方言说明教模型改写时「原样留着」——模型手里根本没有原始 id 形态，写回的
 // [[标题]] 若直接落库，链接边（wiki_entity_link 走 extractMentionEdges，只认
 // id 形态）就被打断。所以写回路径必须把**无歧义**的 [[标题]] 反解回

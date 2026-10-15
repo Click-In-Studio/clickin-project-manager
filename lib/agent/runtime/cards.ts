@@ -142,6 +142,13 @@ export function approvalCard(bareTool: string, params: Record<string, unknown>, 
         `📝 摘要：${str(params.summary, 100)}`,
         params.body !== undefined ? `新正文预览：\n${str(params.body, 160)}` : "正文不变",
       ]) };
+    case "production-wiki_propose_patch":
+      return { severity, title: `提议局部修改文档（id: ${str(params.wikiId, 40)}）`, description: lines([
+        permLine("编辑", extra?.hasPermission),
+        ...(extra?.notes ?? []),
+        `📝 摘要：${str(params.summary, 150)}`,
+        "查看详情核对修改前后的差异；确认期间正文变化则整批不执行。",
+      ]) };
     case "production-wiki_propose_delete":
       return { severity, title: `提议删除文档（id: ${str(params.wikiId, 40)}）`, description: lines([
         permLine("删除", extra?.hasPermission),
