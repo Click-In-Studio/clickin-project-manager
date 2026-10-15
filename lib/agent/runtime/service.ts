@@ -1,5 +1,5 @@
 import { assertModelSelection, sessionModelSelection, runModelSelection } from "./model-settings-db";
-import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
 import { setToolObservationSources, addObservationTools } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait, type PrepareAdmittedRequest } from "./admission";
@@ -37,7 +37,7 @@ import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/ty
 import type { MmpClient } from "@mmp/client";
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneStreamingUpdates } from "./events";
-import { createStreamLineAdapter } from "./stream-lines";
+import { assistantFailureReason, createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
 import { describeMutation, type MutationRecord } from "./mutation-audit";
 import { getSchedule, finishScheduledRun, type ScheduleReport } from "./schedules";
@@ -580,7 +580,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       systemPrompt: buildSystemPrompt(inject),
       model: selectedModel,
       thinkingLevel: selection.thinkingLevel,
-      streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
+      streamOptions: { maxTokens: normalOutputTokens(selectedModel) },
       getApiKeyAndHeaders: async () => {
         // 停止可能发生在 harness 异步准备、内部取消控制器尚未建立时。
         if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -1198,9 +1198,8 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
       if (thinking) entries.push({ role: "thinking", content: thinking });
       const t = textOf(m.content);
       if (t) entries.push({ role: "assistant", content: t });
-      if (m.stopReason === "error") {
-        entries.push({ role: "notice", content: m.errorMessage || "模型请求失败，请重试" });
-      }
+      const failure = assistantFailureReason(m);
+      if (failure) entries.push({ role: "notice", content: failure });
     }
   }
   for (const pending of await pendingInputsForSession(sessionId)) {

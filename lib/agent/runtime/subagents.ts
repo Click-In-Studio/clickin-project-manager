@@ -1,4 +1,4 @@
-import { resolveModel, modelApiKey, REQUEST_OUTPUT_TOKENS } from "./config";
+import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments, restoreModelMedia } from "./model-attachments";
 import type { ModelKey } from "../model-types";
 import { setToolObservationSources } from "./observation";
@@ -31,6 +31,7 @@ import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
 import { compactRequestContext } from "./request-compaction";
+import { assistantFailureReason } from "./stream-lines";
 
 const TIMEOUT_MS = 30 * 60_000;
 const TOOL_CAP = 100;
@@ -320,7 +321,7 @@ async function executeBody(
     systemPrompt: SYSTEM,
     model: selectedModel,
     thinkingLevel: selection.thinkingLevel,
-    streamOptions: { maxTokens: REQUEST_OUTPUT_TOKENS },
+    streamOptions: { maxTokens: normalOutputTokens(selectedModel) },
     getApiKeyAndHeaders: async () => {
       // harness 在异步准备期间尚未建立自己的取消控制器，外部停止必须在请求前再检查。
       if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -460,8 +461,8 @@ async function executeBody(
     await costTail;
     const messages = (await session.buildContext()).messages;
     const last = messages.at(-1);
-    if (last?.role === "assistant" && last.stopReason === "error")
-      throw new Error(last.errorMessage || "子 Agent 模型调用失败");
+    const failure = assistantFailureReason(last);
+    if (failure) throw new Error(failure);
     if (abort.signal.aborted) {
       status = timedOut || costExceeded ? "failed" : "aborted";
       error = timedOut

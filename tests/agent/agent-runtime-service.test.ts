@@ -29,16 +29,16 @@ const USAGE = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 1
 const base = () => ({ role: "assistant" as const, api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id, usage: USAGE, timestamp: Date.now() });
 
 type Step = (
-  { text: string; thinking?: string; wait?: Promise<void> }
+  { text: string; thinking?: string; wait?: Promise<void>; stopReason?: "stop" | "length" }
   | { calls: ToolCall[] }
   | { hang: true }
   | { error: string }
 ) & { before?: () => void | Promise<void> };
 /** 脚本化假模型；记录每次调用看到的上下文（系统提示、消息、工具名）。 */
 function scripted(script: Step[]) {
-  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string }> = [];
+  const seen: Array<{ systemPrompt?: string; messages: unknown[]; tools: string[]; reasoning?: string; maxTokens?: number }> = [];
   const streamFn: StreamFn = (_model, context, options) => {
-    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name), reasoning: options?.reasoning });
+    seen.push({ systemPrompt: context.systemPrompt, messages: context.messages, tools: (context.tools ?? []).map((t) => t.name), reasoning: options?.reasoning, maxTokens: options?.maxTokens });
     const next = script.shift();
     if (!next) throw new Error("script exhausted");
     const stream = createAssistantMessageEventStream();
@@ -57,7 +57,7 @@ function scripted(script: Step[]) {
       }
       if ("text" in next && next.wait) await next.wait;
       const final: AssistantMessage = "text" in next
-        ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: "stop" }
+        ? { ...base(), content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: next.text }], stopReason: next.stopReason ?? "stop" }
         : { ...base(), content: next.calls, stopReason: "toolUse" };
       stream.push({ type: "start", partial: { ...final, content: [] } });
       if ("text" in next) {
@@ -74,7 +74,7 @@ function scripted(script: Step[]) {
         stream.push({ type: "text_start", contentIndex: textIndex, partial: { ...final, content: [...(next.thinking ? [{ type: "thinking" as const, thinking: next.thinking }] : []), { type: "text", text: "" }] } });
         for (const ch of next.text) stream.push({ type: "text_delta", contentIndex: textIndex, delta: ch });
       }
-      stream.push({ type: "done", reason: final.stopReason as "stop" | "toolUse", message: final });
+      stream.push({ type: "done", reason: final.stopReason as "stop" | "length" | "toolUse", message: final });
     });
     return stream;
   };
@@ -173,6 +173,27 @@ describe("agent-runtime service", () => {
     expect((await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0])
       .toEqual({ status: "failed", error: reason });
     expect((await getHistory(key)).at(-1)).toEqual({ role: "notice", content: reason });
+  });
+
+  it.each(["", "已生成的部分正文"])("长度截断保留正文与思考，终态和重载均报告未完成：%s", async (text) => {
+    const { streamFn, seen } = scripted([{ text, thinking: "正在分析材料", stopReason: "length" }]);
+    runtimeOverrides.streamFn = streamFn;
+    const key = newKey();
+    const { runId } = await startRun({ sessionId: key, userId, message: "分析这份材料" });
+    const lines = await collectUntilTerminal(key);
+    await waitForIdle(key);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].maxTokens).toBe(256_000);
+    expect(lines.at(-1)).toMatchObject({ type: "error", error: expect.stringContaining("尚未完成") });
+    expect(lines.some(line => line.type === "final")).toBe(false);
+    const row = (await getPool().query("SELECT status,error FROM agent_run WHERE id=$1", [runId])).rows[0];
+    expect(row).toEqual({ status: "failed", error: expect.stringContaining("尚未完成") });
+    const history = await getHistory(key);
+    expect(history).toContainEqual({ role: "thinking", content: "正在分析材料" });
+    if (text) expect(history).toContainEqual({ role: "assistant", content: text });
+    expect(history.at(-1)).toEqual({ role: "notice", content: row.error });
+    const bubbles = lines.reduce<Bubble[]>((all, line) => applyStreamLine(all, line), []);
+    expect(bubbles.at(-1)).toEqual({ kind: "notice", text: row.error });
   });
 
   it("纯文本一轮：会话行自动建立并带关联；事件落表（delta 合并、final 收尾）→ 现有 reducer；历史投影；记账", async () => {

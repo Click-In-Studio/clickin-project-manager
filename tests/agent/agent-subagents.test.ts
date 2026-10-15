@@ -237,8 +237,9 @@ describe("持久子 Agent 基建", () => {
     const p = await parent();
     await getPool().query("UPDATE agent_run SET model_selection=$2::jsonb WHERE id=$1", [p.runId, JSON.stringify({ modelKey: "deepseek-pro", thinkingLevel: "high", disabledSubagentModels: [] })]);
     const calls: string[] = [];
+    const outputLimits: Array<number | undefined> = [];
     const fake = model(["已完成", "已完成"]);
-    subagentRuntimeOverrides.streamFn = (actual, context, options) => { calls.push(actual.id); return fake(actual, context, options); };
+    subagentRuntimeOverrides.streamFn = (actual, context, options) => { calls.push(actual.id); outputLimits.push(options?.maxTokens); return fake(actual, context, options); };
     const inherited = await spawnSubagent(p, { task: "继承父模型" });
     const inheritedId = inherited.match(/子 Agent (\S+)/)![1];
     await completed(p, inheritedId);
@@ -246,11 +247,29 @@ describe("持久子 Agent 基建", () => {
     const expertId = expert.match(/子 Agent (\S+)/)![1];
     await completed(p, expertId);
     expect(calls).toEqual(["deepseek-v4-pro", "qwen3.8-omni-flash"]);
+    expect(outputLimits).toEqual([256_000, 64_000]);
     const snapshots = (await getPool().query("SELECT r.model,r.model_selection,s.model_selection AS session_selection FROM agent_run r JOIN agent_session s ON s.id=r.session_id WHERE r.subagent_id=ANY($1::text[]) ORDER BY r.started_at", [[inheritedId, expertId]])).rows;
     expect(snapshots.map(row => row.model_selection.modelKey)).toEqual(["deepseek-pro", "resonance"]);
     expect(snapshots.every(row => row.model_selection.thinkingLevel === "high" && row.session_selection.modelKey === row.model_selection.modelKey)).toBe(true);
     await getPool().query("UPDATE agent_run SET model_selection=jsonb_set(model_selection,'{disabledSubagentModels}',$2::jsonb) WHERE id=$1", [p.runId, JSON.stringify(["resonance"])]);
     await expect(spawnSubagent(p, { task: "被禁用专家", modelKey: "resonance" })).rejects.toThrow("用户已禁用");
+  });
+
+  it("子任务长度截断报告失败并保留已有结果", async () => {
+    const p = await parent();
+    subagentRuntimeOverrides.streamFn = () => {
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => stream.push({ type: "done", reason: "length", message: {
+        role: "assistant", api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id,
+        content: [{ type: "text", text: "已核对第一部分" }], stopReason: "length", usage, timestamp: Date.now(),
+      } }));
+      return stream;
+    };
+    const id = /as_[a-z0-9]+/.exec(await spawnSubagent(p, { task: "核对长材料" }))![0];
+    await eventually(async () => (await listSubagents(p.sessionId)).find(row => row.id === id)?.status === "failed");
+    const view = (await listSubagents(p.sessionId)).find(row => row.id === id)!;
+    expect(view.error).toContain("尚未完成");
+    expect(view.result).toBe("已核对第一部分");
   });
 
   it("六个工具仅热层常驻；个人/制作会话无页面与召回信号也可见，目录不收录", () => {

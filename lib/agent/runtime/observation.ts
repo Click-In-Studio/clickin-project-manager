@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { AssistantMessage, Context, Model } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import { estimateContextTokens } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import { startObservation, finishObservation, type ObservationKind } from "./observation-db";
-import { estimateRequestBudget } from "./context-budget";
+import { requestOutputTokens, estimateRequestBudget } from "./context-budget";
 
 type Scope = { runId: string; sources: Record<string, string[]>; retrievalIds: string[]; requestId: string | null; tierMode: string };
 const storage = new AsyncLocalStorage<Scope>();
@@ -31,7 +31,7 @@ export async function observeModelRequest(model: Model, context: Context, purpos
   sources.unattributed = names.filter(n => !Object.values(sources).some(tools => tools.includes(n)));
   const id = await startObservation("model_request", scope?.runId ?? null, {
     purpose, model: model.id, provider: model.provider, contextWindow: model.contextWindow,
-    maxOutputTokens: maxTokens ?? model.maxTokens, effectiveContextWindow: model.contextTokens ?? model.contextWindow,
+    maxOutputTokens: requestOutputTokens(model, { maxTokens }), effectiveContextWindow: model.contextTokens ?? model.contextWindow,
     toolSchemaChars: JSON.stringify(context.tools ?? []).length, contextEstimate: estimateContextTokens(context.messages),
     requestBudget: estimateRequestBudget(model, context, { maxTokens }),
     messageCount: context.messages.length, systemChars: context.systemPrompt?.length ?? 0,

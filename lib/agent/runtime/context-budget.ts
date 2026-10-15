@@ -4,7 +4,7 @@ import type {
   SimpleStreamOptions,
 } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { CompactionSettings } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
-import { COMPACTION_TOKEN_BUDGET, REQUEST_OUTPUT_TOKENS } from "./config";
+import { normalOutputTokens } from "./config";
 
 export const CONTEXT_PRESSURE_RATIO = 0.8;
 export function estimateTextTokens(text: string): number {
@@ -20,7 +20,7 @@ export function requestOutputTokens(
   model: Model,
   options?: Pick<SimpleStreamOptions, "maxTokens">,
 ): number {
-  return Math.min(options?.maxTokens ?? REQUEST_OUTPUT_TOKENS, model.maxTokens);
+  return Math.min(options?.maxTokens ?? normalOutputTokens(model), model.maxTokens);
 }
 export function estimateRequestBudget(
   model: Model,
@@ -60,7 +60,7 @@ export function estimateRequestBudget(
     heuristicTokens * Math.max(1, calibration),
   );
   const effectiveContextWindow = Math.min(
-    COMPACTION_TOKEN_BUDGET,
+    model.contextWindow,
     model.contextTokens ?? model.contextWindow,
   );
   const outputReserveTokens = requestOutputTokens(model, options);
@@ -94,11 +94,12 @@ export function compactionSettingsFor(
   forced = false,
 ): CompactionSettings {
   const window = Math.min(
-    COMPACTION_TOKEN_BUDGET,
+    model.contextWindow,
     model.contextTokens ?? model.contextWindow,
   );
+  // 摘要预算不随普通回复上限放大，避免一次输出修复改变摘要与近期原文保留量。
   const reserveTokens = Math.min(
-    requestOutputTokens(model, options),
+    Math.min(8_192, requestOutputTokens(model, options)),
     Math.floor(window / 4),
   );
   return {
