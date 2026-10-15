@@ -308,7 +308,7 @@ async function executeBody(
         return { ...context, messages: convertToLlm(messages), tools: requestTools };
       },
       prepareMessages: (messages, summaryModel) => restoreModelMedia(messages, { ...mediaInput, model: summaryModel }),
-      selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, job.user_id, job.production_id, serviceRuntime.apiKey),
+      selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, job.user_id, job.production_id),
       completeSimple: llmRuntime().completeSimple,
       compactFn: serviceRuntime.compactFn,
       shouldCompact: serviceRuntime.shouldCompactFn,

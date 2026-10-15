@@ -557,7 +557,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         },
         rebuildMessages: withInjectedNote,
         prepareMessages: (messages, summaryModel) => restoreModelMedia(messages, { ...mediaInput, model: summaryModel }),
-        selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, userId, productionId, runtimeOverrides.apiKey),
+        selectSummaryModel: (messages, context) => selectMediaCompactionModel(messages, context, model, userId, productionId),
         onCompacting: async (active) => {
           const next = active ? "compacting" : "running";
           const previous = active ? "running" : "compacting";
