@@ -63,6 +63,7 @@ describe("Agent 接流所有权", () => {
     const stored = new Map<string, string>();
     vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), clear: () => stored.clear() });
     localStorage.setItem("clickin-ai-last-session:personal", KEY);
+    router.refresh.mockClear();
     post = deferred<Response>();
     gets = [];
     getResponse = undefined;
@@ -137,6 +138,22 @@ describe("Agent 接流所有权", () => {
     await act(async () => { StatusStream.current.send(null); stream.send({ type: "final", text: "本轮完整回复" }); stream.close(); });
     expect(historyCalls()).toHaveLength(2);
     expect(count("本轮完整回复")).toBe(1);
+  });
+
+  it("结束后同步历史仍保留写操作的页面刷新", async () => {
+    await openIdle();
+    await send();
+    const stream = watch();
+    await act(async () => post.resolve(stream.response));
+    await act(async () => {
+      stream.send({ type: "mutation", scope: "unhandled", action: "updated" });
+      StatusStream.current.send(null);
+      stream.send({ type: "final", text: "修改完成" });
+      stream.close();
+    });
+    expect(historyCalls()).toHaveLength(2);
+    await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
+    expect(router.refresh).toHaveBeenCalledOnce();
   });
 
   it("已在接流时重选当前会话不重新加载或开启第二条流", async () => {

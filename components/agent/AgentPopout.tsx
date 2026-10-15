@@ -359,7 +359,11 @@ export default function AgentPopout({
           scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
         });
         if (handled || fallbackTimer) return;
-        fallbackTimer = setTimeout(() => { fallbackTimer = null; if (isCurrentOperation(operation)) router.refresh(); }, 300);
+        fallbackTimer = setTimeout(() => {
+          fallbackTimer = null;
+          // 已接收的变更在同会话历史同步后仍需刷新页面。
+          if (activeKeyRef.current === operation.key) router.refresh();
+        }, 300);
       };
 
       const apply = (line: StreamLine) => {
