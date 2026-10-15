@@ -42,11 +42,21 @@ export async function readResourceText(resource: MediaResource, options: MediaRe
     return { text: neutralizeInjectionTags(outcome.contextText) + "\n以上为 MMP 解析证据，当前模型未原生读取该原件。", complete: false };
   }
   if (resource.mimeType.startsWith("text/") || /\.(md|txt|csv|json|xml|yaml|yml|log)$/.test(lower)) {
-    if (resource.fileSize > 1024 * 1024) return { text: "纯文本超过单次读取上限 1 MB，请缩小文件范围。", complete: false };
+    if (resource.fileSize > 50 * 1024 * 1024) return { text: "纯文本超过文件读取上限 50 MiB，请缩小文件范围。", complete: false };
     const object = await getR2Object(resource.r2Key);
     if (!object) return { text: "原件不存在，无法读取。", complete: false };
     const text = object.body.toString("utf8").replace(/\u0000/g, "�");
-    return { text: neutralizeInjectionTags(`《${resource.fileName}》：\n` + (text.length > 80_000 ? text.slice(0, 80_000) + "\n…（已截断）" : text)),
+    const ranges = options.ranges;
+    if (ranges?.length) {
+      if (ranges.some(({ from, to }) => !Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || to > text.length)
+        || ranges.reduce((sum, range) => sum + range.to - range.from, 0) > 80_000) {
+        return { text: `文本共有 ${text.length} 个字符；区间需满足 0 ≤ from < to ≤ 总字符数，单次最多读取 80,000 字符。`, complete: false };
+      }
+      return { text: neutralizeInjectionTags(`《${resource.fileName}》共 ${text.length} 字符；零起始区间 [from,to)：\n`
+        + ranges.map(({ from, to }) => `[${from},${to})\n${text.slice(from, to)}`).join("\n")), complete: ranges.some(({ from, to }) => from === 0 && to === text.length) };
+    }
+    return { text: neutralizeInjectionTags(`《${resource.fileName}》共 ${text.length} 字符：\n` + (text.length > 80_000
+      ? text.slice(0, 80_000) + "\n…（已截断；可用 mode=read + ranges 按零起始字符区间继续回查）" : text)),
       complete: text.length <= 80_000 };
   }
   return { text: neutralizeInjectionTags(`《${resource.fileName}》（${resource.mimeType}）原件仍保留，但当前没有适合该格式的读取器。`), complete: false };

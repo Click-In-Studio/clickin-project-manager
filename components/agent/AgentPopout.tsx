@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentMedia } from "./AttachmentMedia";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
@@ -1011,11 +1012,7 @@ export default function AgentPopout({
                   {b.text}
                   {b.attachments?.map((attachment) => (
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
-                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
-                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                        </button>
-                      )}
+                      {activeKey && <AttachmentMedia attachment={attachment} sessionKey={activeKey} onPreview={() => setPreviewAttachment(attachment)} />}
                       <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>
@@ -1044,12 +1041,10 @@ export default function AgentPopout({
                   {refs.items.map((ref) => {
                     const attachment = known.get(ref.id);
                     if (previousIds.has(ref.id)) return null;
-                    if (!attachment || !attachment.mimeType.startsWith("image/") || attachment.status && attachment.status !== "ready") {
-                      return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">图片附件 {ref.id} 当前不可显示{ref.alt ? `：${ref.alt}` : ""}</p>;
+                    if (!attachment || attachment.status && attachment.status !== "ready") {
+                      return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">附件 {ref.id} 当前不可用{ref.alt ? `：${ref.alt}` : ""}</p>;
                     }
-                    return <button key={ref.key} type="button" className="mt-1.5 block max-w-full" onClick={() => setPreviewAttachment(attachment)}>
-                      <img src={attachmentPreviewUrl(activeKey!, attachment.id)} alt={ref.alt || attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                    </button>;
+                    return <div key={ref.key} className="mt-1.5 max-w-full"><AttachmentMedia attachment={attachment} sessionKey={activeKey!} onPreview={() => setPreviewAttachment(attachment)} /></div>;
                   })}
                   {b.streaming && !compacting && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
                 </div>
@@ -1078,11 +1073,7 @@ export default function AgentPopout({
                     onCancel={!b.done && b.name.startsWith("clickin__mmp-") ? abort : undefined} />
                   {b.attachments?.map((attachment) => (
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
-                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
-                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                        </button>
-                      )}
+                      {activeKey && <AttachmentMedia attachment={attachment} sessionKey={activeKey} onPreview={() => setPreviewAttachment(attachment)} />}
                       <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>

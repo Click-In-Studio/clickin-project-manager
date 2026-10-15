@@ -1213,7 +1213,8 @@ export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry
   const storage = await PgSessionStorage.load(sessionId);
   if (!storage) return [];
   const ctx = await new Session(storage).buildContext();
-  const attachments = new Map((await listAttachmentsForSession(sessionId)).map((a) => [a.id, a]));
+  const attachments = new Map((await listAttachmentsForSession(sessionId))
+    .filter((a) => !(a.sourceKind === "mmp" && a.sourceMetadata?.deliveryReservation === true)).map((a) => [a.id, a]));
   const entries: ChatTranscriptEntry[] = [];
   for (const m of ctx.messages) {
     if (m.role === "user") {

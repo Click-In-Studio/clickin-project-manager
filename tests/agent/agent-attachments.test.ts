@@ -6,7 +6,7 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
 import { runAttachmentGcBatch } from "@/lib/agent/attachment-db";
-import { createPendingAttachment } from "@/lib/agent/attachment-db";
+import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 import { newRunId } from "@/lib/agent/runtime/ids";
 import { RUNNER_OWNER } from "@/lib/agent/runtime/config";
 
@@ -134,6 +134,20 @@ describe("会话临时附件路由（#704）", () => {
     expect(first).toMatchObject({ sourceKind: "mmp", sourceRunId: runId, sourceToolCallId: "call-1",
       sourceOutputName: "image", sourceOutputIndex: 0, sourceUrl: null, sourceFinalUrl: null,
       sourceMetadata: { capabilityId: "image.generate" } });
+  });
+
+  it("MMP 未使用的交付预留不显示为附件，实测登记后才进入列表", async () => {
+    const key = createNewSessionKey(userId); sessions.push(key);
+    const runId = newRunId();
+    await getPool().query("INSERT INTO agent_session(id,user_id) VALUES($1,$2)", [key,userId]);
+    await getPool().query("INSERT INTO agent_run(id,session_id) VALUES($1,$2)", [runId,key]);
+    const pending = await createPendingAttachment({ sessionId:key,userId,fileName:"audio-1.bin",mimeType:"application/octet-stream",fileSize:0,
+      source:{kind:"mmp",runId,toolCallId:"array",outputName:"audio",outputIndex:0,metadata:{deliveryReservation:true}} });
+    const { GET } = await import("@/app/api/agent/attachments/route");
+    const request = () => new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(key)}`,{headers:{cookie}});
+    expect((await (await GET(request())).json()).attachments.some((a:{id:string})=>a.id===pending.id)).toBe(false);
+    await markAttachmentReady(pending.id,key,userId,12,{outputIndex:0},{fileName:"audio-1.flac",mimeType:"audio/flac",mediaKind:"audio"});
+    expect((await (await GET(request())).json()).attachments).toContainEqual(expect.objectContaining({id:pending.id,fileName:"audio-1.flac",status:"ready"}));
   });
 
   it("上传完成后按 R2 HEAD 实际大小校准预占", async () => {

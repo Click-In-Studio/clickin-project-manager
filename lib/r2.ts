@@ -117,11 +117,11 @@ export function presignedGet(
   return `${endpoint}/${r2Bucket}/${key}?${query}&X-Amz-Signature=${sig}`;
 }
 
-/** Presigned PUT URL. Client must send Content-Type: mimeType header. */
-export function presignedPut(key: string, mimeType: string, expiresIn = 3600): { url: string; contentType: string } {
+/** 默认签署 Content-Type；MMP 多格式产物可只签对象地址，交付后核验实际类型。 */
+export function presignedPut(key: string, mimeType: string, expiresIn = 3600, contentTypeKnown = true): { url: string; contentType: string } {
   const { dateStr, amzDate } = dateParts();
   const scope = `${dateStr}/${region}/s3/aws4_request`;
-  const signedHeaders = "content-type;host";
+  const signedHeaders = contentTypeKnown ? "content-type;host" : "host";
   const query = canonicalQuery({
     "X-Amz-Algorithm":    "AWS4-HMAC-SHA256",
     "X-Amz-Credential":   `${accessKeyId}/${scope}`,
@@ -133,7 +133,7 @@ export function presignedPut(key: string, mimeType: string, expiresIn = 3600): {
     "PUT",
     `/${r2Bucket}/${key}`,
     query,
-    `content-type:${mimeType}\nhost:${host}\n`,
+    contentTypeKnown ? `content-type:${mimeType}\nhost:${host}\n` : `host:${host}\n`,
     signedHeaders,
     "UNSIGNED-PAYLOAD",
   ].join("\n");

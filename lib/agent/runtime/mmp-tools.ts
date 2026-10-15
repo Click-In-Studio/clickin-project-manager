@@ -83,6 +83,7 @@ function makeTool(ctx: ToolContext, capability: Capability): RuntimeToolDef {
           onUpdate?.({ content: [], details: status, progress: { text: detail, visibility: "channel", privacy: "public", id: "mmp-status" } });
         },
       });
+      await ctx.run.warmAttachments?.(out.attachments.map((item) => item.id));
       return {
         content: [{ type: "text" as const, text: out.text }, ...out.media],
         details: { attachments: out.attachments.map((item) => ({ attachmentId: item.id, fileName: item.fileName,

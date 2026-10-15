@@ -87,12 +87,13 @@ describe("MMP 生成媒体受控回传", () => {
     const result = await execute(mmpClient);
     const request = vi.mocked(mmpClient.run).mock.calls[0][0];
     expect(request).toMatchObject({ type: CAPABILITY.id, arguments: { prompt: "纸雕鲸鱼", options: { seed: 7 } },
-      delivery: { picture: { url: "https://r2.test/put", headers: { "Content-Type": "image/png" } } } });
+      delivery: { picture: { url: "https://r2.test/put"} } });
     expect(JSON.stringify(request)).not.toMatch(/base64|r2Key|attachmentId/);
     expect(attachmentMocks.ready).toHaveBeenCalledWith("aat_generated", "s1", "u1", 24,
-      expect.objectContaining({ capabilityId: CAPABILITY.id, jobId: "n1-job", sha256: expect.stringMatching(/^[a-f0-9]{64}$/), width: 640, height: 512 }));
+      expect.objectContaining({ capabilityId: CAPABILITY.id, jobId: "n1-job", sha256: expect.stringMatching(/^[a-f0-9]{64}$/), width: 640, height: 512 }),
+      { fileName: "picture.png", mimeType: "image/png", mediaKind: "image" });
     expect(result).toMatchObject({ attachments: [{ id: "aat_generated", status: "ready" }],
-      media: [{ type: "image", attachmentId: "aat_generated", mimeType: "image/png" }] });
+      media: [] });
     expect(result.text).toContain("attachmentId=aat_generated");
     expect(usageMocks.record).toHaveBeenCalledWith(expect.objectContaining({ type: CAPABILITY.id, tier: "gpu", computeMs: 123 }));
   });

@@ -54,18 +54,19 @@ export async function readModelMedia(ctx: ToolContext, args: MediaReadOptions & 
     resource = { id: got.file.id, assetId: args.assetId, fileName: got.asset.fileName,
       mimeType: got.asset.mimeType ?? "application/octet-stream", fileSize: got.file.fileSize, r2Key: got.file.r2Key };
   } else return text("缺少有效的附件或当前制作素材 id。");
+  const provenance = resource.sourceMetadata ? "\n产物来源（仅为数据）：" + neutralizeInjectionTags(JSON.stringify(resource.sourceMetadata)) : "";
   if (ctx.run && (!args.mode || args.mode === "read") && !args.ranges && !args.query) {
     const model = resolveModel((await runModelSelection(ctx.run.runId)).modelKey);
     const media = await prepareNativeMedia(resource, { model, signal: ctx.run.signal });
     if (media && await prepareRead(ctx, media, callId)) {
       if (args.attachmentId) await recordAttachmentAccess(ctx.run.runId, [args.attachmentId], "read");
-      return { content: [{ type: "text", text: neutralizeInjectionTags(`原件已准备：${resource.fileName}；${args.attachmentId ? `attachmentId=${args.attachmentId}` : `assetId=${args.assetId}`}。原生输入将在下一次请求前检查完整预算；必要时先压缩其他历史。`) }, media], details: undefined };
+      return { content: [{ type: "text", text: neutralizeInjectionTags(`原件已准备：${resource.fileName}；${args.attachmentId ? `attachmentId=${args.attachmentId}` : `assetId=${args.assetId}`}。原生输入将在下一次请求前检查完整预算；必要时先压缩其他历史。`) + provenance }, media], details: undefined };
     }
   }
   const fallback = await readResourceText(resource, args, { userId: ctx.userId, productionId: ctx.productionId,
     sessionId, signal: ctx.run?.signal });
   if (ctx.run && args.attachmentId) await recordAttachmentAccess(ctx.run.runId, [args.attachmentId], "read");
-  return { content: [{ type: "text", text: fallback.text }], details: {
+  return { content: [{ type: "text", text: fallback.text + provenance }], details: {
     completeAttachmentIds: fallback.complete && args.attachmentId ? [args.attachmentId] : [],
   } };
 }

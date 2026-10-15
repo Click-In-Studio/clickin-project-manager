@@ -54,6 +54,15 @@ async function readyAttachment(productionId?: string) {
 }
 
 describe("附件生命周期（#772）", () => {
+  it("MMP 未知格式先预留对象数，实测后一次登记 MIME、文件名、来源和配额", async () => {
+    const sessionId = createNewSessionKey(userId); sessionIds.push(sessionId);
+    const pending = await createPendingAttachment({ sessionId, userId, fileName: "result.bin", mimeType: "application/octet-stream", fileSize: 0 });
+    const row = await markAttachmentReady(pending.id, sessionId, userId, 512, { outputIndex: 1, inputs: { attachmentId: "original" } },
+      { fileName: "result-2.flac", mimeType: "audio/flac", mediaKind: "audio" });
+    expect(row).toMatchObject({ status: "ready", fileName: "result-2.flac", mimeType: "audio/flac", mediaKind: "audio", fileSize: 512,
+      sourceMetadata: { outputIndex: 1 } });
+    expect((await getAttachmentUsage(userId, sessionId)).session).toMatchObject({ bytes: 512, count: 1 });
+  });
   it("web.fetch 来源绑定当前 run/tool call，同一 run 的工具重放或最终 URL 重复时复用附件", async () => {
     const sessionId = createNewSessionKey(userId);
     const runId = `ar_web_fetch_${shortId()}`;

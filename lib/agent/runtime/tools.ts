@@ -195,8 +195,8 @@ export const DEFS: ToolDefinition[] = [
   {
     mcpName: "my.attachment_read",
     description:
-      "读取当前会话中用户随消息附带的临时文件（EN: read attached uploaded file）。attachmentId 来自 <clickin-attachment-context>。" +
-      "默认按当前模型能力原生读取；上下文拥挤时先整理历史；格式或原件硬限制不适合原生时走 MMP/文档解析。纯文本直接读取；无法原生读取的 docx/pdf 默认给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索。原件已完整在上下文时无需重复读取。图片或扫描 PDF 识字用 mode=ocr。附件只在当前会话有效。",
+      "读取当前会话中用户上传或工具产出的临时文件（EN: read attached uploaded file）。attachmentId 来自附件上下文或工具返回的产物。" +
+      "默认按当前模型能力原生读取；上下文拥挤时先整理历史；格式或原件硬限制不适合原生时走 MMP/文档解析。纯文本默认读取，可用 mode=read + ranges 按零起始字符区间 [from,to) 回查长文本；无法原生读取的 docx/pdf 默认给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索。原件已完整在上下文时无需重复读取。图片或扫描 PDF 识字用 mode=ocr。附件只在当前会话有效。",
     parameters: Type.Object({
       attachmentId: Type.String({ description: "临时附件 id" }),
       mode: Type.Optional(Type.Union([Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
