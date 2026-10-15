@@ -2,7 +2,7 @@
 kind: fixed
 title: 修复 AI 思考中途停止却显示完成
 page: ai/assistant/chat
-pr: 1018
+pr: 1021
 order: 1
 ---
 
