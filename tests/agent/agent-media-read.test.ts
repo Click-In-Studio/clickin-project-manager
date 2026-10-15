@@ -9,7 +9,7 @@ import { TOOL_MCP_NAMES, buildTools } from "@/lib/agent/runtime/tools";
 
 const state = vi.hoisted(() => ({
   attachment: null as unknown, asset: null as unknown, modelKey: "deepseek-flash", preflight: vi.fn(), doc: vi.fn(),
-  getAttachment: vi.fn(), resolveAsset: vi.fn(), access: vi.fn(),
+  textBody: "完整的文本材料", getAttachment: vi.fn(), resolveAsset: vi.fn(), access: vi.fn(),
 }));
 vi.mock("@/lib/agent/attachment-db", () => ({
   getReadyAttachmentForSession: state.getAttachment,
@@ -22,13 +22,20 @@ vi.mock("@/lib/agent/tools/doc-tools", () => ({ resolveReadableAsset: state.reso
   attachmentDocRead: state.doc, attachmentFileOcr: vi.fn() }));
 vi.mock("@/lib/agent/runtime/model-settings-db", () => ({ runModelSelection: async () => ({ modelKey: state.modelKey }) }));
 vi.mock("@/lib/mmp/attachment-preflight", () => ({ preflightAttachment: state.preflight }));
-vi.mock("@/lib/r2", () => ({ presignedGet: () => "https://media.test/immutable", getR2Object: async () => ({ body: Buffer.from("完整的文本材料") }) }));
+vi.mock("@/lib/r2", () => ({ presignedGet: () => "https://media.test/immutable", getR2Object: async () => ({ body: Buffer.from(state.textBody) }),
+  getR2Stream: async () => new Response(new ReadableStream({ start(controller) {
+    const bytes = Buffer.from(state.textBody);
+    // 故意切在 UTF-8 字符内部，证明区间按解码后的字符计数。
+    for (let offset = 0; offset < bytes.length; offset += 4097) controller.enqueue(bytes.subarray(offset, offset + 4097));
+    controller.close();
+  } })) }));
 const run = { runId: "r", sessionId: "s", signal: new AbortController().signal, publish: () => {}, setStatus: async () => {}, isDetached: () => false };
 const context = { userId: "u", productionId: "p", run };
 
 beforeEach(async () => {
   vi.clearAllMocks();
   state.modelKey = "deepseek-flash";
+  state.textBody = "完整的文本材料";
   const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: "blue" } }).png().toBuffer();
   state.attachment = { id: "att", mimeType: "image/png", mediaKind: "image", fileSize: bytes.length, fileName: "图片.png", r2Key: "object" };
   state.asset = { asset: { id: "asset", mimeType: "image/png", fileName: "图片.png" }, file: { id: "file", fileSize: bytes.length, r2Key: "object" } };
@@ -41,6 +48,36 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("#967 附件与素材同构读取", () => {
+  it("超过旧 1 MiB 的曲谱仍可流式回查末尾，保留准确字符位置", async () => {
+    state.textBody = "甲".repeat(400_000) + "🎵尾声";
+    state.attachment = { ...(state.attachment as object), mimeType: "text/plain", fileName: "score.txt", mediaKind: null,
+      fileSize: Buffer.byteLength(state.textBody) };
+    const result = await readModelMedia(context, { attachmentId: "att", mode: "read", ranges: [{ from: 400_000, to: state.textBody.length }] });
+    expect(JSON.stringify(result.content)).toContain("🎵尾声");
+    expect(JSON.stringify(result.content)).not.toContain("甲");
+    expect(result.details).toEqual({ completeAttachmentIds: [] });
+  });
+
+  it("长曲谱可按字符区间完整回查，不把部分内容标成完整已读", async () => {
+    state.textBody = "甲".repeat(80_000) + "乙".repeat(20_000);
+    state.attachment = { ...(state.attachment as object), mimeType: "text/plain", fileName: "score.txt", mediaKind: null, fileSize: 300_000 };
+    const result = await readModelMedia(context, { attachmentId: "att", mode: "read", ranges: [{ from: 80_000, to: 100_000 }] });
+    expect(JSON.stringify(result.content)).toContain("乙".repeat(20_000));
+    expect(JSON.stringify(result.content)).not.toContain("甲");
+    expect(result.details).toEqual({ completeAttachmentIds: [] });
+    const invalid = await readModelMedia(context, { attachmentId: "att", mode: "read", ranges: [{ from: 0, to: 100_001 }] });
+    expect(JSON.stringify(invalid.content)).toContain("区间需满足");
+  });
+
+  it("产物来源在原生读取及 MMP 路径都保留，不把请求区间伪装成实际区间", async () => {
+    state.attachment = { ...(state.attachment as object), sourceMetadata: { inputs: { audio: { attachmentId: "original" }, options: { start_sec: 12, end_sec: 13 } } } };
+    const native = await readModelMedia(context, { attachmentId: "att" });
+    expect(JSON.stringify(native)).toContain("original");
+    state.modelKey = "deepseek-pro";
+    const fallback = await readModelMedia(context, { attachmentId: "att" });
+    expect(JSON.stringify(fallback)).toContain("start_sec");
+  });
+
   it.each(["attachment", "asset"])("%s 原生可读时直接返回原件，不调用 MMP", async (kind) => {
     const args = kind === "asset" ? { assetId: "asset" } : { attachmentId: "att" };
     const result = await readModelMedia(context, args);

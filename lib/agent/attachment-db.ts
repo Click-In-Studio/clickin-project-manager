@@ -172,6 +172,9 @@ export async function markAttachmentReady(
   verifiedSize: number,
   sourceMetadata?: Record<string, unknown>,
 ): Promise<AgentAttachment | null> {
+  if (!Number.isSafeInteger(verifiedSize) || verifiedSize < 0 || verifiedSize > AGENT_ATTACHMENT_MAX_BYTES) {
+    throw Object.assign(new Error("附件实际大小超过 50 MiB 或无效"), { status: 413 });
+  }
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");

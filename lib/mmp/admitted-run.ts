@@ -20,7 +20,8 @@ export async function admittedMmpRun(
 ): ReturnType<MmpClient["run"]> {
   const scope = currentAdmissionScope();
   if (!scope) return client.run(job, opts);
-  const digest = createHash("sha256").update(JSON.stringify([cacheKey, job.type, job.tier, job.arguments])).digest("hex");
+  // 调用方提供稳定的业务输入身份；临时 GET/PUT 签名和 ref 缓存命中不能改变重放身份。
+  const digest = createHash("sha256").update(JSON.stringify([cacheKey, job.type, job.tier])).digest("hex");
   const key = `${scope.operationKey ?? "preflight"}:mmp:${digest}`;
   const ticket = await acquire(scope.runId, key, "mmp", scope.signal);
   if (ticket.state === "done") return ticket.result as Awaited<ReturnType<MmpClient["run"]>>;

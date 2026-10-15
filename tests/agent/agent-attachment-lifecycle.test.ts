@@ -54,6 +54,23 @@ async function readyAttachment(productionId?: string) {
 }
 
 describe("附件生命周期（#772）", () => {
+  it("MMP 按实际描述预占，核验后登记来源和实际配额", async () => {
+    const sessionId = createNewSessionKey(userId); sessionIds.push(sessionId);
+    const pending = await createPendingAttachment({ sessionId, userId, fileName: "result-2.flac", mimeType: "audio/flac", mediaKind: "audio", fileSize: 512 });
+    const row = await markAttachmentReady(pending.id, sessionId, userId, 512, { outputIndex: 1, inputs: { attachmentId: "original" } });
+    expect(row).toMatchObject({ status: "ready", fileName: "result-2.flac", mimeType: "audio/flac", mediaKind: "audio", fileSize: 512,
+      sourceMetadata: { outputIndex: 1 } });
+    expect((await getAttachmentUsage(userId, sessionId)).session).toMatchObject({ bytes: 512, count: 1 });
+  });
+  it.each([-1, 1.5, Number.NaN, 50 * 1024 * 1024 + 1])("实际大小 %s 无效时拒绝登记且不改预占", async (verifiedSize) => {
+    const sessionId = createNewSessionKey(userId); sessionIds.push(sessionId);
+    const pending = await createPendingAttachment({ sessionId, userId, fileName: "result.flac", mimeType: "audio/flac", fileSize: 12 });
+    await expect(markAttachmentReady(pending.id, sessionId, userId, verifiedSize)).rejects.toMatchObject({ status: 413 });
+    expect((await getAttachmentUsage(userId, sessionId)).session).toMatchObject({ bytes: 12, count: 1 });
+    const row = await getPool().query("SELECT status FROM agent_session_attachment WHERE id=$1", [pending.id]);
+    expect(row.rows[0].status).toBe("pending");
+  });
+
   it("web.fetch 来源绑定当前 run/tool call，同一 run 的工具重放或最终 URL 重复时复用附件", async () => {
     const sessionId = createNewSessionKey(userId);
     const runId = `ar_web_fetch_${shortId()}`;

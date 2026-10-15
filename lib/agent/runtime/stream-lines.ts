@@ -62,7 +62,7 @@ function toolAttachmentsForClient(result: unknown): import("@/lib/agent/chat/typ
     const item = value as Record<string, unknown>;
     if (typeof item.attachmentId !== "string" || typeof item.fileName !== "string" || typeof item.mimeType !== "string") return [];
     return [{ id: item.attachmentId, fileName: item.fileName, mimeType: item.mimeType,
-      mediaKind: item.mimeType.startsWith("image/") ? "image" : null, status: "ready" as const,
+      mediaKind: /^(image|audio)\//.exec(item.mimeType)?.[1] ?? null, status: "ready" as const,
       sourceToolCallId: null }];
   });
 }

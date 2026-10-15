@@ -74,7 +74,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "my.memory_search", family: "my.account", scope: "personal", oneliner: "检索长期记忆与更早的历史对话",
     triggers: ["之前说过", "上次讨论", "之前的决定", "还记得", "更早的对话"], en: "search my memory history",
     examples: ["我们之前聊过这个吗", "你还记得上次说的那个决定吗", "帮我回忆一下之前讨论的内容"] },
-  { name: "my.attachment_read", family: "my.account", scope: "personal", oneliner: "读取本次对话附件；按当前模型能力提供原生媒体或结构化正文",
+  { name: "my.attachment_read", family: "my.account", scope: "personal", oneliner: "读取用户上传或工具产出的附件；按当前模型能力原生读取、解析或分段回查文本",
     triggers: ["这个附件", "附带的文件", "上传的文件", "看看这个文件", "读附件", "这张图"], en: "read attached uploaded temporary file document image",
     examples: ["看看我刚附带的文件", "读一下这个附件", "这张图里写了什么"] },
   { name: "my.attachment_release", family: "my.account", scope: "personal", oneliner: "释放本轮已处理且不再需要的临时附件（24 小时内可恢复）",

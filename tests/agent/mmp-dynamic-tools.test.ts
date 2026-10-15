@@ -25,7 +25,7 @@ function registry(capabilities = [TEXT_MEDIA]) {
 
 function runHandle() {
   return { runId: "r1", sessionId: "s1", signal: new AbortController().signal, publish: vi.fn(),
-    setStatus: vi.fn(), isDetached: () => false };
+    setStatus: vi.fn(), warmAttachments: vi.fn(), isDetached: () => false };
 }
 
 beforeEach(() => {
@@ -51,13 +51,25 @@ describe("MMP v3 capability binder", () => {
 
   it("每项 capability 只生成一个一级工具，参数原名交给通用授权壳", async () => {
     const client = { capabilities: async () => registry() } as unknown as MmpClient;
-    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run: runHandle() }, { client });
+    const run = runHandle();
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run }, { client });
     expect(surface.tools.map((tool) => tool.mcpName)).toEqual(["mmp.image.generate"]);
     expect(surface.catalog[0]).toMatchObject({ family: "mmp.image.generate", scope: "personal" });
+    bridgeMocks.run.mockResolvedValueOnce({ text: "done", attachments: [{ id: "aat_output", fileName: "片段.wav", mimeType: "audio/wav", fileSize: 12 }], media: [] });
     await surface.tools[0].execute("call-1", { prompt: "纸雕鲸鱼" }, new AbortController().signal);
+    expect(run.warmAttachments).toHaveBeenCalledWith(["aat_output"]);
     expect(bridgeMocks.run).toHaveBeenCalledWith(expect.objectContaining({
       capability: TEXT_MEDIA, rawArguments: { prompt: "纸雕鲸鱼" }, runId: "r1", toolCallId: "call-1",
     }));
+  });
+
+  it("宿主媒体交付步骤不进入模型工具面或召回目录", async () => {
+    const delivery = { ...capability("node.delivery", [mediaField]), purpose: "media.deliver" };
+    const client = { capabilities: async () => registry([TEXT_MEDIA, delivery]) } as unknown as MmpClient;
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: null, run: runHandle() }, { client });
+    expect(surface.capabilities.map((item) => item.id)).toEqual([TEXT_MEDIA.id]);
+    expect(surface.tools.map((item) => item.mcpName)).toEqual(["mmp.image.generate"]);
+    expect(surface.catalog.map((item) => item.name)).toEqual(["mmp.image.generate"]);
   });
 
   it("长 capability id 的暴露名不超过常见 64 字符限制且保持稳定", () => {
@@ -73,11 +85,13 @@ describe("MMP v3 capability binder", () => {
       { name: "description", kind: "text", required: true, schema: { type: "string" } },
     ]);
     const client = { capabilities: async () => registry([triage]) } as unknown as MmpClient;
-    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run: runHandle() }, { client });
+    const run = runHandle();
+    const surface = await buildMmpToolSurface({ userId: "u", productionId: "p", run }, { client });
     expect(surface.tools[0].mcpName).toBe("mmp.triage.image");
     expect(surface.tools[0].description).toContain(triage.description);
     expect(surface.catalog[0]).toMatchObject({ name: "mmp.triage.image", family: "mmp.triage.image" });
     await surface.tools[0].execute("triage-call", { references: [{ assetId: "asset-1" }] }, new AbortController().signal);
+    expect(run.warmAttachments).toHaveBeenCalledWith([]);
     expect(bridgeMocks.run).toHaveBeenCalledWith(expect.objectContaining({ capability: triage,
       rawArguments: { references: [{ assetId: "asset-1" }] } }));
   });
@@ -88,13 +102,13 @@ describe("MMP v3 capability binder", () => {
       .resolves.toEqual({ tools: [], catalog: [], capabilities: [] });
   });
 
-  it("未接入的 audio media output 明确失败，不序列化成文本成功", async () => {
-    const audio = capability("audio.generate", [textField], [
-      { name: "audio", kind: "media", required: true, produces: ["audio/wav"], cardinality: { min: 1, max: 1 } },
+  it("未接入的 video media output 明确失败，不序列化成文本成功", async () => {
+    const audio = capability("video.generate", [textField], [
+      { name: "video", kind: "media", required: true, produces: ["video/mp4"], cardinality: { min: 1, max: 1 } },
     ]);
     const client = { capabilities: async () => registry([audio]) } as unknown as MmpClient;
     await expect(runMmpCapability({ capability: audio, rawArguments: { prompt: "music" }, resolveMedia: vi.fn(),
       userId: "u", productionId: null, sessionId: "s", runId: "r", toolCallId: "c" }, { client }))
-      .rejects.toThrow("尚未接入 audio 的输出渲染");
+      .rejects.toThrow("尚未接入 video 的输出接收");
   });
 });
