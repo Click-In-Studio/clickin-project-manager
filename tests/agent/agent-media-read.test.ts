@@ -22,7 +22,13 @@ vi.mock("@/lib/agent/tools/doc-tools", () => ({ resolveReadableAsset: state.reso
   attachmentDocRead: state.doc, attachmentFileOcr: vi.fn() }));
 vi.mock("@/lib/agent/runtime/model-settings-db", () => ({ runModelSelection: async () => ({ modelKey: state.modelKey }) }));
 vi.mock("@/lib/mmp/attachment-preflight", () => ({ preflightAttachment: state.preflight }));
-vi.mock("@/lib/r2", () => ({ presignedGet: () => "https://media.test/immutable", getR2Object: async () => ({ body: Buffer.from(state.textBody) }) }));
+vi.mock("@/lib/r2", () => ({ presignedGet: () => "https://media.test/immutable", getR2Object: async () => ({ body: Buffer.from(state.textBody) }),
+  getR2Stream: async () => new Response(new ReadableStream({ start(controller) {
+    const bytes = Buffer.from(state.textBody);
+    // 故意切在 UTF-8 字符内部，证明区间按解码后的字符计数。
+    for (let offset = 0; offset < bytes.length; offset += 4097) controller.enqueue(bytes.subarray(offset, offset + 4097));
+    controller.close();
+  } })) }));
 const run = { runId: "r", sessionId: "s", signal: new AbortController().signal, publish: () => {}, setStatus: async () => {}, isDetached: () => false };
 const context = { userId: "u", productionId: "p", run };
 
@@ -42,6 +48,16 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("#967 附件与素材同构读取", () => {
+  it("超过旧 1 MiB 的曲谱仍可流式回查末尾，保留准确字符位置", async () => {
+    state.textBody = "甲".repeat(400_000) + "🎵尾声";
+    state.attachment = { ...(state.attachment as object), mimeType: "text/plain", fileName: "score.txt", mediaKind: null,
+      fileSize: Buffer.byteLength(state.textBody) };
+    const result = await readModelMedia(context, { attachmentId: "att", mode: "read", ranges: [{ from: 400_000, to: state.textBody.length }] });
+    expect(JSON.stringify(result.content)).toContain("🎵尾声");
+    expect(JSON.stringify(result.content)).not.toContain("甲");
+    expect(result.details).toEqual({ completeAttachmentIds: [] });
+  });
+
   it("长曲谱可按字符区间完整回查，不把部分内容标成完整已读", async () => {
     state.textBody = "甲".repeat(80_000) + "乙".repeat(20_000);
     state.attachment = { ...(state.attachment as object), mimeType: "text/plain", fileName: "score.txt", mediaKind: null, fileSize: 300_000 };

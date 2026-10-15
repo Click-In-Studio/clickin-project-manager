@@ -6,13 +6,14 @@ import type { Capability, MmpClient } from "@mmp/client";
 import type { AgentAttachment } from "@/lib/agent/attachment-db";
 
 const state = vi.hoisted(() => ({
-  create: vi.fn(), ready: vi.fn(), remove: vi.fn(), head: vi.fn(), get: vi.fn(), put: vi.fn(), usage: vi.fn(),
+  create: vi.fn(), ready: vi.fn(), remove: vi.fn(), head: vi.fn(), get: vi.fn(), put: vi.fn(), usage: vi.fn(), admit: vi.fn(),
 }));
 vi.mock("@/lib/agent/attachment-db", () => ({ AGENT_ATTACHMENT_MAX_BYTES: 50 * 1024 * 1024,
   createPendingAttachment: state.create, markAttachmentReady: state.ready, scheduleAttachmentDeletion: state.remove }));
 vi.mock("@/lib/r2", () => ({ headR2Object: state.head, getR2Object: state.get,
   presignedPut: (key: string) => ({ url: `https://r2.test/${key}` }), putR2Object: state.put }));
 vi.mock("@/lib/mmp/usage-db", () => ({ recordMmpUsage: state.usage }));
+vi.mock("@/lib/mmp/admitted-run", () => ({ admittedMmpRun: state.admit }));
 import { runMmpCapability } from "@/lib/mmp/capability-runner";
 
 const cap = (produces: string[], max = 1): Capability => ({ id: "test.process", purpose: "test.process", visibility: "public",
@@ -51,9 +52,10 @@ beforeEach(() => {
   state.head.mockImplementation(async () => ({ size: body.length, contentType }));
   state.get.mockImplementation(async () => ({ body, contentType }));
   state.remove.mockResolvedValue(true);
+  state.admit.mockImplementation((client, job, opts) => client.run(job, opts));
 });
 
-async function execute(capability = cap([contentType])) {
+async function execute(capability = cap([contentType]), options: Record<string, unknown> = { start_sec: 10, end_sec: 10.25 }) {
   if (score !== undefined) capability.output.fields.push({ name: "score", kind: "text", required: true, schema: { type: "string" } });
   let deliveredCount = 0;
   const run = vi.fn(async (job: Parameters<MmpClient["run"]>[0]) => {
@@ -73,7 +75,7 @@ async function execute(capability = cap([contentType])) {
       usage: { served_from: "compute", tier: "cpu", engine: "test", compute_ms: 0, wasted_ms: 0 } };
   });
   const client = { capabilities: async () => ({ capabilities: [{ capability }] }), resolveCapability: async () => DELIVERY, run } as unknown as MmpClient;
-  const result = await runMmpCapability({ capability, rawArguments: { options: { start_sec: 10, end_sec: 10.25 } },
+  const result = await runMmpCapability({ capability, rawArguments: { options },
     resolveMedia: vi.fn(), userId: "u", productionId: null, sessionId: "s", runId: "r", toolCallId: "c" }, { client });
   return { result, request: run.mock.calls };
 }
@@ -150,6 +152,14 @@ describe("MMP 产物接收与呈现能力独立", () => {
     await expect(execute()).rejects.toThrow();
     contentType = "audio/flac"; metadata = { files: [{ sample_rate: 48000, channels: 1, duration_sec: 0.25 }] };
     await expect(execute()).rejects.toThrow("音频采样率、声道或时长");
+  });
+
+  it("调用边界把声道选择和裁段区间纳入业务重放身份，相同参数保持稳定", async () => {
+    const options = [{ channels: [0] }, { channels: [1] }, { start_sec: 20, end_sec: 21 }, { channels: [0] }];
+    for (const value of options) await execute(cap(["audio/flac"]), value);
+    const keys = state.admit.mock.calls.filter(([, job]) => job.type === "test.process").map((call) => call[3]);
+    expect(new Set(keys.slice(0, 3)).size).toBe(3);
+    expect(keys[3]).toBe(keys[0]);
   });
 
   it("多个命名媒体字段保留各自名称与索引，并按批次一起交付", async () => {
