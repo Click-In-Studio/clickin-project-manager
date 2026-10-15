@@ -260,16 +260,28 @@ describe("并发、索引与数据完整性", () => {
     await cleanupProduction(p);
     expect(await count(third.id)).toBe(0);
   });
-  it("新增结构无 viewport / 设备 / 置顶字段；排序查询具有索引路径", async () => {
+  it("新增结构无 viewport / 设备 / 置顶字段；排序索引有效且键顺序正确", async () => {
     const cols = (await pool.query<{ column_name: string }>("SELECT column_name FROM information_schema.columns WHERE table_name = 'wiki_recent_visit' ORDER BY ordinal_position")).rows.map(r => r.column_name);
     expect(cols).toEqual(["id", "user_id", "production_id", "wiki_id", "last_viewed_at"]);
+    const index = (await pool.query<{ indisvalid: boolean; indisready: boolean; definition: string }>(
+      `SELECT i.indisvalid, i.indisready, pg_get_indexdef(i.indexrelid) AS definition
+       FROM pg_index i WHERE i.indexrelid = to_regclass('public.wiki_recent_visit_order_idx')`,
+    )).rows;
+    expect(index).toHaveLength(1);
+    expect(index[0]).toMatchObject({ indisvalid: true, indisready: true });
+    expect(index[0].definition).toContain("USING btree (user_id, production_id, last_viewed_at DESC, wiki_id DESC)");
+  });
+  it("排序查询可通过排序索引直接提供顺序", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      // 小工厂数据允许 planner 选 seq scan；这里只验证真实排序索引可用，不伪称大数据测量。
+      // 禁用显式排序以验证有序索引路径；不约束小样本下默认 planner 的成本选择。
       await client.query("SET LOCAL enable_seqscan = off");
+      await client.query("SET LOCAL enable_sort = off");
       const plan = await client.query<{ "QUERY PLAN": string }>("EXPLAIN SELECT wiki_id FROM wiki_recent_visit WHERE user_id = $1 AND production_id = $2 ORDER BY last_viewed_at DESC, wiki_id DESC LIMIT 100", [viewer, prodId]);
-      expect(plan.rows.map(r => r["QUERY PLAN"]).join("\n")).toContain("wiki_recent_visit_order_idx");
+      const explain = plan.rows.map(r => r["QUERY PLAN"]).join("\n");
+      expect(explain).toContain("wiki_recent_visit_order_idx");
+      expect(explain).not.toMatch(/\bSort\b/);
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
 });
