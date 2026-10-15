@@ -118,7 +118,7 @@ describe("剧本与构作常驻入口及调用后整族加载（#1019）", () =>
     expect(result.active.filter(n => [...familyNames("production.script"), ...familyNames("production.dramaturgy")].includes(n)).sort()).toEqual([...entries].sort());
   });
 
-  it.each(entries)("近期调用 %s 恢复所属整族，跨族依赖不触发另一族展开", name => {
+  it.each([...familyNames("production.script"), ...familyNames("production.dramaturgy")])("近期调用 %s 恢复所属整族，跨族依赖不触发另一族展开", name => {
     const result = tier([name]);
     const family = TOOL_CATALOG.find(e => e.name === name)!.family;
     for (const member of familyNames(family)) expect(result.active).toContain(member);
@@ -136,5 +136,17 @@ describe("剧本与构作常驻入口及调用后整族加载（#1019）", () =>
       recalled: ["production.script_search"], available: ALL });
     expect(result.active).toContain("production.script_read_window");
     expect(result.active).toContain("production.script_dialect_ref");
+  });
+});
+
+describe("#1019 加载面约束", () => {
+  it("仅加载可用工具，未调用的其他族维持按单工具留存", () => {
+    const result = tieredToolNames({ hasProduction: true, pageKey: null, prompt: null, recalled: [],
+      used: ["production.script_search", "production.wiki_read"],
+      available: ALL.filter(name => name !== "production.script_propose_rewrite") });
+    expect(result.active).not.toContain("production.script_propose_rewrite");
+    expect(result.active).toContain("production.script_read_page");
+    expect(result.active).toContain("production.wiki_read");
+    expect(result.active).not.toContain("production.wiki_propose_create");
   });
 });
