@@ -105,19 +105,17 @@ function model(
       usage,
       timestamp: Date.now(),
     };
-    options?.signal?.addEventListener(
-      "abort",
-      () => {
-        if (stopped) return;
-        stopped = true;
-        stream.push({
-          type: "error",
-          reason: "aborted",
-          error: { ...base, content: [], stopReason: "aborted" },
-        });
-      },
-      { once: true },
-    );
+    const abort = () => {
+      if (stopped) return;
+      stopped = true;
+      stream.push({
+        type: "error",
+        reason: "aborted",
+        error: { ...base, content: [], stopReason: "aborted" },
+      });
+    };
+    if (options?.signal?.aborted) abort();
+    else options?.signal?.addEventListener("abort", abort, { once: true });
     queueMicrotask(async () => {
       if (gate) await gate;
       if (stopped) return;
@@ -146,6 +144,29 @@ async function eventually(check: () => Promise<boolean>, timeout = 8000) {
   }
   throw new Error("等待持久状态超时");
 }
+
+describe("子任务假模型取消时序", () => {
+  it.each(["注册监听前", "注册监听后"])("%s取消均结束模型流", async (timing) => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const script = ["不应输出"];
+    if (timing === "注册监听前") controller.abort();
+    const stream = await model(script, [], gate)(CHAT_MODEL, { messages: [] }, { signal: controller.signal });
+    if (timing === "注册监听后") controller.abort();
+
+    // gate 尚未释放，取消必须独立产生终态，不能靠正常输出结束。
+    const result = await stream.result();
+    release();
+    await gate;
+    expect(result.stopReason).toBe("aborted");
+    expect(result.content).toEqual([]);
+    expect(script).toEqual(["不应输出"]);
+    const events = [];
+    for await (const event of stream) events.push(event);
+    expect(events).toEqual([{ type: "error", reason: "aborted", error: result }]);
+  });
+});
 
 describe("持久子 Agent 基建", () => {
   let userId: string;

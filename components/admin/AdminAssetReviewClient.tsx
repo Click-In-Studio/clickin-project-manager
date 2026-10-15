@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useState } from "react";
 import { SECONDARY_BTN } from "@/components/ui/PageHeader";
 import Badge from "@/components/ui/Badge";
@@ -96,7 +97,7 @@ export default function AdminAssetReviewClient({ productionId, initialAssets, ca
                   aria-label={`${open ? "收起" : "展开"}${a.name || a.fileName}的授权名单`}
                   aria-expanded={open}
                 >
-                  {open ? "▾" : "▸"}
+                  <ChevronIcon direction={open ? "down" : "right"} size={12} />
                 </button>
                 <div className={styles.assetDetails}>
                   <p className={styles.assetName}>

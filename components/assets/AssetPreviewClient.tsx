@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { buildArchiveTree, flattenTree, allDirPaths } from "@/lib/asset/archive-view";
 import { useRouter } from "next/navigation";
@@ -465,7 +466,7 @@ export default function AssetPreviewClient({
                       {node.isDir ? (
                         <button onClick={() => toggleDir(node.path)}
                           className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer">
-                          <span className={`shrink-0 w-3 ${t.faint}`}>{expanded.has(node.path) ? "▾" : "▸"}</span>
+                          <ChevronIcon direction={expanded.has(node.path) ? "down" : "right"} size={12} className={`shrink-0 ${t.faint}`} />
                           <span className="shrink-0">📁</span>
                           <span className="truncate" title={node.path}>{node.name}</span>
                         </button>

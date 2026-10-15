@@ -24,10 +24,8 @@ export function useScriptPresence({ effectiveScriptId, activeVersionId }: {
     return stored || anonymousName(getOrCreateClientId());
   });
   const [presenceMap, setPresenceMap] = useState<Map<string, RemotePresence>>(new Map());
-  const presenceCountRef = useRef(0);
   const lastSentPresenceRef = useRef<{ versionId: string | null; blockId: string | null } | null>(null);
   const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const presenceLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sendPresence = useCallback((blockId: string | null) => {
     if (!clientId || !effectiveScriptId) return;
@@ -50,6 +48,6 @@ export function useScriptPresence({ effectiveScriptId, activeVersionId }: {
 
   return {
     clientId, userName, setUserName, presenceMap, setPresenceMap,
-    presenceCountRef, presenceTimerRef, presenceLayoutTimerRef, sendPresence,
+    presenceTimerRef, sendPresence,
   };
 }

@@ -7,6 +7,7 @@
  * 不受模态/容器 overflow 裁剪。大列表友好（限高内滚 + 搜索）。
  */
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -199,7 +200,7 @@ export default function DropdownPicker({
               ?? (selectedCount > 0 ? (multiCountLabel?.(selectedCount) ?? `已选 ${selectedCount} 人`) : placeholder)}
           </span>
         )}
-        {showIndicator && <span style={{ fontSize: 9, color: "var(--muted)", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>}
+        {showIndicator && <ChevronIcon direction={open ? "up" : "down"} size={12} className="shrink-0 text-[var(--muted)]" />}
       </button>
 
       {open && pos && typeof document !== "undefined" && createPortal(

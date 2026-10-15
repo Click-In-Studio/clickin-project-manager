@@ -5,7 +5,6 @@ import ChevronIcon from "@/components/ui/ChevronIcon";
 import type { ScriptPersonalMode } from "./personal-mode";
 
 export default function ScriptModeMenu({
-  compact,
   open,
   currentLabel,
   selectedMode,
@@ -18,7 +17,6 @@ export default function ScriptModeMenu({
   onToggle,
   onSelect,
 }: {
-  compact: boolean;
   open: boolean;
   currentLabel: string;
   selectedMode: ScriptPersonalMode | null;
@@ -39,7 +37,7 @@ export default function ScriptModeMenu({
         onClick={onToggle}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`${compact ? "hidden" : "flex"} items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
+        className={`flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-800`}
       >
         {currentLabel} <ChevronIcon size={12} className="opacity-50" />
       </button>
@@ -48,10 +46,10 @@ export default function ScriptModeMenu({
           role="menu"
           aria-label="剧本操作模式"
           data-script-toolbar-menu-panel="mode"
-          data-production-overflow-menu-child={compact ? "true" : undefined}
-          ref={compact ? nestedMenuRef : undefined}
-          style={compact ? nestedMenuStyle : undefined}
-          className={`${menuClassName} w-52`}
+          data-production-overflow-menu-child="true"
+          ref={nestedMenuRef}
+          style={nestedMenuStyle}
+          className={`${menuClassName} min-w-[96px] w-max`}
         >
           <button
             type="button"

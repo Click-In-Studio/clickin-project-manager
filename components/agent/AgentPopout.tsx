@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentMedia } from "./AttachmentMedia";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
@@ -31,6 +32,13 @@ import type { ChatTranscriptEntry } from "@/lib/agent/chat/types";
 function lastSessionStorageKey(productionId: string | null): string {
   return `clickin-ai-last-session:${productionId ?? "personal"}`;
 }
+
+type ChatOperation = {
+  key: string;
+  phase: "history" | "stream" | "idle";
+  controller: AbortController;
+  reader?: ReadableStreamDefaultReader<Uint8Array>;
+};
 
 type SessionSummary = {
   key: string;
@@ -137,6 +145,24 @@ export default function AgentPopout({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeKeyRef = useRef<string | null>(null);
   activeKeyRef.current = activeKey;
+  // 请求发出前同步登记所有权，状态通知与 React 下一次渲染之间也不能重复接流。
+  const operationRef = useRef<ChatOperation | null>(null);
+  const cancelOperation = useCallback(() => {
+    const previous = operationRef.current;
+    operationRef.current = null;
+    previous?.controller.abort();
+    void previous?.reader?.cancel().catch(() => {});
+  }, []);
+  const beginOperation = useCallback((key: string, phase: ChatOperation["phase"]): ChatOperation => {
+    cancelOperation();
+    const operation: ChatOperation = { key, phase, controller: new AbortController() };
+    operationRef.current = operation;
+    return operation;
+  }, [cancelOperation]);
+  const isCurrentOperation = useCallback((operation: ChatOperation) =>
+    operationRef.current === operation && activeKeyRef.current === operation.key && !operation.controller.signal.aborted,
+  []);
+  useEffect(() => cancelOperation, [cancelOperation]);
   const pathname = usePathname();
   const router = useRouter();
   const isMobileViewport = useSyncExternalStore(
@@ -199,11 +225,15 @@ export default function AgentPopout({
   // 后台仍在跑，只是不该继续显示在这个范围的窗口里。
   useEffect(() => {
     if (activeKey && !inScope(activeKey)) {
+      cancelOperation();
+      activeKeyRef.current = null;
+      setStreaming(false);
+      setLoadingHistory(false);
       setActiveKey(null);
       setBubbles([]);
       setCompacting(false);
     }
-  }, [productionId, activeKey, inScope]);
+  }, [productionId, activeKey, inScope, cancelOperation]);
 
   // 按语境记住最后一次活跃的会话——重开 popout/刷新页面后自动接回去，
   // 不用每次都从空白开始。恢复逻辑见下面依赖 openSession 的那个 effect。
@@ -292,48 +322,58 @@ export default function AgentPopout({
   }, [input]);
 
   // 读一条 NDJSON/SSE 聊天流进气泡列表——"发送" 和 "接回运行中会话" 共用。
-  const consumeStream = useCallback(async (res: Response, forKey: string) => {
-    if (!res.ok || !res.body) {
-      const err = await res.json().catch(() => ({ error: `请求失败（${res.status}）` }));
-      setBubbles((prev) => [...prev, { kind: "notice", text: (err as { error?: string }).error || "请求失败" }]);
+  const consumeStream = useCallback(async (res: Response, operation: ChatOperation) => {
+    if (!isCurrentOperation(operation)) {
+      await res.body?.cancel().catch(() => {});
       return;
     }
-    setStreaming(true);
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    let lastByteAt = Date.now();
-    let watchdogFired = false;
-    const watchdog = setInterval(() => {
-      if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
-        watchdogFired = true;
-        reader.cancel().catch(() => {});
-      }
-    }, 5_000);
-
-    let streamKey = forKey;
-    // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
-    // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
-    // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
+    let watchdog: ReturnType<typeof setInterval> | undefined;
     let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-    const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
-      const handled = dispatchAgentMutation({
-        scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
-      });
-      if (handled || fallbackTimer) return;
-      fallbackTimer = setTimeout(() => { fallbackTimer = null; router.refresh(); }, 300);
-    };
-
-    const apply = (line: StreamLine) => {
-      if (activeKeyRef.current !== streamKey) return;
-      setBubbles((prev) => applyStreamLine(prev, line));
-    };
-
     try {
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({ error: `请求失败（${res.status}）` }));
+        if (isCurrentOperation(operation)) {
+          setBubbles((prev) => [...prev, { kind: "notice", text: (err as { error?: string }).error || "请求失败" }]);
+        }
+        return;
+      }
+      const reader = res.body.getReader();
+      operation.reader = reader;
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let lastByteAt = Date.now();
+      let watchdogFired = false;
+      watchdog = setInterval(() => {
+        if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
+          watchdogFired = true;
+          reader.cancel().catch(() => {});
+        }
+      }, 5_000);
+
+      // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
+      // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
+      // 由它们决定刷新粒度；没人接才 router.refresh() 兜底。多个变更 300ms 内合并成一次兜底。
+      const onMutation = (line: Extract<StreamLine, { type: "mutation" }>) => {
+        const handled = dispatchAgentMutation({
+          scope: line.scope, action: line.action, productionId: line.productionId ?? null, ids: line.ids, tool: line.tool,
+        });
+        if (handled || fallbackTimer) return;
+        fallbackTimer = setTimeout(() => {
+          fallbackTimer = null;
+          // 已接收的变更在同会话历史同步后仍需刷新页面。
+          if (activeKeyRef.current === operation.key) router.refresh();
+        }, 300);
+      };
+
+      const apply = (line: StreamLine) => {
+        if (!isCurrentOperation(operation)) return;
+        setBubbles((prev) => applyStreamLine(prev, line));
+      };
+
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || !isCurrentOperation(operation)) break;
         lastByteAt = Date.now();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -346,14 +386,7 @@ export default function AgentPopout({
           try {
             const line = JSON.parse(payload) as StreamLine;
             if (line.type === "ping") continue;
-            if (line.type === "session") {
-              if (typeof line.key === "string" && line.key && activeKeyRef.current === streamKey) {
-                streamKey = line.key;
-                activeKeyRef.current = line.key;
-                setActiveKey(line.key);
-              }
-              continue;
-            }
+            if (line.type === "session") continue;
             if (line.type === "compacting") {
               setCompacting(line.active);
               apply(line);
@@ -366,82 +399,115 @@ export default function AgentPopout({
           }
         }
       }
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "读取回复失败" }]);
+      }
     } finally {
       clearInterval(watchdog);
-      setStreaming(false);
-      setCompacting(false);
-      setBubbles((prev) =>
-        prev.map((b) =>
-          (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
-        )
-      );
-      // 释放/资产化由工具在服务端改状态；流结束后用附件表刷新历史 chip，避免
-      // 用户必须关掉再打开会话才看见「待释放 / 已存为资产」。
-      fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(streamKey)}`)
-        .then((statusRes) => statusRes.ok ? statusRes.json() : null)
-        .then((data: { attachments?: ChatAttachment[] } | null) => {
-          if (activeKeyRef.current !== streamKey || !data?.attachments) return;
-          const byId = new Map(data.attachments.map((item) => [item.id, item]));
-          setBubbles((prev) => prev.map((bubble) => {
-            if (bubble.kind === "user") return {
-              ...bubble,
-              attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
-            };
-            if (bubble.kind === "tool") return {
-              ...bubble,
-              attachments: data.attachments!.filter((item) => item.sourceToolCallId === bubble.id),
-            };
-            return bubble;
-          }));
-        })
-        .catch(() => {});
-      refreshSessions();
+      operation.reader?.releaseLock();
+      if (fallbackTimer && !isCurrentOperation(operation)) clearTimeout(fallbackTimer);
+      // 被替换的消费者既不能写气泡，也不能在 finally 清掉新流的忙碌状态。
+      if (isCurrentOperation(operation)) {
+        operation.phase = "idle";
+        setStreaming(false);
+        setCompacting(false);
+        setBubbles((prev) =>
+          prev.map((b) =>
+            (b.kind === "assistant" || b.kind === "thinking") && b.streaming ? { kind: b.kind, text: b.text } : b
+          )
+        );
+        // 释放/资产化由工具在服务端改状态；流结束后用附件表刷新历史 chip，避免
+        // 用户必须关掉再打开会话才看见「待释放 / 已存为资产」。
+        fetch(`/api/agent/attachments?sessionKey=${encodeURIComponent(operation.key)}`)
+          .then((statusRes) => statusRes.ok ? statusRes.json() : null)
+          .then((data: { attachments?: ChatAttachment[] } | null) => {
+            if (!isCurrentOperation(operation) || !data?.attachments) return;
+            const byId = new Map(data.attachments.map((item) => [item.id, item]));
+            setBubbles((prev) => prev.map((bubble) => {
+              if (bubble.kind === "user") return {
+                ...bubble,
+                attachments: bubble.attachments?.map((item) => ({ ...item, ...byId.get(item.id) })),
+              };
+              if (bubble.kind === "tool") return {
+                ...bubble,
+                attachments: data.attachments!.filter((item) => item.sourceToolCallId === bubble.id),
+              };
+              return bubble;
+            }));
+          })
+          .catch(() => {});
+        refreshSessions();
+      }
     }
-  }, [refreshSessions, router]);
+  }, [refreshSessions, router, isCurrentOperation]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
+    // 同一会话的历史加载或接流尚未结束时，重复选择不再启动第二个消费者。
+    if (operationRef.current?.key === key && operationRef.current.phase !== "idle") return;
+    const switchingSession = activeKeyRef.current !== key;
+    const operation = beginOperation(key, "history");
+    activeKeyRef.current = key;
     setActiveKey(key);
-    setBubbles([]);
+    setStreaming(false);
+    if (switchingSession) setBubbles([]);
     setCompacting(status === "compacting");
     setLoadingHistory(true);
+    let handedOff = false;
+    const signal = operation.controller.signal;
     try {
-      const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`);
+      const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`, { signal });
+      if (!isCurrentOperation(operation)) return;
       if (res.ok) {
-        const data = (await res.json()) as {
-          messages: ChatTranscriptEntry[];
-        };
-        if (activeKeyRef.current !== key) return;
+        const data = (await res.json()) as { messages: ChatTranscriptEntry[] };
+        if (!isCurrentOperation(operation)) return;
         const history = data.messages.map((m) =>
-            m.role === "tool"
-              ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
-              : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
-          ) as Bubble[];
+          m.role === "tool"
+            ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
+            : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
+        ) as Bubble[];
         setBubbles(history);
       }
       try {
-        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`);
+        const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`, { signal });
         if (qres.ok) {
           const data = (await qres.json()) as { questions?: QuestionInfo[] };
-          if (activeKeyRef.current === key && data.questions?.length) {
-            setBubbles((prev) => mergeRestoredQuestions(prev,data.questions!));
+          if (isCurrentOperation(operation) && data.questions?.length) {
+            setBubbles((prev) => mergeRestoredQuestions(prev, data.questions!));
           }
         }
       } catch {
-        // 恢复失败不挡接流；进行中的问题还有实时事件这条路
+        // 恢复失败不挡接流；进行中的问题还有实时事件这条路。
+      }
+      if (!isCurrentOperation(operation)) return;
+      setLoadingHistory(false);
+      if (status === "queued" || status === "running" || status === "compacting") {
+        operation.phase = "stream";
+        setStreaming(true);
+        const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`, { signal });
+        handedOff = true;
+        void consumeStream(res, operation);
+      }
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "加载对话失败" }]);
       }
     } finally {
-      if (activeKeyRef.current === key) setLoadingHistory(false);
+      if (isCurrentOperation(operation)) {
+        setLoadingHistory(false);
+        if (!handedOff) {
+          operation.phase = "idle";
+          setStreaming(false);
+          setCompacting(false);
+        }
+      }
     }
-    if (status === "queued" || status === "running" || status === "compacting") {
-      const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`);
-      consumeStream(res, key);
-    }
-  }, [consumeStream]);
+  }, [beginOperation, consumeStream, isCurrentOperation]);
 
   const onSubagentParentRun = useCallback(
     async (status: "queued" | "running" | "compacting" | "done") => {
-      if (!activeKey || streaming || loadingHistory) return false;
+      if (!activeKey || streaming || loadingHistory || (operationRef.current && operationRef.current.phase !== "idle")) return false;
       await openSession(activeKey, status);
       return true;
     },
@@ -498,10 +564,14 @@ export default function AgentPopout({
     });
     if (!res.ok) return;
     const { key } = (await res.json()) as { key: string };
+    cancelOperation();
+    activeKeyRef.current = key;
     setActiveKey(key);
     setBubbles([]);
+    setStreaming(false);
+    setLoadingHistory(false);
     setCompacting(false);
-  }, [productionId]);
+  }, [productionId, cancelOperation]);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     const current = activeKeyRef.current;
@@ -649,22 +719,43 @@ export default function AgentPopout({
       scriptFocus: focusAttached ? scriptFocusActive : null,
     });
 
-    const res = await fetch("/api/agent/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionKey: key, message, attachmentIds: selectedAttachments.map((a) => a.id), steer: streaming || undefined }),
-    });
-    if (streaming) {
-      const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !out?.ok) {
-        setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
-        return false;
-      }
-    } else {
-      consumeStream(res, key);
+    const current = operationRef.current;
+    const steer = current?.key === key && current.phase === "stream";
+    const operation = steer ? current : beginOperation(key, "stream");
+    if (!steer) {
+      setLoadingHistory(false);
+      setStreaming(true);
     }
-    return res.ok;
-  }, [streaming, consumeStream, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+    try {
+      const res = await fetch("/api/agent/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionKey: key, message, attachmentIds: selectedAttachments.map((a) => a.id), steer: steer || undefined }),
+        signal: operation.controller.signal,
+      });
+      if (steer) {
+        const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+        if (!res.ok || !out?.ok) {
+          if (isCurrentOperation(operation)) {
+            setBubbles((prev) => [...prev, { kind: "notice", text: out?.error || "消息注入失败，请等本轮结束后重发" }]);
+          }
+          return false;
+        }
+      } else {
+        void consumeStream(res, operation);
+      }
+      return res.ok;
+    } catch (error) {
+      if (isCurrentOperation(operation)) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "发送失败" }]);
+        if (!steer) {
+          operation.phase = "idle";
+          setStreaming(false);
+        }
+      }
+      return false;
+    }
+  }, [beginOperation, consumeStream, isCurrentOperation, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
 
   const send = useCallback(async () => {
     const raw = input.trim();
@@ -824,12 +915,16 @@ export default function AgentPopout({
     if (!confirm("删除这个对话？")) return;
     await fetch(`/api/agent/sessions/${encodeURIComponent(key)}`, { method: "DELETE" });
     if (activeKeyRef.current === key) {
+      cancelOperation();
+      activeKeyRef.current = null;
+      setStreaming(false);
+      setLoadingHistory(false);
       setActiveKey(null);
       setBubbles([]);
       setCompacting(false);
     }
     refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshSessions, cancelOperation]);
 
   const renameSession = useCallback(async (key: string, current: string) => {
     const title = prompt("重命名对话", current)?.trim();
@@ -891,7 +986,7 @@ export default function AgentPopout({
                 待补充 {activeSession.pendingQuestionCount}
               </span>
             )}
-            <span className="shrink-0 text-[10px] text-[var(--muted)]">{pickerOpen ? "▲" : "▼"}</span>
+            <ChevronIcon direction={pickerOpen ? "up" : "down"} size={12} className="shrink-0 text-[var(--muted)]" />
           </button>
           <button
             type="button"
@@ -993,7 +1088,7 @@ export default function AgentPopout({
       {/* 聊天区 */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
         <div ref={scrollContentRef} className="min-h-full space-y-3">
-        {loadingHistory && <p className="text-center text-sm text-zinc-400">加载中…</p>}
+        {loadingHistory && bubbles.length === 0 && <p className="text-center text-sm text-zinc-400">加载中…</p>}
         {!loadingHistory && bubbles.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <p className="text-sm text-zinc-400">
@@ -1009,11 +1104,7 @@ export default function AgentPopout({
                   {b.text}
                   {b.attachments?.map((attachment) => (
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md bg-white/10 px-2 py-1 text-[11px] text-zinc-200">
-                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
-                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                        </button>
-                      )}
+                      {activeKey && <AttachmentMedia attachment={attachment} sessionKey={activeKey} onPreview={() => setPreviewAttachment(attachment)} />}
                       <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>
@@ -1042,12 +1133,10 @@ export default function AgentPopout({
                   {refs.items.map((ref) => {
                     const attachment = known.get(ref.id);
                     if (previousIds.has(ref.id)) return null;
-                    if (!attachment || !attachment.mimeType.startsWith("image/") || attachment.status && attachment.status !== "ready") {
-                      return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">图片附件 {ref.id} 当前不可显示{ref.alt ? `：${ref.alt}` : ""}</p>;
+                    if (!attachment || attachment.status && attachment.status !== "ready") {
+                      return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">附件 {ref.id} 当前不可用{ref.alt ? `：${ref.alt}` : ""}</p>;
                     }
-                    return <button key={ref.key} type="button" className="mt-1.5 block max-w-full" onClick={() => setPreviewAttachment(attachment)}>
-                      <img src={attachmentPreviewUrl(activeKey!, attachment.id)} alt={ref.alt || attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                    </button>;
+                    return <div key={ref.key} className="mt-1.5 max-w-full"><AttachmentMedia attachment={attachment} sessionKey={activeKey!} onPreview={() => setPreviewAttachment(attachment)} /></div>;
                   })}
                   {b.streaming && !compacting && <span className="inline-block h-3 w-1.5 animate-pulse bg-zinc-400" />}
                 </div>
@@ -1071,16 +1160,12 @@ export default function AgentPopout({
           if (b.kind === "tool") {
             return (
               <div key={i} className="flex justify-start">
-                <div className="max-w-[92%]">
+                <div className="min-w-0 max-w-[92%]">
                   <ToolCallBubble name={b.name} done={b.done} isError={b.isError} input={b.input} result={b.result} progress={b.progress}
                     onCancel={!b.done && b.name.startsWith("clickin__mmp-") ? abort : undefined} />
                   {b.attachments?.map((attachment) => (
                     <div key={attachment.id} className="mt-1.5 max-w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-600">
-                      {attachment.mimeType.startsWith("image/") && (!attachment.status || attachment.status === "ready") && activeKey && (
-                        <button type="button" className="mb-1 block max-w-full" onClick={() => setPreviewAttachment(attachment)} aria-label={`预览 ${attachment.fileName}`}>
-                          <img src={attachmentPreviewUrl(activeKey, attachment.id)} alt={attachment.fileName} className="max-h-72 max-w-full rounded object-contain" />
-                        </button>
-                      )}
+                      {activeKey && <AttachmentMedia attachment={attachment} sessionKey={activeKey} onPreview={() => setPreviewAttachment(attachment)} />}
                       <div className="flex items-center gap-1">
                       <span className="min-w-0 flex-1 truncate">📎 {attachment.fileName}</span>
                       {attachment.status === "released" && <>
@@ -1599,21 +1684,21 @@ function ToolCallBubble({
   );
 
   return (
-    <div className="max-w-[92%]">
-      <div className="flex items-start gap-1.5">
+    <div className="min-w-0 max-w-full">
+      <div className="flex min-w-0 max-w-full items-start gap-1.5">
         <button
           type="button"
           disabled={!hasDetail}
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           title={hasDetail ? (expanded ? "收起详情" : "查看详情") : undefined}
-          className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-xl border px-3 py-1 text-left text-xs ${
+          className={`flex min-w-0 max-w-full items-start gap-1.5 rounded-xl border px-3 py-1 text-left text-xs ${
             failed ? "border-red-200 bg-red-50 text-red-600" : "border-zinc-200 bg-zinc-50 text-zinc-500"
           } ${hasDetail ? "cursor-pointer hover:border-zinc-400 hover:text-zinc-700" : "cursor-default"}`}
         >
           <span className="mt-0.5 shrink-0">{statusIcon}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block break-words">{toolLabel(name)}</span>
+          <span className="min-w-0">
+            <span className="block truncate" title={toolLabel(name)}>{toolLabel(name)}</span>
             {!done && progress && <span className="block break-words text-zinc-400">{progress}</span>}
           </span>
           {hasDetail && <span className="mt-0.5 shrink-0"><ChevronIcon direction={expanded ? "up" : "down"} size={10} /></span>}
@@ -1622,7 +1707,7 @@ function ToolCallBubble({
       </div>
       {expanded && hasDetail && (
         <div className="mt-1 space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-          <p className="font-mono text-[10px] text-zinc-400">{name}</p>
+          <p className="break-all font-mono text-[10px] text-zinc-400">{name}</p>
           {inputText !== "" && (
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">参数</p>

@@ -734,8 +734,58 @@ span[data-stage-inline] {
   display: none;
 }
 
-#production-top-toolbar-overflow:not(:has(#production-page-toolbar-overflow-slot > *)) {
+/* 所有宽度共用占据布局空间的第二栏；收起时保留尺寸用于测量。 */
+.production-toolbar-block {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: max-content;
+  margin-right: 4px;
+  min-height: 32px;
+}
+.production-secondary-toolbar {
+  position: relative;
+  z-index: 40;
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.production-secondary-toolbar-closed {
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+}
+.production-secondary-toolbar #production-page-toolbar-overflow-slot {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+}
+.production-secondary-toolbar #production-page-toolbar-search-overflow-slot:empty {
   display: none;
+}
+
+/* 构作视图切换优先占位，工作区标题在最窄窗口截断。 */
+@media (max-width: 639px) {
+  [data-dramaturgy-heading] {
+    min-width: 0;
+    flex: 1;
+  }
+
+  [data-dramaturgy-heading] > button {
+    max-width: 100%;
+    padding-inline: 4px;
+  }
+
+  [data-dramaturgy-heading] > button > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 @property --panel-scrollbar-thumb-opacity {
@@ -782,6 +832,12 @@ span[data-stage-inline] {
 
 /* Side panels stay above the bottom nav wherever that nav is visible. */
 @media (max-width: 1023px) {
+  /* 当前页面由底部导航识别，只隐藏标签及紧随它的分隔线，保留内容切换控件。 */
+  [data-production-top-menu-context],
+  [data-production-top-menu-context] + [data-production-top-menu-divider] {
+    display: none;
+  }
+
   /* iOS Safari 会在聚焦小于 16px 的编辑控件时自动放大页面。移动端统一使用
      可读字号下限，避免焦点改变 viewport scale；不禁用用户手动缩放。 */
   input,
@@ -1176,4 +1232,12 @@ span[data-stage-inline] {
   .agent-composer-voice.is-recording { background: #fef2f2; color: var(--danger); animation: pulse 1.5s ease-in-out infinite; }
   .agent-composer-voice.is-cancel { background: var(--danger); color: white; }
   .agent-attachment-limits { margin: 6px 10px; color: var(--muted); font-size: 10px; }
+}
+
+[data-toolbar-progressive] .production-top-menu-right {
+  margin-left: 0;
+}
+
+@media (max-width: 1023px) {
+  input[data-script-character-input] { font-size: 14px !important; }
 }

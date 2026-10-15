@@ -331,16 +331,23 @@ export async function withLocalTool<T>(key: string, fn: () => Promise<T>): Promi
   try { return await fn(); } finally { await release(ticket); }
 }
 
-/** 压缩与普通回复共用已取得的模型名额，避免嵌套获取名额造成死锁。 */
+/** 请求边界压缩复用模型名额；工具内的显式媒体重读独立取得名额并结算。 */
 export async function budgetedComplete(model: Model, context: Context, options: SimpleStreamOptions, complete: () => Promise<AssistantMessage>): Promise<AssistantMessage> {
   const scope = scopeStorage.getStore();
-  const ticket = scope?.modelTicket;
-  if (!scope || !ticket) return complete();
-  const cost = estimateCostBudget(model, context, options);
-  const costReservation = await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
-  scope.signal.throwIfAborted();
-  options.signal?.throwIfAborted();
-  const result = await complete();
-  await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(result.usage, model)));
-  return result;
+  if (!scope) return complete();
+  const owned = !scope.modelTicket;
+  const ticket = scope.modelTicket ?? await acquire(scope.runId, `compaction:${scope.operationKey ?? await db.continuationKey(scope.runId)}:${scope.sequence++}`, "llm", scope.signal);
+  if (owned && ticket.state === "done" && ticket.result) return ticket.result as AssistantMessage;
+  let result: AssistantMessage | undefined;
+  try {
+    const cost = estimateCostBudget(model, context, options);
+    const costReservation = await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
+    scope.signal.throwIfAborted();
+    options.signal?.throwIfAborted();
+    result = await complete();
+    await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(result.usage, model)));
+    return result;
+  } finally {
+    if (owned) await release(ticket,result ? "done" : "failed",result);
+  }
 }

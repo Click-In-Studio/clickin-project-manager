@@ -1,6 +1,5 @@
 import React from "react";
 
-export const TOOLBAR_FOLD_HYSTERESIS_PX = 16;
 export const COMPACT_STAGE_COMMENT_EDITOR_WIDTH_RATIO = 0.8;
 export const LINE_INDEX_GUTTER_OFFSET_REM = 1.25;
 export const LINE_INDEX_CONTROL_MIN_WIDTH_REM = 0.5;

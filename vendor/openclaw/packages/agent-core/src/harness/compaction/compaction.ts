@@ -675,6 +675,8 @@ export interface CompactionPreparation {
   /** Settings used to prepare compaction. */
   settings: CompactionSettings;
   mediaToKeep?: MediaContent[];
+  /** 宿主在提交前验证模态适配，允许摘要 token 未减少。 */
+  mediaAdaptation?: boolean;
   mediaReferences?: MediaContent[];
 }
 
@@ -752,8 +754,8 @@ export function prepareCompaction(
   const seenMedia = new Set<string>();
   const mediaToKeep = buildSessionContext(pathEntries).messages.flatMap((message) => "content" in message && Array.isArray(message.content) && message.role !== "assistant"
     ? message.content.filter((part): part is MediaContent => ["image", "audio", "video", "file"].includes(part.type)) : []).filter((part) => {
-      const identity = JSON.stringify([part.attachmentId, part.mimeType, part.source]);
-      if (!part.attachmentId) return true;
+      const identity = JSON.stringify([part.attachmentId, part.assetId, part.mimeType, part.source]);
+      if (!part.attachmentId && !part.assetId) return true;
       if (seenMedia.has(identity)) return false;
       seenMedia.add(identity); return true;
     });
@@ -820,7 +822,7 @@ export async function compact(
   summary += formatFileOperations(readFiles, modifiedFiles);
   if (preparation.mediaReferences?.length) {
     summary += "\n\n【已压缩媒体的回查身份；摘要不是原件】\n" + preparation.mediaReferences.map((part) =>
-      `attachmentId=${part.attachmentId ?? "无"}; MIME=${part.mimeType}; source=${JSON.stringify(part.source ?? {})}`,
+      `attachmentId=${part.attachmentId ?? "无"}; assetId=${part.assetId ?? "无"}; fileName=${JSON.stringify(part.fileName ?? "")}; MIME=${part.mimeType}; source=${JSON.stringify(part.source ?? {})}`,
     ).join("\n");
   }
 
@@ -833,7 +835,7 @@ export async function compact(
   const summaryTokens = estimateTokens(
     asAgentMessage(createCompactionSummaryMessage(summary, tokensBefore, new Date(0).toISOString())),
   );
-  if (summaryTokens >= shadowedTokens) {
+  if (!preparation.mediaAdaptation && summaryTokens >= shadowedTokens) {
     return err(new CompactionError(
       "not_smaller",
       `Compaction summary did not shrink context (${summaryTokens} >= ${shadowedTokens} estimated tokens)`,

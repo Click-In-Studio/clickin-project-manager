@@ -64,7 +64,9 @@ function makeTool(ctx: ToolContext, capability: Capability): RuntimeToolDef {
     mcpName,
     name: exposedName(mcpName),
     label: description,
-    description: `${description}。输入与限制来自在线 capability；输出：${outputDescription(capability)}；可用档位：${tiers}。`,
+    description: `${description}。输入与限制来自在线 capability；输出：${outputDescription(capability)}；可用档位：${tiers}。`
+      + (capability.output.fields.some((field) => field.kind === "media")
+        ? "生成媒体附件后，应调用 my.attachment_rename 按内容与用途命名，保留原扩展名，避免交付一批同名文件。" : ""),
     parameters: capabilityParameters(capability),
     readOnly: true,
     execute: async (toolCallId, raw, _signal, onUpdate) => {
@@ -83,6 +85,7 @@ function makeTool(ctx: ToolContext, capability: Capability): RuntimeToolDef {
           onUpdate?.({ content: [], details: status, progress: { text: detail, visibility: "channel", privacy: "public", id: "mmp-status" } });
         },
       });
+      await ctx.run.warmAttachments?.(out.attachments.map((item) => item.id));
       return {
         content: [{ type: "text" as const, text: out.text }, ...out.media],
         details: { attachments: out.attachments.map((item) => ({ attachmentId: item.id, fileName: item.fileName,
@@ -98,7 +101,9 @@ export async function buildMmpToolSurface(ctx: ToolContext, opts: { client?: Mmp
   if (!client) return { tools: [], catalog: [], capabilities: [] };
   try {
     const registry = await client.capabilities();
-    const capabilities = registry.capabilities.map((entry) => entry.capability);
+    const capabilities = registry.capabilities.map((entry) => entry.capability)
+      // 交付是宿主协议步骤；模型只使用已授权的附件/资产引用，不接触 ref 或 PUT 地址。
+      .filter((capability) => capability.purpose !== "media.deliver");
     const tools = capabilities.map((capability) => makeTool(ctx, capability));
     return { tools, catalog: capabilities.map((capability, index) => catalogEntry(tools[index].mcpName, capability)), capabilities };
   } catch (error) {

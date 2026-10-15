@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BASE_PATH } from "@/lib/base-path";
@@ -107,7 +108,7 @@ export default function WikiRecentVisits({ productionId, currentWikiId, onNaviga
     <section aria-label="最近访问" className="shrink-0 border-b border-zinc-200 px-2.5 py-1.5">
       <button type="button" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}
         className="flex min-h-9 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs font-semibold text-zinc-500 hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-zinc-500">
-        <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>最近访问
+        <ChevronIcon direction={collapsed ? "right" : "down"} size={12} className="shrink-0" />最近访问
       </button>
       {!collapsed && <div aria-live="polite" aria-busy={state.kind === "loading"}>
         {state.kind === "loading" && <p className="px-1 py-2 text-xs text-zinc-400">加载中…</p>}

@@ -138,12 +138,20 @@
   line-height: 1;
 }
 
-.progressMetricValue {
+.progressMetricCard .progressMetricValue {
+  font-size: clamp(18px, 2vw, 22px);
   display: inline-flex;
   align-items: baseline;
   gap: .16em;
   line-height: 1;
   white-space: nowrap;
+}
+
+.progressMetricCard .progressMetricText {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 .progressMetricValue > span {

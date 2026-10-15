@@ -15,14 +15,14 @@ import { toolRecall } from "@/lib/agent/tools/tool-catalog";
 const HOT_PERSONAL = [
   "model_list",
   ...SUBAGENT_TOOL_NAMES,
-  "my.productions", "my.memory_search", "my.attachment_read", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
+  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
 const HOT_PRODUCTION = [
   "model_list",
   ...SUBAGENT_TOOL_NAMES,
-  "my.productions", "my.memory_search", "my.attachment_read", "my.call_times",
+  "my.productions", "my.memory_search", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",
   "ask_user", "find_tools", "web.search", "web.fetch",
@@ -59,14 +59,14 @@ const SCRIPT_WRITE = [
 /** #47 文档解读族：资产枚举（id 供给）+ docx/pdf 结构信号读面 + 导入指引与日志；
  *  #510 起也带资产写面两工具（改名/移动，走确认卡）——分层不是权限（不变量 2） */
 const DOC_FAMILY = [
-  "production.asset_list", "production.asset_preflight", "production.asset_propose_rename", "production.asset_propose_move",
+  "production.asset_list", "production.asset_read", "production.asset_propose_rename", "production.asset_propose_move",
   "production.doc_outline", "production.doc_read", "production.doc_search", "production.doc_page_ocr",
   "production.doc_import_guide", "production.doc_import_log_create", "production.doc_import_log_append",
 ];
 
 /** 温层：pageKey → 该页的工作面（与 PAGE_LABELS 的 key 对齐；缺席 = 该页无温层） */
 const WARM_BY_PAGE: Record<string, string[]> = {
-  "prod:wiki": WIKI_FAMILY,
+  "prod:wiki": [...WIKI_FAMILY, "production.asset_read"],
   "prod:dramaturgy-inspiration": WIKI_FAMILY,
   "prod:dramaturgy": DRAMATURGY_FAMILY,
   "prod:characters": DRAMATURGY_FAMILY,
@@ -114,7 +114,7 @@ const CLOSURE: Record<string, string[]> = {
   "production.doc_search": ["production.doc_outline", "production.doc_import_guide"],
   // #453 OCR：页序与「哪些页是栅格化」来自 outline
   "production.doc_page_ocr": ["production.doc_outline", "production.doc_import_guide"],
-  "production.asset_preflight": ["production.asset_list"],
+  "production.asset_read": ["production.asset_list"],
   "production.doc_import_log_create": ["production.doc_import_guide"],
   // #510 资产写面：id 来自 asset_list 或 wiki_tree 的 [文件] 行（与工具描述一致）；移动的目标父也来自 wiki_tree
   "production.asset_propose_rename": ["production.asset_list", "production.wiki_tree"],

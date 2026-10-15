@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CharactersManager from "@/components/script/CharactersManager";
 import Dramaturgy from "@/components/script/Dramaturgy";
-import ListTableViewToggle, { ListTableViewToggleOverflow } from "@/components/script/ListTableViewToggle";
+import ListTableViewToggle from "@/components/script/ListTableViewToggle";
 import {
   listTableViewStorageKey,
   type ListTableViewScope,
@@ -133,7 +133,7 @@ describe("构作与角色的列表 / 表格偏好", () => {
     expect(container.querySelector("output")?.textContent).toBe("table");
   });
 
-  it("工具栏与收纳菜单都按表格在前、列表在后排列", () => {
+  it("同一组切换按表格在前、列表在后排列，保留完整名称", () => {
     const closeOverflow = vi.fn();
     act(() => root.render(
       <ProductionToolbarContext.Provider value={{
@@ -144,11 +144,10 @@ describe("构作与角色的列表 / 表格偏好", () => {
         setHasStoredControls: () => {},
       }}>
         <ListTableViewToggle value="table" onChange={() => {}} />
-        <ListTableViewToggleOverflow value="table" onChange={() => {}} />
       </ProductionToolbarContext.Provider>,
     ));
 
     const labels = [...container.querySelectorAll("button")].map((button) => button.textContent?.trim());
-    expect(labels).toEqual(["⊞表格", "☰列表", "⊞表格✓", "☰列表"]);
+    expect(labels).toEqual(["⊞表格", "☰列表"]);
   });
 });

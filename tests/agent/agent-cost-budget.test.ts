@@ -7,6 +7,7 @@ import { newRunId, newSessionId } from "@/lib/agent/runtime/ids";
 import { RUNNER_OWNER, resolveModel } from "@/lib/agent/runtime/config";
 import { contextRepeatsWithoutProgress, estimateCostBudget, repeatsWithoutProgress, toolProgressKey, TASK_COST_LIMIT_CREDITS } from "@/lib/agent/runtime/cost-budget";
 import { reserveRequestCost, settleRequestCost, assertToolProgress } from "@/lib/agent/runtime/cost-budget-db";
+import { budgetedComplete, runInAdmission } from "@/lib/agent/runtime/admission";
 import { requestAdmission, reattachAdmission, beginToolOperation, saveToolResult, saveToolFailure } from "@/lib/agent/runtime/admission-db";
 import type { Context } from "../../vendor/openclaw/packages/llm-core/src/types";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
@@ -29,6 +30,23 @@ async function run(parent?: string) {
 const context = (characters: number): Context => ({ messages: [{ role: "user", content: "文".repeat(characters), timestamp: 0 }] });
 
 describe("任务预算与循环检测分离", () => {
+  it("工具内触发的媒体摘要也取得模型名额，使用同一预算且余额不足不请求", async () => {
+    const r = await run();
+    await getPool().query("UPDATE agent_admission SET state='done' WHERE id=$1", [r.ticketId]);
+    const model = resolveModel("inspiration");
+    let calls = 0;
+    const complete = async () => {
+      calls++;
+      return { role: "assistant" as const,api: model.api,provider: model.provider,model: model.id,content: [{ type: "text" as const,text: "摘要" }],stopReason: "stop" as const,timestamp: 0,usage: { input: 1,output: 10,cacheRead: 0,cacheWrite: 0,totalTokens: 11,cost: { input: 0,output: 0,cacheRead: 0,cacheWrite: 0,total: 0 } } };
+    };
+    await runInAdmission(r.id,new AbortController().signal,() => {},async () => {
+      await budgetedComplete(model,context(10),{ maxTokens: 100 },complete);
+      expect(Number((await getPool().query("SELECT task_credits FROM agent_run WHERE id=$1", [r.id])).rows[0].task_credits)).toBeGreaterThan(0);
+      await getPool().query("UPDATE agent_run SET task_credits=$2 WHERE id=$1", [r.id,TASK_COST_LIMIT_CREDITS]);
+      await expect(budgetedComplete(model,context(10),{ maxTokens: 100 },complete)).rejects.toThrow("task-budget-exceeded");
+    });
+    expect(calls).toBe(1);
+  });
   it("26 万 token 冷缓存的两次正常往返不受旧 50 万 credit 阈值限制", async () => {
     const model = resolveModel("inspiration"); const estimate = estimateCostBudget(model, context(266000));
     expect(estimate.taskCredits).toBeGreaterThan(estimate.requestCredits * 2);

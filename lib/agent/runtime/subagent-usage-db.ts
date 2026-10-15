@@ -21,6 +21,7 @@ export async function recordChildUsage(
     cacheRead: number;
     usd: number;
     compaction?: boolean;
+    modelId?: string;
   },
 ): Promise<void> {
   const source = await getPool().query<{
@@ -60,7 +61,7 @@ export async function recordChildUsage(
             job.user_id,
             job.production_id,
             kind,
-            job.model,
+            usage.modelId ?? job.model,
             tokens,
             billed,
             paid,

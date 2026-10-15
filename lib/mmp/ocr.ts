@@ -92,7 +92,7 @@ export async function ocrPages(
     const done = await admittedMmpRun(client,
       { type: "ocr.structured", arguments: { media: handle, options: { pages, lang: input.lang ?? "ch" } }, tier: input.tier },
       { pollWaitSec: POLL_WAIT_SEC, timeoutMs: RUN_TIMEOUT_MS, signal: opts.signal },
-      input.fileId,
+      JSON.stringify([input.fileId, pages, input.lang ?? "ch"]),
     );
     const mediaId = done.media_ids.media;
     if (typeof mediaId === "string") rememberMmpMediaId(input.fileId, mediaId);

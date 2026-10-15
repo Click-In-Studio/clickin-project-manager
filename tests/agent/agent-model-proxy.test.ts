@@ -43,7 +43,7 @@ describe("Gemini 显式客户端代理", () => {
   const context: Context = {
     messages: [{ role: "user", timestamp: 1, content: [
       { type: "text", text: "测试" },
-      { type: "image", mimeType: "image/png", data: "AQID", attachmentId: "fixture", source: { kind: "attachment", sha256: "a".repeat(64) } },
+      { type: "image", mimeType: "image/png", data: "AQID", budget: { bytes: 3, base64Chars: 4, estimatedTokens: 1200, width: 1, height: 1, basis: "协议夹具" }, attachmentId: "fixture", source: { kind: "attachment", sha256: "a".repeat(64) } },
     ] }],
     tools: [{ name: "echo", description: "测试工具", parameters: { type: "object", properties: { value: { type: "string" } } } }],
   };

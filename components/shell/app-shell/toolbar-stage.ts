@@ -127,3 +127,50 @@ export function productionTopbarOverflow(topbar: HTMLElement): number {
   const clearanceDeficit = PRODUCTION_TOOLBAR_MIN_CLEARANCE_PX - visibleGap;
   return Math.max(contentOverflow, clearanceDeficit);
 }
+
+/** 优先级只决定保留哪些块，渲染顺序仍由原位置决定。 */
+export function selectStoredToolbarBlocks(
+  blocks: readonly { id: string; width: number; priority: number }[],
+  available: number,
+  moreWidth: number,
+): string[] {
+  let required = blocks.reduce((sum, block) => sum + block.width, 0);
+  if (required <= available) return [];
+  const stored: string[] = [];
+  for (const block of [...blocks].sort((a, b) => a.priority - b.priority)) {
+    stored.push(block.id);
+    required -= block.width;
+    if (required + moreWidth <= available) break;
+  }
+  return stored;
+}
+
+/** 读取两栏中的同一控件，重新计算当前名称、权限和头像所需宽度。 */
+export function layoutProgressiveToolbar(topbar: HTMLElement): boolean | null {
+  const root = topbar.querySelector<HTMLElement>("[data-toolbar-progressive]");
+  const secondary = document.getElementById("production-page-toolbar-overflow-slot");
+  if (!root || !secondary) return null;
+  const markers = [...root.querySelectorAll<HTMLElement>("[data-toolbar-marker]")];
+  const blocks = markers.flatMap((marker) => {
+    const host = [...document.querySelectorAll<HTMLElement>("[data-toolbar-instance]")]
+      .find((element) => element.dataset.toolbarInstance === marker.dataset.toolbarMarker);
+    return host ? [{ marker, host, id: host.dataset.toolbarInstance!,
+      width: outerWidth(host), priority: Number(host.dataset.toolbarPriority) }] : [];
+  });
+  const firstWidth = blocks.filter(({ host }) => root.contains(host))
+    .reduce((sum, block) => sum + block.width, 0);
+  const more = topbar.querySelector<HTMLElement>("[aria-label='更多工具']");
+  // “更多”的容器始终存在，父级 gap 在展开前后都占位，只扣按钮自身宽度。
+  const moreWidth = more ? outerWidth(more) : 56;
+  const fixedWidth = productionTopbarContentWidth(topbar) - firstWidth - (more ? moreWidth : 0);
+  const stored = selectStoredToolbarBlocks(blocks, topbar.clientWidth - fixedWidth - 6, moreWidth);
+  let storedIndex = 0;
+  for (const block of blocks) {
+    if (stored.includes(block.id)) {
+      // append 维持原始顺序；不重排 React 管理的子节点。
+      const current = secondary.children[storedIndex++];
+      if (current !== block.host) secondary.insertBefore(block.host, current ?? null);
+    } else if (block.marker.nextElementSibling !== block.host) block.marker.after(block.host);
+  }
+  return stored.length > 0;
+}

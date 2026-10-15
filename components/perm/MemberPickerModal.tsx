@@ -1,5 +1,6 @@
 "use client";
 
+import ChevronIcon from "@/components/ui/ChevronIcon";
 import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 
 import { useMemo, useState } from "react";
@@ -223,7 +224,7 @@ export default function MemberPickerModal({
                   border: "none", background: "transparent", cursor: "pointer", textAlign: "left",
                 }}
               >
-                <span style={{ fontSize: 9, color: "var(--muted)" }}>{isCollapsed ? "▸" : "▾"}</span>
+                <ChevronIcon direction={isCollapsed ? "right" : "down"} size={12} className="shrink-0 text-[var(--muted)]" />
                 <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", color: "var(--muted)", textTransform: "uppercase" }}>
                   {dept.name}
                 </span>
