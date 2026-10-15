@@ -1,3 +1,4 @@
+import type { Capability, MmpClient } from "@mmp/client";
 import { saveModelSelection } from "@/lib/agent/runtime/model-settings-db";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import sharp from "sharp";
@@ -231,6 +232,50 @@ describe("agent-runtime service", () => {
     expect(list.find((s) => s.key === key)).toMatchObject({ title: "你好", status: "done" });
     // delta 行已清理，只剩终态
     expect((await readEventsSince(key, 0)).map((r) => r.line.type)).not.toContain("delta");
+  });
+
+  it("新生成的音频在同轮温启改名工具，无需确认且卡片、后续推理使用新名称", async () => {
+    const key = newKey(false);
+    const capability: Capability = {
+      id: "test.generate", purpose: "test.generate", visibility: "public", description: "生成测试音频",
+      tiers: [{ tier: "cpu", engine: "test", engine_version: "1", cost: "low" }], input: { fields: [{ name: "prompt", kind: "text", required: true, schema: { type: "string" } }] },
+      output: { agent_context: "none", fields: [{ name: "audio", kind: "media", required: true,
+        produces: ["audio/flac"], cardinality: { min: 1, max: 1 } }] },
+    };
+    runtimeOverrides.mmpClient = { capabilities: async () => ({ protocol_version: "3.1", capabilities: [{ capability, nodes: ["n1"] }] }) } as unknown as MmpClient;
+    let attachmentId = "";
+    const bridge = await import("@/lib/agent/tools/mmp-capability-tools");
+    const generate = vi.spyOn(bridge, "runCapability").mockImplementation(async (input) => {
+      const pending = await createPendingAttachment({
+        sessionId: key, userId, fileName: "audio.flac", mimeType: "audio/flac", mediaKind: "audio", fileSize: 12,
+        source: { kind: "mmp", runId: input.runId, toolCallId: input.toolCallId, outputName: "audio", outputIndex: 0, metadata: {} },
+      });
+      const attachment = (await markAttachmentReady(pending.id, key, userId, 12))!;
+      attachmentId = attachment.id;
+      return { text: `attachmentId=${attachment.id}; audio.flac`, attachments: [attachment], media: [] };
+    });
+    const renameArgs = { attachmentId: "", fileName: "开场音效" };
+    const { streamFn, seen } = scripted([
+      { calls: [{ type: "toolCall", id: "generate-audio", name: exposedName("mmp.test.generate"), arguments: { prompt: "开场" } }] },
+      { before: () => { renameArgs.attachmentId = attachmentId; }, calls: [{ type: "toolCall", id: "rename-generated-audio", name: exposedName("my.attachment_rename"), arguments: renameArgs }] },
+      { text: "已改名为开场音效.flac。" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    try {
+      await startRun({ sessionId: key, userId, message: "生成测试音频" });
+      const lines = await collectUntilTerminal(key);
+      await waitForIdle(key);
+      expect(seen[0].tools).not.toContain(exposedName("my.attachment_rename"));
+      expect(seen[1].tools).toContain(exposedName("my.attachment_rename"));
+      expect(JSON.stringify(seen[2].messages)).toContain("开场音效.flac");
+      expect(lines.some((line) => line.type === "approval")).toBe(false);
+      expect(lines).toContainEqual(expect.objectContaining({ type: "mutation", scope: "attachment", ids: [attachmentId] }));
+      expect(await getHistory(key)).toContainEqual(expect.objectContaining({ role: "tool", id: "generate-audio",
+        attachments: [expect.objectContaining({ id: attachmentId, fileName: "开场音效.flac" })] }));
+    } finally {
+      generate.mockRestore();
+      runtimeOverrides.mmpClient = null;
+    }
   });
 
   it("媒体附件在首次模型调用前按 MMP registry 自动预检，agent context 与原件引用同时进入消息", async () => {

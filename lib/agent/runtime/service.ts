@@ -629,7 +629,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     warmAttachmentsImpl = async (attachmentIds) => {
         if (!attachmentIds.length || !mmpSurface.capabilities.length) return;
         const attachments = await getReadyAttachments(attachmentIds, sessionId, userId);
-        const warmed = mmpAttachmentToolNamesFor(mmpSurface.capabilities, attachments);
+        const warmed = ["my.attachment_rename", ...mmpAttachmentToolNamesFor(mmpSurface.capabilities, attachments)];
         for (const name of warmed) {
           activeToolNames.add(exposedName(name));
         }

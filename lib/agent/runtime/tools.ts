@@ -215,6 +215,21 @@ export const DEFS: ToolDefinition[] = [
     } as Parameters<typeof import("./model-read").readModelMedia>[1], callId),
   },
   {
+    mcpName: "my.attachment_rename",
+    description: "为当前会话的有效临时附件改名（EN: rename attachment file）。适用于用户上传、网页下载和模型生成的附件；生成结果应根据用途起有意义的名称，避免只保留 audio.flac 等通用名称。只改名称，保留扩展名，不转换格式；已存为资产的附件请使用资产改名工具。",
+    parameters: Type.Object({
+      attachmentId: Type.String({ description: "当前会话临时附件 id" }),
+      fileName: Type.String({ minLength: 1, maxLength: 240, description: "新文件名，保留原扩展名；省略扩展名时自动补上" }),
+    }),
+    readOnly: false,
+    reversibleNoConfirm: true,
+    mutates: (args) => ({ scope: "attachment", action: "updated", ids: [String(args.attachmentId)] }),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/attachment-tools")).renameSessionAttachment({
+      userId: ctx.userId, sessionId: ctx.run?.sessionId ?? null,
+      attachmentId: String(args.attachmentId), fileName: String(args.fileName),
+    }),
+  },
+  {
     mcpName: "my.attachment_release",
     description: "释放当前会话中本轮已经成功处理、且确认不再需要的临时附件。释放后有 24 小时恢复期；不要释放仍可能在后续步骤使用的附件。",
     parameters: Type.Object({ attachmentId: Type.String({ description: "本轮已成功处理的临时附件 id" }) }),

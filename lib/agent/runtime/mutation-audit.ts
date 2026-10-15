@@ -181,7 +181,7 @@ const READERS: Record<string, ScopeReader> = {
          WHERE a.id = ANY($1::text[]) AND s.user_id = $2`, [ids, userId],
       );
       return new Map(rows.rows.map((row) => [row.id, {
-        label: row.file_name, status: row.status, expiresAt: row.expires_at.toISOString(),
+        label: row.file_name, fileName: row.file_name, status: row.status, expiresAt: row.expires_at.toISOString(),
         releaseUntil: row.release_until?.toISOString() ?? null, promotedAssetId: row.promoted_asset_id,
       }]));
     },
@@ -475,6 +475,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "instructions.personal": "个人 AI 指令", "instructions.production": "制作 AI 指令",
 };
 const FIELD_LABELS: Record<string, string> = {
+  fileName: "文件名",
   body: "正文", title: "标题", parentId: "位置", tags: "标签", isPublic: "全员可见", deptShares: "部门分享", people: "分享给个人",
   name: "名称", synopsis: "梗概", actionLine: "行动线", music: "音乐", stageNotes: "舞台呈现", expectedDuration: "时长",
   isAggregate: "聚合/单人", memberIds: "聚合成员", gender: "性别", roleType: "类型", biography: "小传",

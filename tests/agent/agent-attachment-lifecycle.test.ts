@@ -6,14 +6,16 @@ import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import {
   createPendingAttachment,
   getAttachmentUsage,
+  getAttachmentForSession,
+  renameAttachmentForSession,
   markAttachmentReady,
   recordAttachmentAccess,
   restoreReleasedAttachment,
 } from "@/lib/agent/attachment-db";
-import { releaseSessionAttachment, saveSessionAttachmentAsAsset } from "@/lib/agent/tools/attachment-tools";
+import { renameSessionAttachment, releaseSessionAttachment, saveSessionAttachmentAsAsset } from "@/lib/agent/tools/attachment-tools";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
 import { deleteSessionRows } from "@/lib/agent/runtime/service";
-import { DEFS } from "@/lib/agent/runtime/tools";
+import { buildTools, DEFS } from "@/lib/agent/runtime/tools";
 import { cleanupProduction, makeProduction, shortId } from "../_support/factories";
 import { saveWebFetchedAttachment } from "@/lib/agent/tools/web-fetch-tools";
 
@@ -44,16 +46,71 @@ afterAll(async () => {
   await cleanupProduction(prodId).catch(() => {});
 });
 
-async function readyAttachment(productionId?: string) {
+async function readyAttachment(productionId?: string, fileName = "参考资料.txt") {
   const sessionId = createNewSessionKey(userId, productionId);
   sessionIds.push(sessionId);
   const attachment = await createPendingAttachment({
-    sessionId, userId, fileName: "参考资料.txt", mimeType: "text/plain", fileSize: 12,
+    sessionId, userId, fileName, mimeType: fileName.endsWith(".flac") ? "audio/flac" : "text/plain", fileSize: 12,
   });
   return { sessionId, attachment: (await markAttachmentReady(attachment.id, sessionId, userId, 12))! };
 }
 
 describe("附件生命周期（#772）", () => {
+  it("audio.flac 可通过真工具命名、恢复原名，并留下文件名变化审计", async () => {
+    const { sessionId, attachment } = await readyAttachment(undefined, "audio.flac");
+    const runId = `ar_rename_${shortId()}`;
+    await getPool().query(`INSERT INTO agent_run (id, session_id) VALUES ($1, $2)`, [runId, sessionId]);
+    const run = { runId, sessionId, signal: new AbortController().signal, publish: () => {},
+      setStatus: async () => {}, isDetached: () => false };
+    const tool = buildTools({ userId, productionId: null, run }).find((t) => t.mcpName === "my.attachment_rename")!;
+    await tool.execute("rename-audio", { attachmentId: attachment.id, fileName: "开场音效" }, run.signal);
+    expect(await getAttachmentForSession(attachment.id, sessionId, userId)).toMatchObject({
+      fileName: "开场音效.flac", r2Key: attachment.r2Key, mimeType: "audio/flac", fileSize: 12, status: "ready",
+    });
+    const block = await buildAttachmentLifecycleBlock({ sessionId, userId, productionId: null });
+    expect(block.text).toContain("开场音效.flac");
+    const audit = await getPool().query(`SELECT changes FROM agent_mutation WHERE run_id = $1`, [runId]);
+    expect(audit.rows).toEqual([{ changes: [{ field: "fileName", from: "audio.flac", to: "开场音效.flac" }] }]);
+    await tool.execute("rename-same", { attachmentId: attachment.id, fileName: "开场音效.FLAC" }, run.signal);
+    expect((await getPool().query(`SELECT id FROM agent_mutation WHERE run_id = $1`, [runId])).rows).toHaveLength(1);
+    await tool.execute("rename-back", { attachmentId: attachment.id, fileName: "audio.flac" }, run.signal);
+    expect((await getAttachmentForSession(attachment.id, sessionId, userId))?.fileName).toBe("audio.flac");
+  });
+
+  it("拒绝跨用户、跨会话和无会话的改名，数据库写入同样检查归属", async () => {
+    const { sessionId, attachment } = await readyAttachment();
+    const otherSession = createNewSessionKey(userId);
+    const base = { userId, sessionId, attachmentId: attachment.id, fileName: "改名.txt" };
+    await expect(renameSessionAttachment({ ...base, userId: "00000000-0000-0000-0000-000000000099" })).rejects.toThrow("不属于当前会话");
+    await expect(renameSessionAttachment({ ...base, sessionId: otherSession })).rejects.toThrow("不属于当前会话");
+    await expect(renameSessionAttachment({ ...base, sessionId: null })).rejects.toThrow("没有会话上下文");
+    expect(await renameAttachmentForSession(attachment.id, otherSession, userId, "错误.txt")).toBeNull();
+    expect(await renameAttachmentForSession(attachment.id, sessionId, "00000000-0000-0000-0000-000000000099", "错误.txt")).toBeNull();
+    expect((await getAttachmentForSession(attachment.id, sessionId, userId))?.fileName).toBe(attachment.fileName);
+  });
+
+  it.each(["", "   ", ".", "..", "../音效.flac", "目录\\音效.flac", "音效\n.flac", "音效.mp3", "长".repeat(241)])("拒绝无效文件名 %s", async (fileName) => {
+    const { sessionId, attachment } = await readyAttachment(undefined, "audio.flac");
+    await expect(renameSessionAttachment({ userId, sessionId, attachmentId: attachment.id, fileName })).rejects.toThrow();
+    expect((await getAttachmentForSession(attachment.id, sessionId, userId))?.fileName).toBe("audio.flac");
+  });
+
+  it.each(["pending", "released", "expired", "deleting", "promoted", "timed-out"])("状态 %s 不可改名，包含读后状态变化的写入检查", async (status) => {
+    const { sessionId, attachment } = await readyAttachment();
+    if (status === "timed-out") await getPool().query(`UPDATE agent_session_attachment SET expires_at = now() - interval '1 second' WHERE id = $1`, [attachment.id]);
+    else await getPool().query(`UPDATE agent_session_attachment SET status = $2 WHERE id = $1`, [attachment.id, status]);
+    await expect(renameSessionAttachment({ userId, sessionId, attachmentId: attachment.id, fileName: "改名.txt" }))
+      .rejects.toThrow(status === "promoted" ? "资产改名工具" : "无法改名");
+    expect(await renameAttachmentForSession(attachment.id, sessionId, userId, "改名.txt")).toBeNull();
+  });
+
+  it("改名工具接入写审计、免确认且默认禁止无人值守", () => {
+    const rename = DEFS.find((item) => item.mcpName === "my.attachment_rename");
+    expect(rename).toMatchObject({ readOnly: false, reversibleNoConfirm: true });
+    expect(rename?.unattended).not.toBe("allow");
+    expect(rename?.mutates?.({ attachmentId: "aat_test" })).toEqual({ scope: "attachment", action: "updated", ids: ["aat_test"] });
+  });
+
   it("MMP 按实际描述预占，核验后登记来源和实际配额", async () => {
     const sessionId = createNewSessionKey(userId); sessionIds.push(sessionId);
     const pending = await createPendingAttachment({ sessionId, userId, fileName: "result-2.flac", mimeType: "audio/flac", mediaKind: "audio", fileSize: 512 });
@@ -184,7 +241,7 @@ describe("附件生命周期（#772）", () => {
     const personal = await readyAttachment();
     const personalBlock = await buildAttachmentLifecycleBlock({ sessionId: personal.sessionId, userId, productionId: null });
     expect(personalBlock.text).toContain("<clickin-attachment-lifecycle>");
-    expect(personalBlock.toolNames).toEqual(["my.attachment_release"]);
+    expect(personalBlock.toolNames).toEqual(["my.attachment_rename", "my.attachment_release"]);
     const production = await readyAttachment(prodId);
     const productionBlock = await buildAttachmentLifecycleBlock({ sessionId: production.sessionId, userId, productionId: prodId });
     expect(productionBlock.toolNames).toContain("production.attachment_save_as_asset");

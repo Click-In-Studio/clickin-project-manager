@@ -64,7 +64,9 @@ function makeTool(ctx: ToolContext, capability: Capability): RuntimeToolDef {
     mcpName,
     name: exposedName(mcpName),
     label: description,
-    description: `${description}。输入与限制来自在线 capability；输出：${outputDescription(capability)}；可用档位：${tiers}。`,
+    description: `${description}。输入与限制来自在线 capability；输出：${outputDescription(capability)}；可用档位：${tiers}。`
+      + (capability.output.fields.some((field) => field.kind === "media")
+        ? "生成媒体附件后，应调用 my.attachment_rename 按内容与用途命名，保留原扩展名，避免交付一批同名文件。" : ""),
     parameters: capabilityParameters(capability),
     readOnly: true,
     execute: async (toolCallId, raw, _signal, onUpdate) => {

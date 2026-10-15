@@ -6,6 +6,7 @@ import { getPool } from "@/lib/pg";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
 import { runAttachmentGcBatch } from "@/lib/agent/attachment-db";
+import { renameSessionAttachment } from "@/lib/agent/tools/attachment-tools";
 import { createPendingAttachment } from "@/lib/agent/attachment-db";
 import { newRunId } from "@/lib/agent/runtime/ids";
 import { RUNNER_OWNER } from "@/lib/agent/runtime/config";
@@ -104,6 +105,7 @@ describe("会话临时附件路由（#704）", () => {
     const first = await (await POST(req("POST", { sessionKey: key, fileName: "generated.png", mimeType: "image/png", mediaKind: "image", fileSize: 3 }))).json();
     headMock.mockResolvedValueOnce({ size: 3, contentType: "image/png" });
     await PATCH(req("PATCH", { sessionKey: key, attachmentId: first.attachment.id }));
+    await renameSessionAttachment({ userId, sessionId: key, attachmentId: first.attachment.id, fileName: "开场气氛图.png" });
     const { GET } = await import("@/app/api/agent/attachments/[id]/route");
     const ctx = { params: Promise.resolve({ id: first.attachment.id }) };
     expect((await GET(new NextRequest(`http://localhost/api/agent/attachments/${first.attachment.id}?sessionKey=${encodeURIComponent(key)}`), ctx)).status).toBe(401);
@@ -116,6 +118,13 @@ describe("会话临时附件路由（#704）", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).toContain(encodeURIComponent("开场气氛图.png"));
+    const download = await GET(new NextRequest(`http://localhost/api/agent/attachments/${first.attachment.id}?sessionKey=${encodeURIComponent(key)}&download=1`, { headers: { cookie } }), ctx);
+    expect(download.headers.get("content-disposition")).toContain(`attachment; filename=`);
+    expect(download.headers.get("content-disposition")).toContain(encodeURIComponent("开场气氛图.png"));
+    const { GET: list } = await import("@/app/api/agent/attachments/route");
+    const listed = await list(new NextRequest(`http://localhost/api/agent/attachments?sessionKey=${encodeURIComponent(key)}`, { headers: { cookie } }));
+    expect((await listed.json()).attachments).toEqual(expect.arrayContaining([expect.objectContaining({ id: first.attachment.id, fileName: "开场气氛图.png" })]));
     expect(streamMock).toHaveBeenCalledWith(first.attachment.r2Key, null);
   });
 
