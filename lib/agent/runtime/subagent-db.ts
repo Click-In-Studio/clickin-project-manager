@@ -4,7 +4,6 @@ import { resolveModel } from "./config";
 import { getPool } from "@/lib/pg";
 import { newRunId, newSessionId } from "./ids";
 import { RUNNER_OWNER } from "./config";
-import { RUN_CREDIT_HARD_CAP, creditsFromUsd } from "@/lib/account/plan";
 import type { SubagentSource, SubagentView } from "./subagent-types";
 
 const ACTIVE = "('running','compacting','awaiting_approval','awaiting_answer')";
@@ -179,10 +178,9 @@ export async function claimSubagents(): Promise<SubagentJob[]> {
     const claimed = await client.query<SubagentJob>(
       `SELECT r.*,s.parent_session_id,c.task,c.completion_criteria,c.context_request,s.user_id,s.production_id
        FROM agent_run r JOIN agent_subagent c ON c.id=r.subagent_id
-       JOIN agent_session s ON s.id=c.id JOIN agent_run budget ON budget.id=r.budget_run_id
-       WHERE r.status='queued' AND NOT c.stopped AND budget.task_credits <= $1
+       JOIN agent_session s ON s.id=c.id
+       WHERE r.status='queued' AND NOT c.stopped
        ORDER BY r.started_at,r.id FOR UPDATE OF r`,
-      [RUN_CREDIT_HARD_CAP],
     );
     const result: SubagentJob[] = [];
     for (const row of claimed.rows) {
@@ -289,22 +287,6 @@ export async function claimChildOrphans(
     [RUNNER_OWNER, orphanAfterMs],
   );
   return pendingChildJobs();
-}
-
-/** 所有模型调用共用根任务预算；数据库原子累加，避免并发子任务各烧一份硬顶。 */
-export async function addTaskCost(
-  runId: string,
-  usd: number,
-): Promise<boolean> {
-  const result = await getPool().query<{ task_credits: string }>(
-    `UPDATE agent_run SET task_credits=task_credits+$2 WHERE id=(
-       SELECT COALESCE(budget_run_id,id) FROM agent_run WHERE id=$1) RETURNING task_credits`,
-    [runId, creditsFromUsd(usd)],
-  );
-  return (
-    !!result.rowCount &&
-    Number(result.rows[0].task_credits) <= RUN_CREDIT_HARD_CAP
-  );
 }
 
 export async function finishSubagent(

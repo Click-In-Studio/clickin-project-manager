@@ -24,13 +24,13 @@ export async function observeRetrieval(kind: Extract<ObservationKind, "tool_retr
   const started = performance.now();
   return { finish: (data: object) => finishObservation(id, performance.now() - started, data) };
 }
-export async function observeModelRequest(model: Model, context: Context, purpose: "chat" | "compaction", admissionMs: number, maxTokens?: number) {
+export async function observeModelRequest(model: Model, context: Context, purpose: "chat" | "compaction", admissionMs: number, maxTokens?: number, costBudget?: object) {
   const scope = storage.getStore();
   const names = context.tools?.map(t => t.name) ?? [];
   const sources = Object.fromEntries(Object.entries(scope?.sources ?? {}).map(([source, tools]) => [source, [...new Set(tools.filter(n => names.includes(n)))]]));
   sources.unattributed = names.filter(n => !Object.values(sources).some(tools => tools.includes(n)));
   const id = await startObservation("model_request", scope?.runId ?? null, {
-    purpose, model: model.id, provider: model.provider, contextWindow: model.contextWindow,
+    purpose, ...(costBudget ? { costBudget } : {}), model: model.id, provider: model.provider, contextWindow: model.contextWindow,
     maxOutputTokens: requestOutputTokens(model, { maxTokens }), effectiveContextWindow: model.contextTokens ?? model.contextWindow,
     toolSchemaChars: JSON.stringify(context.tools ?? []).length, contextEstimate: estimateContextTokens(context.messages),
     requestBudget: estimateRequestBudget(model, context, { maxTokens }),

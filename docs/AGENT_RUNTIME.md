@@ -46,7 +46,7 @@
 | `AGENT_DRAIN_TIMEOUT_MS` | 默认 600000 | 排水上限 |
 | `AGENT_HEARTBEAT_MS` / `AGENT_ORPHAN_AFTER_MS` | 默认 5000 / 30000 | 租约心跳 / 判孤儿 |
 | `AGENT_APPROVAL_TTL_MS` / `AGENT_QUESTION_TTL_MS` | 默认 10min / 15min | 审批 / 提问过期 |
-| `AI_RUN_CREDIT_HARD_CAP` | 默认 200000 | 单个 run 的成本硬顶（credit），防工具死循环——不是限流，豁免档同样受它约束 |
+| `AI_TASK_COST_LIMIT_USD` | 默认 10 | 根任务最终美元上限；按模型和冷缓存请求估算 12 次往返的任务预算，主、子任务及压缩共用，请求前预留、返回后结算；豁免档同样适用 |
 | `AGENT_SCHEDULE_TICK_MS` | 默认 60000 | 定时任务节拍（认领到期任务）；跟执行者走：runner 或 in-process 的 next |
 
 ### 冷层：召回 + `find_tools` 兜底
@@ -140,7 +140,7 @@ OpenClaw 网关已退役（2026-08-29）：`systemctl disable --now openclaw`，
 - **时间表**（`schedule-cron.ts`，形状照抄 OpenClaw cron 工具）：`{kind:"at",at}` 一次性 / `{kind:"cron",expr,tz}`（expr 是 tz 的
   **墙钟时间**，默认 `Asia/Shanghai`，绝不换算 UTC）/ `{kind:"every",everyMs}`。成本闸在 `lib/account/plan.ts` 的 `SCHEDULE_LIMITS`
   （every ≥ 1h、cron ≤ 24 次/日、at ≤ 1 年）+ 按用户档位的活跃任务数（`maxActiveSchedules`：free 3 / creator 20 / internal 无限）。
-  额度照走 `assertAiQuota`（项目任务记 owner 头上），单 run 仍受 `AI_RUN_CREDIT_HARD_CAP`。
+  额度照走 `assertAiQuota`（项目任务记 owner 头上），主、子任务共享请求预算并受 `AI_TASK_COST_LIMIT_USD` 约束。
 - **权限实时查、不快照**：触发出的 run 与普通会话同构，工具内 `hasEffectiveGrant` 照判。触发前三道前置门（创建者账号在 /
   制作成员 active 且未归档 / 制作档位有 AI）——终局性失败置 `paused` + `paused_reason` + 通知；额度用尽等暂时性失败跳过本次并通知。
   overlap（上次 run 还在跑）= 跳过；停机漏掉的触发只补一次。
@@ -173,7 +173,7 @@ provider 层逐条算出 `usage.cost`，`billing.ts` 折成美元、`lib/account
 
 **判定点**：`startRun` 进 harness **之前**判一次（`assertAiQuota`），超限抛 429、不进循环。
 **run 内不打断**——轮内超限打断等于把一次已经花掉的调用扔掉；代价是最后一次会扣穿（负 credit），
-透支上限由 `AI_RUN_CREDIT_HARD_CAP` 封顶。孤儿接管/审批后续跑**不再判**（那是已经开始的任务）。
+每次模型请求（含摘要）按完整输入未命中缓存、请求输出上限估算并原子预留成本；任务预算随上下文需求增长，最多覆盖 12 次当前规模的冷缓存往返，并受 `AI_TASK_COST_LIMIT_USD` 最终上限约束。返回 usage 后只结算一次，失败或重启后未确认的请求保守占用预算。孤儿接管与审批后续跑继续使用持久预算，余额不足在下一次请求前报错，不中断正在执行的工具。工具循环按本轮已完成调用的参数和结果摘要独立检测：相同步骤连续四次，或 2–4 步循环连续三次且结果不变时停止；结果变化、分页参数变化与新用户输入不沿用旧循环。
 
 **账本**：`ai_usage.billed_credits` + `paid_from`。窗口聚合只 SUM `paid_from='quota'`；
 `extra` 走 `ai_credit_grant.remaining` 减法；`exempt` 两边都不进（豁免 ≠ 不记账）。

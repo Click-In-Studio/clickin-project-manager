@@ -4007,3 +4007,12 @@ CREATE TABLE IF NOT EXISTS agent_observation (
 );
 CREATE INDEX IF NOT EXISTS agent_observation_run_idx ON agent_observation(run_id,started_at);
 CREATE INDEX IF NOT EXISTS agent_observation_kind_idx ON agent_observation(kind,started_at);
+
+-- 模型请求成本预留与持久循环检测。
+ALTER TABLE agent_run ADD COLUMN task_budget_credits BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_admission ADD COLUMN reserved_credits BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_admission ADD COLUMN charged_credits BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_tool_operation ADD COLUMN progress_key TEXT;
+ALTER TABLE agent_tool_operation ADD COLUMN input_entry_id TEXT;
+ALTER TABLE agent_tool_operation ADD COLUMN completed_at TIMESTAMPTZ;
+CREATE INDEX agent_tool_operation_progress_idx ON agent_tool_operation(run_id,completed_at DESC) WHERE progress_key IS NOT NULL;

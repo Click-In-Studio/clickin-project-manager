@@ -164,7 +164,7 @@ describe("导入指引", () => {
     for (const kw of [
       "开工申报", "分诊", "丢弃也是一种裁决", "判例", "annotation", "泄压阀",
       "checkpoint", "复用优先于新建", "插入", "不是指令", "攒批",
-      "一个回合只做一个批次", // 单回合成本硬顶（RUN_CREDIT_HARD_CAP）的对齐纪律，2026-09-07 实测触顶后加
+      "一个回合只做一个批次", // 任务用量预算之外，批次边界仍是与用户合作的独立纪律
     ]) {
       expect(DOC_IMPORT_GUIDE, `guide 应包含「${kw}」`).toContain(kw);
     }

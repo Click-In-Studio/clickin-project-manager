@@ -205,7 +205,6 @@ async function executeBody(
   let detached = false;
   let requested = job.context_request;
   let timedOut = false;
-  let costExceeded = false;
   let toolCalls = 0;
   let result = job.result ?? "";
   let status = "completed";
@@ -300,16 +299,9 @@ async function executeBody(
         await db.signalSubagentState(job.parent_session_id);
       },
       onUsage: async (cost) => {
-        if (!(await recordChildUsage(job, `acu_${newRunId()}`, {
-          input: cost.tokens,
-          output: 0,
-          cacheRead: 0,
-          usd: cost.usd,
-          compaction: true,
-        }))) {
-          costExceeded = true;
-          abort.abort();
-        }
+        await recordChildUsage(job, `acu_${newRunId()}`, {
+          input: cost.tokens, output: 0, cacheRead: 0, usd: cost.usd, compaction: true,
+        });
       },
     });
   };
@@ -380,7 +372,7 @@ async function executeBody(
         block: true,
         reason: "上下文请求已提交，请结束本轮等待主脑补给",
       };
-    if (++toolCalls > TOOL_CAP || costExceeded) {
+    if (++toolCalls > TOOL_CAP) {
       abort.abort();
       void harness.abort();
       return { block: true, reason: "子任务已达到执行上限" };
@@ -395,21 +387,11 @@ async function executeBody(
         .filter((p) => p.type === "text")
         .map((p) => (p as { text: string }).text)
         .join("\n") || result;
-    costTail = costTail.then(async () => {
-      if (!(await checkpointChildUsage(job))) {
-        costExceeded = true;
-        abort.abort();
-        void harness.abort();
-        void (await import("./service"))
-          .abortRun(job.parent_session_id, "任务成本硬顶触发")
-          .catch((e) => console.error("[subagent] 成本中止失败", e));
-      }
-    });
+    costTail = costTail.then(() => checkpointChildUsage(job));
   });
   try {
     if (abort.signal.aborted) throw new DOMException("Aborted", "AbortError");
-    costExceeded = !(await checkpointChildUsage(job));
-    if (costExceeded) throw new Error("任务成本硬顶触发");
+    await checkpointChildUsage(job);
     const entries = await storage.getEntries();
     const entryId = `ain_child_${job.id}`;
     const present = entries.some((e) => e.id === entryId);
@@ -464,25 +446,21 @@ async function executeBody(
     const failure = assistantFailureReason(last);
     if (failure) throw new Error(failure);
     if (abort.signal.aborted) {
-      status = timedOut || costExceeded ? "failed" : "aborted";
+      status = timedOut ? "failed" : "aborted";
       error = timedOut
         ? "子任务执行超时"
-        : costExceeded
-          ? "任务成本硬顶触发"
-          : "用户停止";
+        : "用户停止";
     }
   } catch (err) {
     status =
-      timedOut || costExceeded
+      timedOut
         ? "failed"
         : abort.signal.aborted
           ? "aborted"
           : "failed";
     error = timedOut
       ? "子任务执行超时"
-      : costExceeded
-        ? "任务成本硬顶触发"
-        : err instanceof Error
+      : err instanceof Error
           ? err.message
           : String(err);
   } finally {

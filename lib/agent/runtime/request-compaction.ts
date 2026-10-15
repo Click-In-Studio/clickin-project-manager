@@ -1,3 +1,4 @@
+import { budgetedComplete } from "./admission";
 import { observeCompactionCheck, observeModelRequest } from "./observation";
 import type {
   Context,
@@ -248,19 +249,17 @@ export async function compactRequestContext(
           throw new Error(
             "摘要请求本身超过预算；无法完整读取待压缩证据，未提交摘要",
           );
-        const observation = await observeModelRequest(
-          model,
-          request,
-          "compaction",
-          0,
-          summaryOptions.maxTokens,
-        );
-        const message = await input.completeSimple(
-          model,
-          request,
-          summaryOptions,
-        );
-        await observation.finish(message, message.stopReason);
+        const message = await budgetedComplete(model, request, summaryOptions, async () => {
+          const observation = await observeModelRequest(model, request, "compaction", 0, summaryOptions.maxTokens);
+          try {
+            const result = await input.completeSimple(model, request, summaryOptions);
+            await observation.finish(result, result.stopReason);
+            return result;
+          } catch (error) {
+            await observation.finish(undefined, "error");
+            throw error;
+          }
+        });
         usd += usdOfUsage(message.usage, model);
         cacheRead += message.usage.cacheRead;
         cacheWrite += message.usage.cacheWrite;

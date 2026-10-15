@@ -150,6 +150,6 @@ describe("所有来源共享资源准入", () => {
     for (const file of ["ocr.ts","capability-runner.ts","attachment-preflight.ts"]) expect(readFileSync(`lib/mmp/${file}`,"utf8")).toContain("admittedMmpRun(client,");
     const admission = readFileSync("lib/agent/runtime/admission.ts","utf8");
     expect(admission).toContain('"llm", signal');
-    expect(admission).toContain("await prepareRequest(");
+    expect(admission).toContain("modelTicket: ticket }, () => prepareRequest(");
   });
 });
