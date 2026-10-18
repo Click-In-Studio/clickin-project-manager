@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const editor = readFileSync("components/script/ScriptEditor.tsx", "utf8");
@@ -6,8 +6,9 @@ const block = readFileSync("components/script/script-editor/ScriptBlock.tsx", "u
 const page = readFileSync("app/production/[id]/script/page.tsx", "utf8");
 
 describe("ScriptEditor 个人只读门接线", () => {
-  it("权限、个人只读、排练共同收敛为内容写门", () => {
-    expect(editor).toContain('const isContentLocked = recoveryLocked || !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;');
+  it("权限与个人模式共同决定唯一只读状态与内容写门", () => {
+    expect(editor).toContain('const isContentLocked = recoveryLocked || !personalModeReady || isReadMode;');
+    expect(editor).toContain('const isReadMode = effectivePersonalMode === "read";');
     expect(editor).toContain("const baseCanEdit = baseCanEditText || baseCanEditMetadata || baseCanEditTextLayout || canEditRehearsalMark;");
     expect(editor).toContain("const canEditText = baseCanEditText && !isContentLocked;");
     expect(editor).toContain("const canEditMetadata = baseCanEditMetadata && !isContentLocked;");
@@ -20,27 +21,28 @@ describe("ScriptEditor 个人只读门接线", () => {
     expect(editor).not.toContain("useState<ScriptPersonalMode>(() => readScriptPersonalMode");
   });
 
-  it("排练与显示 cookie 由服务端解析后作为同一份首帧初值下发", () => {
+  it("模式仅由按剧本 localStorage 恢复，旧排练 cookie 不再驱动模式", () => {
     expect(page).toContain("initialDisplay={parseDisplayCookie(cookieStore.get(DISPLAY_COOKIE)?.value)}");
-    expect(editor).toContain("useState(initialDisplay.rehearsalMode)");
-    expect(editor).toContain("useDisplaySettings({ maxLineIndexText, initialDisplay })");
-    expect(editor).not.toContain("readDisplayCookie().rehearsalMode");
+    expect(editor).not.toMatch(/rehearsalMode|setRehearsalMode|pendingRehearsalMode/);
+    expect(editor).toContain("selectedMode={effectivePersonalMode}");
+    expect(existsSync("components/script/script-editor/RehearsalModeDialog.tsx")).toBe(false);
   });
 
-  it("切只读时持续冲刷保存期间的新输入，不能只验证请求前的旧快照", () => {
+  it("切换前冲刷未保存内容，并在只读版式切换后恢复滚动锚点", () => {
     expect(editor).toContain("const flushPendingPatch = sync.flush;");
-    expect(editor).toContain("flushPendingPatchRef.current = flushPendingPatch");
     expect(editor).toContain("useScriptSync(script, {");
+    expect(editor).toContain("captureScrollAnchor: captureVirtualScrollAnchor");
+    expect(editor).toContain("preserveScrollAnchor: (anchor) => { pendingModeScrollAnchorRef.current = anchor; }");
+    expect(editor).toContain("[isReadMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]");
   });
 
-  it("从编辑进入排练前也必须冲刷待保存内容，失败时保持原模式", () => {
-    expect(editor).toContain('pendingRehearsalMode && personalMode === "edit" && !await flushPendingPatchRef.current()');
-    expect(editor).toContain('setRehearsalModeSwitchError("尚有内容未保存，已保留编辑模式，请稍后重试。")');
-  });
-
-  it("普通只读不复用排练版式，拖拽写入口也受编辑门控制", () => {
-    expect(editor).toContain("reserveRehearsalGap={rehearsalMode}");
-    expect(editor).toContain("readOnlyRehearsalMode={rehearsalMode}");
+  it("只读完整沿用排练版式，拖拽仍受编辑门控制", () => {
+    expect(editor).toContain("reserveRehearsalGap={isReadMode}");
+    expect(editor).toContain("readOnlyMode={isReadMode}");
+    expect(editor).toContain("isReadMode && shouldShowSceneEndGap(prev, block)");
+    expect(editor).toContain("isReadMode && shouldShowCharacterGap(");
+    expect(editor).toContain("readOnlyScene={isReadMode && display.rehearsalBlockScenes");
+    expect(editor).toContain("const maxVisibleAvatars = isReadMode");
     expect(block).toContain("draggable={canEditText && !isReorderLocked}");
     expect(block).toContain('canEditText ? "" : "sm:hidden"');
   });

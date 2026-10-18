@@ -5,7 +5,6 @@ export type DisplaySettings = {
   pageBreaks: boolean;
   lineNumbers: boolean;
   blockTags: boolean;
-  rehearsalMode: boolean;
   rehearsalBlockScenes: boolean;
   sceneDetail: boolean;
 };
@@ -13,7 +12,6 @@ export const DEFAULT_DISPLAY: DisplaySettings = {
   pageBreaks: true,
   lineNumbers: true,
   blockTags: true,
-  rehearsalMode: false,
   rehearsalBlockScenes: true,
   sceneDetail: true,
 };
@@ -22,7 +20,14 @@ export const CHARACTER_FOCUS_STORAGE_PREFIX = "script_character_focus";
 export function parseDisplayCookie(raw: string | null | undefined): DisplaySettings {
   if (!raw) return DEFAULT_DISPLAY;
   try {
-    return { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(raw)) };
+    const parsed = { ...DEFAULT_DISPLAY, ...JSON.parse(decodeURIComponent(raw)) };
+    return {
+      pageBreaks: parsed.pageBreaks,
+      lineNumbers: parsed.lineNumbers,
+      blockTags: parsed.blockTags,
+      rehearsalBlockScenes: parsed.rehearsalBlockScenes,
+      sceneDetail: parsed.sceneDetail,
+    };
   } catch {
     return DEFAULT_DISPLAY;
   }

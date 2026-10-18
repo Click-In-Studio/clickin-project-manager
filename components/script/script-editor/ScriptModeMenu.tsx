@@ -19,7 +19,7 @@ export default function ScriptModeMenu({
 }: {
   open: boolean;
   currentLabel: string;
-  selectedMode: ScriptPersonalMode | null;
+  selectedMode: ScriptPersonalMode;
   canSelectEdit: boolean;
   pending: boolean;
   error: string;

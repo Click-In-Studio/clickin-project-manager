@@ -49,14 +49,13 @@ import ScenePanel from "./script-editor/ScenePanel";
 import ScriptBlock from "./script-editor/ScriptBlock";
 import ScriptMarkerRow, { type ScriptMarkerNode } from "./script-editor/ScriptMarkerRow";
 import ScriptModeMenu from "./script-editor/ScriptModeMenu";
-import RehearsalModeDialog from "./script-editor/RehearsalModeDialog";
 import ScriptSceneDetailRail from "./script-editor/ScriptSceneDetailRail";
 import ScriptToolbarMenuController, { type ScriptToolbarOpenMenu } from "./script-editor/ScriptToolbarMenuController";
 import SideBlockPanel from "./script-editor/SideBlockPanel";
 import TableOfContents from "./script-editor/TableOfContents";
 import { EMPTY_COMMENTS, EMPTY_BLOCK_ASSETS, buildCommentBlockCaption, findSideBlockPanelNavigationTargets, type RemotePresence } from "./script-editor/comments";
 import { SCRIPT_TOC_CENTER_EVENT, SCRIPT_EDITOR_MAX_WIDTH_PX, SCRIPT_BODY_HORIZONTAL_PADDING_REM, SCRIPT_PRODUCTION_SIDEBAR_FULL_WIDTH_PX, SCRIPT_CONTENTS_MENU_MAX_WIDTH_REM, SCRIPT_TOC_RAIL_SCROLLBAR_WIDTH_REM, SCRIPT_TOC_RAIL_COMPACT_NUMBER_PADDING_REM, SCRIPT_SCENE_DETAIL_RAIL_MIN_WIDTH_REM, SCRIPT_SCENE_DETAIL_RAIL_MAX_WIDTH_PX, SCRIPT_SCENE_DETAIL_RAIL_RIGHT_INSET_PX, SCRIPT_SCENE_DETAIL_MODE_LABEL, SCRIPT_TOC_ACTIVE_SCENE_TOP_ANCHOR_PX, DISABLED_CHECKBOX_OPTION_CLASS, checkboxOptionClass, COMMENT_BUBBLE_MIN_WIDTH_PX, COMMENT_BUBBLE_GAP_REM, SIDE_PANEL_FALLBACK_WIDTH_PX, SCRIPT_SHORTCUTS } from "./script-editor/constants";
-import { DEFAULT_DISPLAY, writeDisplayCookie, type DisplaySettings } from "./script-editor/display-settings";
+import { DEFAULT_DISPLAY, type DisplaySettings } from "./script-editor/display-settings";
 import { useScriptSearch } from "./script-editor/use-script-search";
 import { useDragCountBadge } from "./script-editor/use-drag-count-badge";
 import { useReorderLock } from "./script-editor/use-reorder-lock";
@@ -147,12 +146,13 @@ export default function ScriptEditor({
   const baseCanEditMetadata = canEditMetadataProp;
   const baseCanEditTextLayout = canEditLayout;
   const baseCanEdit = baseCanEditText || baseCanEditMetadata || baseCanEditTextLayout || canEditRehearsalMark;
-  const [rehearsalMode, setRehearsalMode] = useState(initialDisplay.rehearsalMode);
   const [personalMode, setPersonalMode, personalModeReady] = useStoredScriptPersonalMode(effectiveScriptId);
+  const effectivePersonalMode: ScriptPersonalMode = personalModeReady && baseCanEdit ? personalMode : "read";
+  const isReadMode = effectivePersonalMode === "read";
   const [recoveryLocked, setRecoveryLocked] = useState(false);
 
   const recoveryTriggerRef = useRef<() => void>(() => {});
-  const isContentLocked = recoveryLocked || !personalModeReady || !baseCanEdit || personalMode === "read" || rehearsalMode;
+  const isContentLocked = recoveryLocked || !personalModeReady || isReadMode;
   const canEditTextLayout = baseCanEditTextLayout && !isContentLocked;
   const canEditText = baseCanEditText && !isContentLocked;
   const canEditMetadata = baseCanEditMetadata && !isContentLocked;
@@ -277,10 +277,6 @@ export default function ScriptEditor({
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const isMac = useIsMacLike(); // 「关于 · 快捷键」表格按平台显示 ⌘ / Ctrl（#542）
-  const [pendingRehearsalMode, setPendingRehearsalMode] = useState<boolean | null>(null);
-  const [rehearsalModeSwitchPending, setRehearsalModeSwitchPending] = useState(false);
-  const [rehearsalModeSwitchError, setRehearsalModeSwitchError] = useState("");
-  const flushPendingPatchRef = useRef<() => Promise<boolean>>(async () => false);
   const pendingModeScrollAnchorRef = useRef<{ id: string; top: number } | null>(null);
   const [pendingStageDelimiterChange, setPendingStageDelimiterChange] =
     useState<PendingStageDelimiterChange | null>(null);
@@ -384,7 +380,7 @@ export default function ScriptEditor({
   const maxLineIndexText = String(Math.max(1, scriptLineNumberByBlockId.size));
 
   const {
-    display, setDisplay, toggleDisplay,
+    display, toggleDisplay,
     lineIndexMeasureRef, lineIndexMinMeasureRef, lineIndexWidthStyle, markerLineIndexWidthStyle,
   } = useDisplaySettings({ maxLineIndexText, initialDisplay });
 
@@ -483,46 +479,6 @@ export default function ScriptEditor({
     clearDragCountBadge();
     window.getSelection()?.removeAllRanges();
   }, [clearDragCountBadge, drag, selection]);
-
-  const toggleRehearsalMode = useCallback(() => {
-    setRehearsalModeSwitchError("");
-    setPendingRehearsalMode(!rehearsalMode);
-    closeToolbarMenu();
-  }, [closeToolbarMenu, rehearsalMode]);
-
-  const confirmRehearsalModeChange = useCallback(async () => {
-    if (pendingRehearsalMode === null) return;
-    setRehearsalModeSwitchError("");
-    setRehearsalModeSwitchPending(true);
-    if (pendingRehearsalMode && personalMode === "edit" && !await flushPendingPatchRef.current()) {
-      setRehearsalModeSwitchError("尚有内容未保存，已保留编辑模式，请稍后重试。");
-      setRehearsalModeSwitchPending(false);
-      return;
-    }
-    const container = blocksContainerRef.current;
-    if (container) {
-      const { viewTop, viewBottom } = getScrollMetrics();
-      const visibleBlock = Array.from(container.querySelectorAll<HTMLElement>("[data-vitem]"))
-        .find((el) => {
-          const rect = el.getBoundingClientRect();
-          return rect.bottom > viewTop && rect.top < viewBottom;
-        });
-      const id = visibleBlock?.dataset.vitem;
-      pendingModeScrollAnchorRef.current = id
-        ? { id, top: visibleBlock.getBoundingClientRect().top }
-        : null;
-    }
-    resetScriptInteractions();
-    closeToolbarMenu();
-    setRehearsalMode(pendingRehearsalMode);
-    setDisplay(prev => {
-      const next = { ...prev, rehearsalMode: pendingRehearsalMode };
-      writeDisplayCookie(next);
-      return next;
-    });
-    setPendingRehearsalMode(null);
-    setRehearsalModeSwitchPending(false);
-  }, [closeToolbarMenu, pendingRehearsalMode, personalMode, resetScriptInteractions, setDisplay]);
 
   const showSelectionChangeNotice = useCallback((message: string) => {
     if (selectionChangeNoticeTimer.current !== null) clearTimeout(selectionChangeNoticeTimer.current);
@@ -679,7 +635,7 @@ export default function ScriptEditor({
     if (!anchor) return;
     pendingModeScrollAnchorRef.current = null;
     restoreVirtualScrollAnchor(anchor);
-  }, [isContentLocked, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
+  }, [isReadMode, scriptConfig.textLayoutMode, restoreVirtualScrollAnchor]);
 
   const requestVirtualWindowRefresh = useCallback(() => {
     navigation.refreshAtAnchor(captureVirtualScrollAnchor());
@@ -1907,7 +1863,6 @@ export default function ScriptEditor({
   }, [focusBlockContent, glowChangedBlocks]);
 
   const flushPendingPatch = sync.flush;
-  useLayoutEffect(() => { flushPendingPatchRef.current = flushPendingPatch; }, [flushPendingPatch]);
 
   const {
     error: modeSwitchError,
@@ -1918,10 +1873,7 @@ export default function ScriptEditor({
     scriptId: effectiveScriptId,
     baseCanEdit,
     personalMode,
-    rehearsalMode,
     setPersonalMode,
-    setRehearsalMode,
-    setDisplay,
     flushPendingPatch,
     captureScrollAnchor: captureVirtualScrollAnchor,
     preserveScrollAnchor: (anchor) => { pendingModeScrollAnchorRef.current = anchor; },
@@ -3409,9 +3361,7 @@ export default function ScriptEditor({
       ? "拖拽当前剧本块至指定位置松开以调整位置"
       : "";
   const rightMenuClass = "z-40 rounded-xl border border-[var(--line)] bg-[var(--surface)] py-1 shadow-md";
-  const effectivePersonalMode: ScriptPersonalMode = personalModeReady && baseCanEdit ? personalMode : "read";
-  const personalModeLabel = effectivePersonalMode === "edit" ? "编辑" : "只读";
-  const currentModeLabel = rehearsalMode ? "排练" : personalModeLabel;
+  const currentModeLabel = isReadMode ? "只读" : "编辑";
   const selfPresence: RemotePresence | null = clientId
     ? {
         clientId,
@@ -3631,7 +3581,7 @@ export default function ScriptEditor({
 <ScriptModeMenu
             open={openMenu === "mode"}
             currentLabel={currentModeLabel}
-            selectedMode={rehearsalMode ? null : effectivePersonalMode}
+            selectedMode={effectivePersonalMode}
             canSelectEdit={baseCanEdit}
             pending={modeSwitchPending}
             error={modeSwitchError}
@@ -3865,20 +3815,6 @@ export default function ScriptEditor({
                     />
                   </span>
                 </button>
-                {baseCanEdit && (
-                  <>
-                    <div className="my-1 border-t border-zinc-50" />
-                    <button
-                      onClick={toggleRehearsalMode}
-                      className="flex w-full items-center justify-between px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
-                    >
-                      <span>排练模式</span>
-                      <span className="flex items-center">
-                        <ModeSwitch active={rehearsalMode} />
-                      </span>
-                    </button>
-                  </>
-                )}
               </div>
             )}
           </div>
@@ -3888,7 +3824,7 @@ export default function ScriptEditor({
           <ProductionToolbarBlock id="presence" priority={5}>
 <div className="relative shrink-0">
             {onlineUsers.length > 0 && (() => {
-              const maxVisibleAvatars = rehearsalMode
+              const maxVisibleAvatars = isReadMode
                   ? REHEARSAL_MODE_VISIBLE_PRESENCE_AVATARS
                   : EDITABLE_MODE_VISIBLE_PRESENCE_AVATARS;
               const stack = renderPresenceStack(maxVisibleAvatars);
@@ -4317,7 +4253,7 @@ export default function ScriptEditor({
             }
             const prev = bIdx > 0 ? blocks[bIdx - 1] : null;
             const hasInsertionGap = hasScriptInsertionGapBefore(blocks, bIdx, sceneParentIdById);
-            const showSceneEndGap = rehearsalMode && shouldShowSceneEndGap(prev, block);
+            const showSceneEndGap = isReadMode && shouldShowSceneEndGap(prev, block);
             if (isMarkerBlock(block)) {
               if (!openingChapterVisible && block.id === scriptConfig.openingChapterMarkerId) return [];
               const markerScene = block.sceneId ? sceneById.get(block.sceneId) ?? null : null;
@@ -4381,7 +4317,7 @@ export default function ScriptEditor({
                     onDragOver={handleScriptDragOver}
                     onDrop={handleScriptDrop}
                     lineIndexWidth={markerLineIndexWidthStyle}
-                    reserveRehearsalGap={rehearsalMode}
+                    reserveRehearsalGap={isReadMode}
                   />
                 </div>
               ) : null;
@@ -4436,7 +4372,7 @@ export default function ScriptEditor({
                     projectedOwnedPrev,
                     projectedOwnedBlock,
                   );
-            const showCharacterGap = rehearsalMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
+            const showCharacterGap = isReadMode && shouldShowCharacterGap(projectedOwnedPrev, projectedOwnedBlock, hideCharSelector);
             const matchOrder = searchMatches.indexOf(bIdx);
             const searchHighlight: "focused" | "match" | undefined =
               matchOrder === searchIdx ? "focused" : matchOrder >= 0 ? "match" : undefined;
@@ -4494,8 +4430,8 @@ export default function ScriptEditor({
                   captionLineNum={blockLineNumber}
                   lineIndexWidth={lineIndexWidthStyle}
                   isSearchHighlight={searchHighlight}
-                  readOnlyRehearsalMode={rehearsalMode}
-                  readOnlyScene={rehearsalMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
+                  readOnlyMode={isReadMode}
+                  readOnlyScene={isReadMode && display.rehearsalBlockScenes && ownedSceneId ? sceneById.get(ownedSceneId) ?? null : null}
                   showSceneLabel={display.rehearsalBlockScenes}
                   stageDelimOpen={scriptConfig.stageDelimOpen}
                   stageDelimClose={scriptConfig.stageDelimClose}
@@ -4612,7 +4548,7 @@ export default function ScriptEditor({
             const preBlockGap = bIdx > 0
               ? canEditText && hasInsertionGap ? <InsertZone lineIndexWidth={lineIndexWidthStyle} onInsert={() => insertBlockAt(bIdx)} /> :
                 showSceneEndGap ? <BlockGap /> :
-                rehearsalMode && showCharacterGap ? <BlockGap /> :
+                isReadMode && showCharacterGap ? <BlockGap /> :
                 null
               : null;
             return [
@@ -4756,20 +4692,6 @@ export default function ScriptEditor({
           }}
         />
         </>
-      )}
-
-      {pendingRehearsalMode !== null && (
-        <RehearsalModeDialog
-          entering={pendingRehearsalMode}
-          pending={rehearsalModeSwitchPending}
-          error={rehearsalModeSwitchError}
-          onClose={() => {
-            if (rehearsalModeSwitchPending) return;
-            setPendingRehearsalMode(null);
-            setRehearsalModeSwitchError("");
-          }}
-          onConfirm={() => { void confirmRehearsalModeChange(); }}
-        />
       )}
 
       {pendingAggregateFocusPrompt && (() => {
@@ -5333,9 +5255,7 @@ export default function ScriptEditor({
           ? null
           : !baseCanEditText
             ? "需要剧本文本编辑权限"
-            : rehearsalMode
-              ? "排练模式下不可添加"
-              : "只读模式下不可添加";
+            : "只读模式下不可添加";
         const insertActions: Array<{ label: string; action: () => void; disabledReason?: string | null }> = [
           {
             label: "添加新剧本块",

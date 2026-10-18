@@ -4,7 +4,6 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ScriptModeMenu from "@/components/script/script-editor/ScriptModeMenu";
-import RehearsalModeDialog from "@/components/script/script-editor/RehearsalModeDialog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -60,18 +59,6 @@ describe("剧本个人模式菜单", () => {
     const edit = container.querySelector('button[role="menuitemradio"]') as HTMLButtonElement;
     expect(edit.disabled).toBe(true);
     expect(edit.title).toContain("没有剧本内容编辑权限");
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("尚有内容未保存");
-  });
-});
-
-describe("排练模式切换对话框", () => {
-  it("保存中锁住关闭和确认，失败原因保持可见", () => {
-    act(() => root.render(
-      <RehearsalModeDialog entering pending error="尚有内容未保存" onClose={() => {}} onConfirm={() => {}} />,
-    ));
-    const buttons = Array.from(container.querySelectorAll("button"));
-    expect(buttons.every((button) => button.disabled)).toBe(true);
-    expect(container.textContent).toContain("保存中…");
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("尚有内容未保存");
   });
 });
