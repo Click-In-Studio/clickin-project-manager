@@ -1,3 +1,6 @@
+import { reserveRequestCost, settleRequestCost } from "@/lib/agent/runtime/cost-budget-db";
+import { TASK_COST_LIMIT_CREDITS } from "@/lib/agent/runtime/cost-budget";
+import { acquire, release } from "@/lib/agent/runtime/admission";
 import {
   vi,
   describe,
@@ -47,7 +50,6 @@ import {
 import {
   listSubagents,
   claimSubagents,
-  addTaskCost,
   queueSubagent,
   deliverSubagentNotifications,
 } from "@/lib/agent/runtime/subagent-db";
@@ -600,7 +602,7 @@ describe("持久子 Agent 基建", () => {
     await expect(sendSubagent(p, id, "再次执行")).rejects.toThrow("已停止");
   });
 
-  it("子轮次与主脑共用根预算，达到成本硬顶后不认领排队任务", async () => {
+  it("子轮次与主脑共用根预算，余额不足时在模型请求前拒绝", async () => {
     const p = await parent();
     const id = await queueSubagent({
       parentSessionId: p.sessionId,
@@ -614,8 +616,11 @@ describe("持久子 Agent 基建", () => {
         [id],
       )
     ).rows[0];
-    expect(await addTaskCost(child.id, 1_000_000)).toBe(false);
-    expect(await claimSubagents()).toEqual([]);
+    const ticket = await acquire(child.id, "budget-test", "llm", new AbortController().signal);
+    const held = await reserveRequestCost(child.id, ticket.id, 100, TASK_COST_LIMIT_CREDITS);
+    await settleRequestCost(child.id, ticket.id, held.reservationId, TASK_COST_LIMIT_CREDITS);
+    await expect(reserveRequestCost(child.id, ticket.id, 1, TASK_COST_LIMIT_CREDITS)).rejects.toThrow("task-budget-exceeded");
+    await release(ticket);
     expect(
       (
         await getPool().query(
@@ -757,7 +762,7 @@ describe("持久子 Agent 基建", () => {
     ).toBe(recorded);
   });
 
-  it("用量去重、根预算与额外额度扣款原子一致", async () => {
+  it("用量去重与额外额度扣款原子一致，不重复结算请求预算", async () => {
     const p = await parent();
     await getPool().query(
       "UPDATE agent_run SET paid_from='extra' WHERE id=$1",
@@ -805,7 +810,7 @@ describe("持久子 Agent 基建", () => {
           )
         ).rows[0].task_credits,
       ),
-    ).toBe(creditsFromUsd(0.001));
+    ).toBe(0);
   });
 
   it("不同发布器并发写同会话事件仍保持唯一连续序号", async () => {

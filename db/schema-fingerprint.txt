@@ -1,9 +1,12 @@
+COL|agent_admission|charged_credits|bigint|int8|NO|0
 COL|agent_admission|heartbeat_at|timestamp with time zone|timestamptz|YES|
 COL|agent_admission|id|text|text|NO|
 COL|agent_admission|operation_key|text|text|NO|
 COL|agent_admission|owner|text|text|YES|
 COL|agent_admission|ready_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_admission|remote_id|text|text|YES|
+COL|agent_admission|reservation_id|text|text|YES|
+COL|agent_admission|reserved_credits|bigint|int8|NO|0
 COL|agent_admission|resource|text|text|NO|
 COL|agent_admission|result|jsonb|jsonb|YES|
 COL|agent_admission|run_id|text|text|NO|
@@ -166,6 +169,7 @@ COL|agent_run|session_id|text|text|NO|
 COL|agent_run|started_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_run|status|text|text|NO|'queued'::text
 COL|agent_run|subagent_id|text|text|YES|
+COL|agent_run|task_budget_credits|bigint|int8|NO|0
 COL|agent_run|task_credits|bigint|int8|NO|0
 COL|agent_schedule|allowed_tools|ARRAY|_text|NO|'{}'::text[]
 COL|agent_schedule|created_at|timestamp with time zone|timestamptz|NO|now()
@@ -248,8 +252,11 @@ COL|agent_subagent|id|text|text|NO|
 COL|agent_subagent|sources|jsonb|jsonb|NO|'[]'::jsonb
 COL|agent_subagent|stopped|boolean|bool|NO|false
 COL|agent_subagent|task|text|text|NO|
+COL|agent_tool_operation|completed_at|timestamp with time zone|timestamptz|YES|
 COL|agent_tool_operation|execution_epoch|integer|int4|NO|
 COL|agent_tool_operation|id|text|text|NO|
+COL|agent_tool_operation|input_entry_id|text|text|YES|
+COL|agent_tool_operation|progress_key|text|text|YES|
 COL|agent_tool_operation|result|jsonb|jsonb|YES|
 COL|agent_tool_operation|run_id|text|text|NO|
 COL|agent_tool_operation|tool_call_id|text|text|NO|
@@ -1995,6 +2002,7 @@ IDX|agent_session|agent_session_user_idx|CREATE INDEX agent_session_user_idx ON 
 IDX|agent_subagent_usage|agent_subagent_usage_pkey|CREATE UNIQUE INDEX agent_subagent_usage_pkey ON public.agent_subagent_usage USING btree (id)
 IDX|agent_subagent|agent_subagent_pkey|CREATE UNIQUE INDEX agent_subagent_pkey ON public.agent_subagent USING btree (id)
 IDX|agent_tool_operation|agent_tool_operation_pkey|CREATE UNIQUE INDEX agent_tool_operation_pkey ON public.agent_tool_operation USING btree (id)
+IDX|agent_tool_operation|agent_tool_operation_progress_idx|CREATE INDEX agent_tool_operation_progress_idx ON public.agent_tool_operation USING btree (run_id, completed_at DESC) WHERE (progress_key IS NOT NULL)
 IDX|agent_tool_operation|agent_tool_operation_run_id_tool_call_id_key|CREATE UNIQUE INDEX agent_tool_operation_run_id_tool_call_id_key ON public.agent_tool_operation USING btree (run_id, tool_call_id)
 IDX|ai_credit_grant|ai_credit_grant_pkey|CREATE UNIQUE INDEX ai_credit_grant_pkey ON public.ai_credit_grant USING btree (id)
 IDX|ai_credit_grant|ai_credit_grant_user_idx|CREATE INDEX ai_credit_grant_user_idx ON public.ai_credit_grant USING btree (user_id, expires_at)

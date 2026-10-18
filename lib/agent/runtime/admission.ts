@@ -1,3 +1,7 @@
+import { estimateCostBudget } from "./cost-budget";
+import { reserveRequestCost, settleRequestCost, assertToolProgress } from "./cost-budget-db";
+import { creditsFromUsd } from "@/lib/account/plan";
+import { usdOfUsage } from "./billing";
 import { withObservationRun, observeModelRequest } from "./observation";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
@@ -22,7 +26,7 @@ export const admissionLimits = {
   mmp: budget("AGENT_MMP_LIMIT", 4),
   agingMs: budget("AGENT_AGING_MS", 30_000),
 };
-type Scope = { runId: string; signal: AbortSignal; operationKey?: string; sequence: number; wait?: InputWait; waits: Map<string, InputWait>; waitTail: Promise<void>; park: () => void; busy: number };
+type Scope = { runId: string; signal: AbortSignal; operationKey?: string; sequence: number; wait?: InputWait; waits: Map<string, InputWait>; waitTail: Promise<void>; park: () => void; busy: number; modelTicket?: AdmissionTicket };
 const scopeStorage = new AsyncLocalStorage<Scope>();
 const scopes = new Map<string, Scope>();
 const pending = new Map<string, { ticket: AdmissionTicket; resolve: (ticket: AdmissionTicket) => void; reject: (error: unknown) => void }>();
@@ -172,8 +176,11 @@ export function wrapTools(tools: RuntimeToolDef[]): RuntimeToolDef[] {
       if (completed) return completed as Awaited<ReturnType<typeof tool.execute>>;
       await db.beginToolOperation(scope.runId,id);
       const result = await scopeStorage.run({ ...scope, operationKey: `tool:${id}`, sequence: 0 }, () => tool.executionResource === "local_tool" ? withLocalTool(id, () => tool.execute(id,args,signal,update)) : tool.execute(id, args, signal, update));
-      if (!scope.signal.aborted) await db.saveToolResult(scope.runId,id,result);
+      if (!scope.signal.aborted) await db.saveToolResult(scope.runId,id,result,tool.name,args);
       return result;
+    } catch (error) {
+      if (!scope.signal.aborted) await db.saveToolFailure(scope.runId,id,tool.name,args,error);
+      throw error;
     } finally {
       scope.busy--;
       if (scope.wait && !scope.signal.aborted) {
@@ -238,14 +245,18 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
           return;
         }
         signal.throwIfAborted();
+        await assertToolProgress(scope.runId, context);
         let requestContext = prepareRequest
-          ? await prepareRequest({ model, context, options, trigger: "pressure", signal, calibration })
+          ? await scopeStorage.run({ ...scope, modelTicket: ticket }, () => prepareRequest({ model, context, options, trigger: "pressure", signal, calibration }))
           : context;
         let overflowRetries = 0;
         for (;;) {
           signal.throwIfAborted();
           if (prepareRequest && !estimateRequestBudget(model, requestContext, options, calibration).fits) throw new Error("完整请求超过运行预算，请缩小任务或附件范围");
-          observation = await observeModelRequest(model, requestContext, "chat", performance.now() - queuedAt, options?.maxTokens);
+          const cost = estimateCostBudget(model, requestContext, options, calibration);
+          const costReservation = await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
+          observation = await observeModelRequest(model, requestContext, "chat", performance.now() - queuedAt, options?.maxTokens, costReservation);
+          signal.throwIfAborted();
           const stream = await streamFn(model, requestContext, {...options,signal});
           let retry = false;
           let emitted = false;
@@ -257,6 +268,7 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
             }
             if (event.type === "error") observedResult = event.error;
             if (event.type === "done" || event.type === "error") {
+              await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(event.type === "done" ? event.message.usage : event.error.usage, model)));
               const contextOverflow = event.type === "error"
                 && isContextOverflow(event.error, model.contextTokens ?? model.contextWindow);
               await observation?.finish(
@@ -274,13 +286,13 @@ export function admittedStream(streamFn: StreamFn, prepareRequest?: PrepareAdmit
               && !signal.aborted
             ) {
               const before = estimateRequestBudget(model, requestContext, options).estimatedInputTokens;
-              const recovered = await prepareRequest({
+              const recovered = await scopeStorage.run({ ...scope, modelTicket: ticket }, () => prepareRequest({
                 model,
                 context: requestContext,
                 options,
                 trigger: "context-overflow",
                 signal, calibration,
-              });
+              }));
               const after = estimateRequestBudget(model, recovered, options).estimatedInputTokens;
               if (!signal.aborted && after < before) {
                 requestContext = recovered;
@@ -317,4 +329,25 @@ export async function withLocalTool<T>(key: string, fn: () => Promise<T>): Promi
   if (!scope) return fn();
   const ticket = await acquire(scope.runId, `${scope.operationKey ?? "local"}:${key}:${scope.sequence++}`, "local_tool", scope.signal);
   try { return await fn(); } finally { await release(ticket); }
+}
+
+/** 请求边界压缩复用模型名额；工具内的显式媒体重读独立取得名额并结算。 */
+export async function budgetedComplete(model: Model, context: Context, options: SimpleStreamOptions, complete: () => Promise<AssistantMessage>): Promise<AssistantMessage> {
+  const scope = scopeStorage.getStore();
+  if (!scope) return complete();
+  const owned = !scope.modelTicket;
+  const ticket = scope.modelTicket ?? await acquire(scope.runId, `compaction:${scope.operationKey ?? await db.continuationKey(scope.runId)}:${scope.sequence++}`, "llm", scope.signal);
+  if (owned && ticket.state === "done" && ticket.result) return ticket.result as AssistantMessage;
+  let result: AssistantMessage | undefined;
+  try {
+    const cost = estimateCostBudget(model, context, options);
+    const costReservation = await reserveRequestCost(scope.runId, ticket.id, cost.requestCredits, cost.taskCredits);
+    scope.signal.throwIfAborted();
+    options.signal?.throwIfAborted();
+    result = await complete();
+    await settleRequestCost(scope.runId, ticket.id, costReservation.reservationId, creditsFromUsd(usdOfUsage(result.usage, model)));
+    return result;
+  } finally {
+    if (owned) await release(ticket,result ? "done" : "failed",result);
+  }
 }

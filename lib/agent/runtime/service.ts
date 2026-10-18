@@ -7,7 +7,7 @@ import { selectMediaCompactionModel } from "./media-compaction-model";
 import { convertToLlm } from "../../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import { setToolObservationSources, addObservationTools } from "./observation";
 import { acquire, release, runInAdmission, admittedStream, wrapTools, waitForInput, watchInputWait, type PrepareAdmittedRequest } from "./admission";
-import { cancelAdmissions, inputWaitReady, recoverAdmissions, completedChatMessages } from "./admission-db";
+import { cancelAdmissions, inputWaitReady, recoverAdmissions } from "./admission-db";
 import type { InputWait } from "./admission-types";
 // 自建运行时的 run 服务（#367 S2）：把 vendor harness、PG 会话树、事件分发、
 // 审批门、注入链、记账串成一次 run。既可在 next 进程内跑（测试/灰度首期），也是
@@ -65,7 +65,7 @@ import {
   llmRuntime,
   RUNNER_OWNER, HEARTBEAT_INTERVAL_MS, ORPHAN_AFTER_MS,
 } from "./config";
-import { creditsFromUsd, RUN_CREDIT_HARD_CAP } from "@/lib/account/plan";
+import { creditsFromUsd } from "@/lib/account/plan";
 import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
 import {
   getReadyAttachments,
@@ -78,14 +78,6 @@ import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
 import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
 
-/** 成本硬顶中止的落库前缀（机器可判）与下一回合的注入说明（导入实测反馈①：
- *  裸 abort 让 agent 只能瞎猜中止原因）。 */
-const COST_CAP_ERROR_PREFIX = "cost-hard-cap";
-const COST_CAP_ERROR = `${COST_CAP_ERROR_PREFIX}: 单回合成本硬顶触发（消耗异常偏高，已自动中止）`;
-const COST_CAP_RESUME_NOTE =
-  "【系统提示】上一回合因单回合成本硬顶被自动中止（不是工具参数错误，也不是数量超限）。" +
-  "中止发生在半途：确认卡已批准的写入通常已生效，悬空的调用状态未知——先用只读工具（或导入日志）核对实际进度，" +
-  "再以更小的批次继续，不要重做已完成的部分。";
 import { assertAiQuota, chargeExtraCredits, getQuotaStatus, paidFromOf, quotaOwnerOf, type PaidFrom } from "@/lib/agent/ai-quota";
 import { usdOfUsage } from "./billing";
 
@@ -428,16 +420,11 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   // compaction 单列：它是独立模型请求且不走 message_end，混进 chat_*
   // 会让「这轮对话花了多少 token」失真。
   const usage = { input: 0, output: 0, cacheRead: 0, usd: 0, compactionUsd: 0, compactionTokens: 0, compactionModels: new Map<string, { modelId: string; tokens: number; usd: number }>() };
-  const previousUsd = (await completedChatMessages(runId)).reduce((sum,msg) => sum+usdOfUsage(msg.usage,selectedModel),0);
   let message = input.message;
   let lastUser: string | null = message ?? null;
   let lastAssistant: string | null = null;
   let status: "completed" | "aborted" | "failed" = "completed";
   let error: string | null = null;
-  // 成本硬顶触发标记：中止发生在工具/流式中途，异常本身只是裸 AbortError——
-  // 不记原因的话 agent 下回合只能瞎猜"是超数量还是超长度"（导入实测反馈①）
-  let costCapAborted = false;
-  let taskCostTail = Promise.resolve();
 
   const toolArgs = new Map<string, Record<string, unknown>>(); // toolCallId → args（mutation 行用）
   const heartbeat = setInterval(() => {
@@ -480,20 +467,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     const dialectDelivered = inject.dialectDelivered;
     const attachmentLifecycle = await buildAttachmentLifecycleBlock({ sessionId, userId, productionId });
 
-    // 上一回合若因成本硬顶被掐（错误带机器可判前缀），本回合开头注入说明——
-    // 否则 agent 只看到悬空工具调用的"状态未知"，不知道该缩小批次续作
-    const priorCapNote = await (async () => {
-      // 「上一回合」＝最近开始且已结束的 run。孤儿 run 被晚回收时可能短暂顶到
-      // 最前（AI review 适配）：时效护栏兜底——过时的续作提示没有价值，宁缺。
-      const { rows } = await pool.query<{ error: string | null }>(
-        `SELECT error FROM agent_run WHERE session_id = $1 AND id <> $2 AND ended_at IS NOT NULL
-           AND ended_at > now() - interval '2 hours'
-         ORDER BY started_at DESC LIMIT 1`,
-        [sessionId, runId],
-      );
-      return rows[0]?.error?.startsWith(COST_CAP_ERROR_PREFIX) ? COST_CAP_RESUME_NOTE : null;
-    })();
-
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。
     const mmpWarm = await focusedMmpToolNames({
       messages: transcript,
@@ -516,7 +489,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       recent: [...new Set(used.flatMap(name => [name, ...calledToolFamilyNames(name, availableToolNames)]))],
       dependency: tiers.dependencies, dynamic: [...mmpSurface.tools.map(t => t.mcpName), ...attachmentLifecycle.toolNames],
     }).map(([source, names]) => [source, names.map(exposedName)])), tiers.mode);
-    const injectedNote = [priorCapNote, recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
+    const injectedNote = [recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
     const withInjectedNote = (messages: AgentMessage[]): AgentMessage[] => {
       if (!injectedNote) return messages;
       const idx = findLastUserIndex(messages);
@@ -576,11 +549,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
           const key = `${cost.model.provider}:${cost.model.id}`;
           const previous = usage.compactionModels.get(key) ?? { modelId: cost.model.id, tokens: 0, usd: 0 };
           usage.compactionModels.set(key, { modelId: cost.model.id, tokens: previous.tokens + cost.tokens, usd: previous.usd + cost.usd });
-          if (cost.usd && !(await (await import("./subagent-db")).addTaskCost(runId, cost.usd))) {
-            costCapAborted = true;
-            abort.abort();
-            await (await import("./subagents")).stopSubagent(sessionId, undefined, "任务成本硬顶触发");
-          }
         },
       });
 
@@ -666,7 +634,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
     harness.on("tool_call", async (event) => {
       const tool = toolByName.get(event.toolName);
       if (!tool) return undefined;
-      await taskCostTail;
       if (abort.signal.aborted) return { block: true, reason: "任务已停止" };
       // #1019：实际调用才激活整族；下一次模型请求即可使用，审批和权限照旧。
       if (productionId) {
@@ -726,25 +693,8 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         usage.cacheRead += event.message.usage.cacheRead;
         const dollars = usdOfUsage(event.message.usage, selectedModel);
         usage.usd += dollars;
-        taskCostTail = taskCostTail.then(async()=>{
-          if (!(await (await import("./subagent-db")).addTaskCost(runId,dollars))) {
-            costCapAborted=true;abort.abort();void active.get(sessionId)?.abortHarness();
-            await (await import("./subagents")).stopSubagent(sessionId,undefined,"任务成本硬顶触发");
-          }
-        });
         const t = event.message.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
         if (t) lastAssistant = t.slice(0, 2000);
-        // 防失控硬顶（#383）：额度判定在 run 开始处、run 内不打断，所以透支上限
-        // 就是单个 run 能烧的量。工具死循环会把「允许少量负 credit」变成无底洞——
-        // 这道闸不是限流，豁免档同样受它约束。
-        const spent = creditsFromUsd(previousUsd+usage.usd);
-        if (!abort.signal.aborted && spent > RUN_CREDIT_HARD_CAP) {
-          console.error(`[agent-runtime] run ${runId} 触发单轮成本硬顶（${spent} credit > ${RUN_CREDIT_HARD_CAP}），中止`);
-          publisher.publish({ type: "error", error: "本次任务消耗异常偏高，已自动中止。请把问题拆小后重试。" });
-          costCapAborted = true;
-          abort.abort();
-          void active.get(sessionId)?.abortHarness().catch(() => {});
-        }
       }
     });
 
@@ -857,21 +807,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
   } finally {
     clearInterval(heartbeat);
     toolArgs.clear(); // 中止/脱离时可能没有对应的 end 事件
-    try {
-      await taskCostTail;
-    } catch (err) {
-      status = "failed";
-      error = err instanceof Error ? err.message : String(err);
-      publisher.publish({ type: "error", error });
-    }
-    if (costCapAborted && status !== "failed") {
-      // 覆盖裸 AbortError：error 落库带机器可判前缀，下一个 run 开头据此注入提示。
-      // status=failed 时不覆盖——那是与硬顶并发的无关失败，真实原因不能丢
-      //（AI review 适配；实际上 costCap 先置 abort、后续异常都会判成 aborted，
-      // 这里是纵深防御）
-      status = "aborted";
-      error = COST_CAP_ERROR;
-    }
     if (!detached && (status === "aborted" || status === "failed")) {
       const questionIds = await (await import("./questions")).cancelQuestionsForRuns(
         [runId], status === "failed" ? "原任务执行失败，不再需要回答" : "原任务已停止，不再需要回答",
