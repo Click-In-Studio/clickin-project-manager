@@ -33,10 +33,10 @@ import { subscribeSessionEvents } from "./events";
 import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
+import { assistantFailureReason } from "./stream-lines";
 import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
 import { estimateRequestBudget } from "./context-budget";
 import { readModelMedia } from "./model-read";
-import { assistantFailureReason } from "./stream-lines";
 
 const TIMEOUT_MS = 30 * 60_000;
 const TOOL_CAP = 100;

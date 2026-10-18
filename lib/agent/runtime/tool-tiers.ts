@@ -9,7 +9,7 @@ import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 //
 // fail-open：任何异常 → 全量工具（宁可贵，不可残废）。AGENT_TOOL_TIERS=off 关闭分层。
 
-import { toolRecall } from "@/lib/agent/tools/tool-catalog";
+import { TOOL_CATALOG, toolRecall } from "@/lib/agent/tools/tool-catalog";
 
 /** 个人会话热层：my.* 就是它的全部业务面（砍了等于空手）+ 提问 */
 const HOT_PERSONAL = [
@@ -18,6 +18,13 @@ const HOT_PERSONAL = [
   "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
+/** #1019：常驻入口仅提供发现面，实际调用后才展开所属族及依赖。 */
+const FAMILY_ENTRIES = [
+  "production.script_search", "production.script_read_section",
+  "production.scene_list", "production.character_list",
+];
+const CALL_ACTIVATED_FAMILIES = new Set(["production.script", "production.dramaturgy"]);
+
 /** 制作会话热层：范围锚点 + 语境锚（info/my_role/notifications）+ id 供给入口（成员/部门）+ 提问 */
 const HOT_PRODUCTION = [
   "model_list",
@@ -25,6 +32,7 @@ const HOT_PRODUCTION = [
   "my.productions", "my.memory_search", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",
+  ...FAMILY_ENTRIES,
   "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
@@ -132,6 +140,24 @@ const CLOSURE: Record<string, string[]> = {
   "my.schedule_propose": ["my.schedules", "production.wiki_tree", "production.wiki_search"],
 };
 
+/** 只展开依赖，不把「可见」误当作调用，也不跨族递归激活。 */
+function withDependencies(names: readonly string[], available: ReadonlySet<string>): string[] {
+  const active = new Set(names.filter(name => available.has(name)));
+  for (const name of active) {
+    for (const dependency of CLOSURE[name] ?? []) {
+      if (available.has(dependency)) active.add(dependency);
+    }
+  }
+  return [...active];
+}
+
+/** 两族实际调用后的加载面；族成员来自召回目录，权限仍由工具端判定。 */
+export function calledToolFamilyNames(name: string, available: readonly string[]): string[] {
+  const family = TOOL_CATALOG.find(entry => entry.name === name)?.family;
+  if (!family || !CALL_ACTIVATED_FAMILIES.has(family) || !available.includes(name)) return [];
+  return withDependencies(TOOL_CATALOG.filter(entry => entry.family === family).map(entry => entry.name), new Set(available));
+}
+
 export interface TierInput {
   hasProduction: boolean;
   pageKey: string | null;
@@ -171,22 +197,14 @@ export function tieredToolNames(input: TierInput): TierResult {
     const recalled = (input.recalled
       ?? (input.prompt ? toolRecall(input.prompt, { hasProduction: input.hasProduction }).map((h) => h.name) : [])
     ).filter((n) => available.has(n));
-    for (const n of input.used ?? []) if (available.has(n)) recalled.push(n);
-    const seeds = new Set([...hot, ...warm, ...recalled]);
-    const active = new Set<string>([...hot, ...warm, ...recalled]);
-    // 闭包：迭代到不动点（闭包里的工具也可能有自己的闭包）
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const name of [...active]) {
-        for (const dep of CLOSURE[name] ?? []) {
-          if (available.has(dep) && !active.has(dep)) {
-            active.add(dep);
-            grew = true;
-          }
-        }
-      }
+    for (const n of input.used ?? []) {
+      if (available.has(n)) recalled.push(n);
+      if (input.hasProduction) recalled.push(...calledToolFamilyNames(n, input.available));
     }
+    const seeds = new Set([...hot, ...warm, ...recalled]);
+    // 常驻入口不提前支付依赖成本；温层、召回、近期调用与跨工具依赖仍走完整闭包。
+    const roots = [...hot.filter(name => !FAMILY_ENTRIES.includes(name)), ...warm, ...recalled];
+    const active = new Set([...hot, ...withDependencies(roots, available)]);
     // 个人会话里 production 工具本来就不可用，去掉免得模型撞 NO_PRODUCTION
     const list = [...active].filter((n) => input.hasProduction || !n.startsWith("production."));
     return {

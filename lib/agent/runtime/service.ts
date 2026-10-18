@@ -45,7 +45,7 @@ import { assistantFailureReason, createStreamLineAdapter } from "./stream-lines"
 import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
 import { describeMutation, type MutationRecord } from "./mutation-audit";
 import { getSchedule, finishScheduledRun, type ScheduleReport } from "./schedules";
-import { tieredToolNames } from "./tool-tiers";
+import { calledToolFamilyNames, tieredToolNames } from "./tool-tiers";
 import { recallFamilies } from "./tool-index";
 import { recentlyUsedToolNames } from "./used-tools";
 import { approvalCard, permissionActivationCard } from "./cards";
@@ -477,14 +477,16 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       productionId,
       capabilities: mmpSurface.capabilities,
     });
+    const availableToolNames = tools.map(tool => tool.mcpName);
     const tiers = tieredToolNames({
       hasProduction: !!productionId, pageKey: input.pageKey ?? null, prompt: recallPrompt, recalled, used,
       extraWarm: [...mmpWarm, ...attachmentLifecycle.toolNames],
-      available: tools.map((t) => t.mcpName),
+      available: availableToolNames,
     });
     const activeToolNames = new Set(tiers.active.map(exposedName));
     setToolObservationSources(tiers.mode !== "tiered" ? { override: tiers.active.map(exposedName) } : Object.fromEntries(Object.entries({
-      resident: tiers.hot, page: tiers.page, recall: recalled, recent: used,
+      resident: tiers.hot, page: tiers.page, recall: recalled,
+      recent: [...new Set(used.flatMap(name => [name, ...calledToolFamilyNames(name, availableToolNames)]))],
       dependency: tiers.dependencies, dynamic: [...mmpSurface.tools.map(t => t.mcpName), ...attachmentLifecycle.toolNames],
     }).map(([source, names]) => [source, names.map(exposedName)])), tiers.mode);
     const injectedNote = [recall, attachmentLifecycle.text].filter(Boolean).join("\n\n");
@@ -577,7 +579,10 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       // 或它记得的）→ 从注册表临时加载。权限/制作语境仍在工具内部判定，分层≠权限。
       resolveDeferredTool: ({ toolCall }) => {
         const tool = toolByName.get(toolCall.name);
-        if (tool) addObservationTools("deferred", [tool.name]);
+        if (tool) {
+          activeToolNames.add(tool.name);
+          addObservationTools("deferred", [tool.name]);
+        }
         return tool;
       },
       systemPrompt: buildSystemPrompt(inject),
@@ -630,6 +635,16 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       const tool = toolByName.get(event.toolName);
       if (!tool) return undefined;
       if (abort.signal.aborted) return { block: true, reason: "任务已停止" };
+      // #1019：实际调用才激活整族；下一次模型请求即可使用，审批和权限照旧。
+      if (productionId) {
+        const added = calledToolFamilyNames(tool.mcpName, availableToolNames)
+          .map(exposedName).filter(name => !activeToolNames.has(name));
+        if (added.length) {
+          for (const name of added) activeToolNames.add(name);
+          addObservationTools("dynamic", added);
+          await harness.setTools(tools, [...activeToolNames]);
+        }
+      }
       const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
       if (schedule) return unattendedGate(g, schedule.allowedTools);
       if (tool.readOnly) return undefined;

@@ -49,7 +49,7 @@
 | `AI_TASK_COST_LIMIT_USD` | 默认 10 | 根任务最终美元上限；按模型和冷缓存请求估算 12 次往返的任务预算，主、子任务及压缩共用，请求前预留、返回后结算；豁免档同样适用 |
 | `AGENT_SCHEDULE_TICK_MS` | 默认 60000 | 定时任务节拍（认领到期任务）；跟执行者走：runner 或 in-process 的 next |
 
-### 冷层：召回 + `find_tools` 兜底
+### 冷层：召回 + 调用激活 + `find_tools` 兜底
 
 工具面 = 热层（按会话类型）∪ 温层（按页面）∪ 冷层召回 ∪ 本会话最近用过的工具（`used-tools.ts`：只看最近 3 个用户轮次、最多 6 个、最近优先——窗口外自然淘汰，避免一个 session 里东问西问把面越滚越大）。**召回的粒度是族**（`tool-catalog.ts` 的 `family`/`TOOL_FAMILIES`）：
 族内任一工具过阈值 → 整族入面（每轮 ≤2 族），由模型在族内挑动作；族太大再拆 sub。冷层索引在 `lib/agent/runtime/tool-index.ts`：
@@ -57,7 +57,8 @@
 （`EMBEDDING_PROVIDER`/`EMBEDDING_API_KEY`，向量缓存在 `agent_memory_embedding_cache`），未配置时退回纯词法。
 没召回到时的兜底是常驻的 `clickin__find_tools`（搜索，不是目录——目录会随工具数线性吃 prompt）：
 模型搜到名字后直接按名调用，harness 通过 `resolveDeferredTool`（vendor 补丁 #4）临时加载并在本会话后续轮次保持可见。
-分层只决定可见性，权限与制作语境仍在工具内部判定。
+制作会话常驻四个读取入口：剧本族 `script_search` / `script_read_section`，构作族 `scene_list` / `character_list`。仅常驻时不展开入口的依赖；页面温层和主动召回仍走原有闭包。实际调用这两族任意工具后，同一 run 后续模型请求加载该整族及依赖；跨族依赖可见不等于另一族被调用。后续用户轮次由上述近期使用窗口恢复整族，窗口过期则退回常驻入口。族成员来自 `tool-catalog`，动态加载同时记入工具面观测。
+分层只决定可见性，权限、写审批与无人值守授权仍按原有判定执行。
 
 ### 多钥匙域：写工具先查权限（构作族的先例）
 
