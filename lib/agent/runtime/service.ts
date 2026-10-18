@@ -528,7 +528,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
             requestTools.push({ name: read.name, description: read.description, parameters: read.parameters });
             addObservationTools("dynamic", [name]);
           }
-          return { ...requestContext, messages: convertToLlm(messages), tools: requestTools, systemPrompt: buildSystemPrompt(currentInject) };
+          return { ...requestContext, messages: convertToLlm(messages), tools: requestTools, systemPrompt: buildSystemPrompt(currentInject, mmpSurface.catalog) };
         },
         rebuildMessages: withInjectedNote,
         prepareMessages: (messages, summaryModel) => restoreModelMedia(messages, { ...mediaInput, model: summaryModel }),
@@ -556,7 +556,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       const current = await session.buildContext();
       const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
       const pending = { role: "user" as const, timestamp: 0, content: [media] };
-      const context = { systemPrompt: buildSystemPrompt(inject),
+      const context = { systemPrompt: buildSystemPrompt(inject, mmpSurface.catalog),
         tools: tools.filter((tool) => activeToolNames.has(tool.name)).map(({ name, description, parameters }) => ({ name, description, parameters })),
         messages: convertToLlm([...withInjectedNote(current.messages), pending]) };
       // 即使清空所有历史也放不下，就不发起无效摘要；改走既有非原生读取。
@@ -585,7 +585,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
         }
         return tool;
       },
-      systemPrompt: buildSystemPrompt(inject),
+      systemPrompt: buildSystemPrompt(inject, mmpSurface.catalog),
       model: selectedModel,
       thinkingLevel: selection.thinkingLevel,
       streamOptions: { maxTokens: normalOutputTokens(selectedModel) },

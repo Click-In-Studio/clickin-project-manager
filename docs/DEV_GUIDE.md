@@ -631,6 +631,10 @@ Session 存为 HMAC 签名的 Cookie，不需要服务端 session store。内容
 
 站内 AI 对话由自建运行时承担（`lib/agent/runtime/` + 独立进程 `agent-runner/`），怎么跑 / 怎么切 / 怎么回滚 / 工具注册表 / 无人值守写 / 审计 / 定时任务 / 用量限流全部见 [AGENT_RUNTIME.md](./AGENT_RUNTIME.md)，**设计新工具或新 skill 前先读那篇的「设计原则」一节**。
 
+**工具族介绍与业务边界必须同步维护。** 新增 / 删除工具族，或修改其业务对象、权威事实范围、默认入口与来源边界时，同一 PR 必须同步系统 prompt 中的工具族介绍（hint）；族内工具的增删若改变了上述边界，也适用。各族介绍应声明自己负责什么事实、何时作为默认入口，以及与文档、文件、记忆和其他族的边界；混合多类来源的族须分别说明，不得笼统赋予整个族权威性。
+
+固定族在 `lib/agent/tools/tool-catalog.ts` 的 `TOOL_FAMILIES` 中声明 `hint`，由 `lib/agent/runtime/prompt.ts` 统一组装进系统 prompt；来源选择、检索范围与 HITL 通用规则写在 `openclaw-workspace/AGENTS.md`。工具族介绍常驻提供产品认知，具体工具仍按需加载；不能因为某族未被页面温层或消息召回，就让 AI 不知道该族存在。介绍不写死逐轮变化的加载状态，也不把功能族存在等同于用户有权限、项目已有数据或现实中的最终决定。仅声明已接入的能力；动态工具族的介绍随实际能力目录同步生成。系统业务事实的默认入口不覆盖用户明确指定的材料。
+
 老运行时保留下来的两个通用模块：`lib/agent/llm-chat.ts`（票据识别与记忆蒸馏的跨厂商生成、超时及输出校验）与 `lib/agent/memory/embedding.ts`（向量嵌入，记忆检索与工具索引在用）。`docs/TOOL_SURFACE.md` 是网关时代的历史文档。
 
 ---
