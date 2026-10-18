@@ -344,7 +344,7 @@ describe("components/ 按域分目录，不回退成平铺", () => {
 // 瘦身不在 #487 范围。
 
 const MONOLITH_LINE_CEILING: Record<string, number> = {
-  "components/script/ScriptEditor.tsx": 5696, // #507 共同状态与生命周期收敛
+  "components/script/ScriptEditor.tsx": 5534, // #978 删除独立排练模式状态、入口与弹窗
   "components/ops/EventDetailClient.tsx": 421,
   "components/ops/CuePage.tsx": 1293, // 失效 Cue 拖拽入口补页面模式判定（+1）
   "components/ops/PlanningClient.tsx": 98,

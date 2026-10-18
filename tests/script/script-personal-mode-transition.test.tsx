@@ -3,7 +3,6 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_DISPLAY, type DisplaySettings } from "@/components/script/script-editor/display-settings";
 import { useScriptPersonalModeTransition } from "@/components/script/script-editor/use-script-personal-mode-transition";
 import type { ScriptPersonalMode } from "@/components/script/script-editor/personal-mode";
 
@@ -17,16 +16,11 @@ const preserveScrollAnchor = vi.fn();
 
 function Probe({ canEdit, flush }: { canEdit: boolean; flush: () => Promise<boolean> }) {
   const [mode, setMode] = useState<ScriptPersonalMode>("edit");
-  const [rehearsalMode, setRehearsalMode] = useState(false);
-  const [, setDisplay] = useState<DisplaySettings>(DEFAULT_DISPLAY);
   const transition = useScriptPersonalModeTransition({
     scriptId: "script-a",
     baseCanEdit: canEdit,
     personalMode: mode,
-    rehearsalMode,
     setPersonalMode: setMode,
-    setRehearsalMode,
-    setDisplay,
     flushPendingPatch: flush,
     captureScrollAnchor: () => ({ id: "b1", top: 120 }),
     preserveScrollAnchor,
@@ -83,6 +77,12 @@ describe("剧本个人模式切换", () => {
     expect(preserveScrollAnchor).toHaveBeenCalledWith({ id: "b1", top: 120 });
     expect(resetInteractions).toHaveBeenCalledOnce();
     expect(closeMenu).toHaveBeenCalledOnce();
+
+    await click("edit");
+    expect(container.querySelector('[data-testid="mode"]')?.textContent).toBe("edit");
+    expect(localStorage.getItem("clickin:script-personal-mode:script-a")).toBe("edit");
+    expect(flush).toHaveBeenCalledOnce();
+    expect(preserveScrollAnchor).toHaveBeenCalledTimes(2);
   });
 
   it("无编辑权限时不能由模式切换获得编辑能力", async () => {

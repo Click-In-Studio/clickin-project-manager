@@ -73,6 +73,16 @@ describe("useDisplaySettings", () => {
     expect(parseDisplayCookie("broken")).toBe(DEFAULT_DISPLAY);
   });
 
+  it("旧 cookie 中的排练状态不进入显示设置，后续保存不再写回", () => {
+    const initialDisplay = parseDisplayCookie(encodeURIComponent(JSON.stringify({
+      rehearsalMode: true, pageBreaks: false,
+    })));
+    expect(initialDisplay).toEqual({ ...DEFAULT_DISPLAY, pageBreaks: false });
+    act(() => root.render(<DisplayProbe initialDisplay={initialDisplay} />));
+    act(() => dlatest().toggleDisplay("lineNumbers"));
+    expect(JSON.parse(cookie(DISPLAY_COOKIE)!)).toEqual({ ...DEFAULT_DISPLAY, pageBreaks: false, lineNumbers: false });
+  });
+
   it("行号开着按测量 span 给宽；关掉行号即清宽、样式为 undefined", () => {
     rect.width = 24.2;
     act(() => root.render(<DisplayProbe />));

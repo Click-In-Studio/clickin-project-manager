@@ -103,7 +103,7 @@ export default function ScriptBlock({
   lineIndexWidth,
   isSearchHighlight,
   showReadOnlyRehearsalMark = false,
-  readOnlyRehearsalMode = false,
+  readOnlyMode = false,
   readOnlyScene = null,
   showSceneLabel = true,
   stageDelimOpen = "（",
@@ -183,7 +183,7 @@ export default function ScriptBlock({
   lineIndexWidth?: string;
   isSearchHighlight?: "match" | "focused";
   showReadOnlyRehearsalMark?: boolean;
-  readOnlyRehearsalMode?: boolean;
+  readOnlyMode?: boolean;
   readOnlyScene?: Scene | null;
   showSceneLabel?: boolean;
   stageDelimOpen?: string;
@@ -489,11 +489,11 @@ export default function ScriptBlock({
   const hasStageComment = !!block.stageComment?.trim();
   const showCompactStageCommentRow = hasStageComment || stageCommentEditing;
   const stageCommentManualOffsetYPx =
-    isCompactTextLayout && (canEditText || readOnlyRehearsalMode) && (hasStageComment || stageCommentEditing)
+    isCompactTextLayout && (canEditText || readOnlyMode) && (hasStageComment || stageCommentEditing)
       ? IN_BLOCK_STAGE_COMMENT_MANUAL_OFFSET_PX
       : 0;
   const characterBottomGapClassName =
-    readOnlyRehearsalMode && !isCompactTextLayout && block.characterIds.length > 0
+    readOnlyMode && !isCompactTextLayout && block.characterIds.length > 0
       ? hasStageComment
         ? REHEARSAL_NON_COMPACT_CHARACTER_STAGE_COMMENT_GAP_CLASS
         : REHEARSAL_NON_COMPACT_CHARACTER_BOTTOM_GAP_CLASS
@@ -517,7 +517,7 @@ export default function ScriptBlock({
   };
   const showCharacterSelector = !effectiveHideCharSelector || isFocused || isSelected;
   const stageCommentPlacementClassName =
-    readOnlyRehearsalMode && !isCompactTextLayout && hasStageComment && !showCharacterSelector
+    readOnlyMode && !isCompactTextLayout && hasStageComment && !showCharacterSelector
       ? REHEARSAL_NON_COMPACT_HIDDEN_CHARACTER_STAGE_COMMENT_GAP_CLASS
       : undefined;
   const compactControlHoverStyle: React.CSSProperties | undefined = isCompactHiddenCharacterLayout
@@ -531,7 +531,7 @@ export default function ScriptBlock({
   }`;
   const lineNumberClass = isFocused
     ? "text-zinc-600"
-    : readOnlyRehearsalMode
+    : readOnlyMode
       ? "text-zinc-300 group-hover:text-zinc-500"
       : "text-zinc-400 group-hover:text-zinc-600";
   const blockRootStyle: React.CSSProperties | undefined = lineIndexWidth
