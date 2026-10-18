@@ -39,7 +39,7 @@ const HOT_PRODUCTION = [
 const WIKI_FAMILY = [
   "production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_backlinks",
   "production.wiki_dialect_ref",
-  "production.wiki_propose_create", "production.wiki_propose_update", "production.wiki_propose_delete",
+  "production.wiki_propose_create", "production.wiki_propose_update", "production.wiki_propose_patch", "production.wiki_propose_delete",
   "production.wiki_propose_move", "production.wiki_propose_tag", "production.wiki_set_grant",
 ];
 
@@ -100,6 +100,7 @@ const CLOSURE: Record<string, string[]> = {
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
+  "production.wiki_propose_patch": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
   "production.wiki_propose_update": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
   "production.wiki_propose_delete": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_move": ["production.wiki_tree", "production.wiki_search"],

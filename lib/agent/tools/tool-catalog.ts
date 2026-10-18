@@ -122,13 +122,13 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.wiki_tree", family: "production.wiki", scope: "production", oneliner: "浏览文档库的目录树",
     triggers: ["wiki", "文档", "文档结构", "文档目录", "有哪些文档", "文档库怎么组织"], en: "wiki documents tree list",
     examples: ["我能看到哪些文档", "列一下这个项目的文档", "文档库里都有什么", "有哪些 wiki"] },
-  { name: "production.wiki_search", family: "production.wiki", scope: "production", oneliner: "全文搜索当前制作的文档库",
+  { name: "production.wiki_search", family: "production.wiki", scope: "production", oneliner: "搜索文档库，或在指定文档内精确、正则、模糊搜索并返回行号",
     // "文档库"/"搜索" 这类短触发词是刻意的：bigram 命中占比对 3 字短语苛刻
     // （"文档库里搜索" 不含 "索文"，"搜索文档" 只得 0.67），短词补覆盖，
     // 误报代价只是召回提示里多一行，可接受。
     triggers: ["wiki", "文档", "搜文档", "找资料", "查资料", "搜索文档", "文档里找", "找一篇", "文档库", "搜索"], en: "wiki search documents fulltext",
     examples: ["帮我在文档里找一下关于灯光的内容", "搜一下排练笔记", "文档库里有没有提到预算"] },
-  { name: "production.wiki_read", family: "production.wiki", scope: "production", oneliner: "按 id 读取一篇文档的完整内容",
+  { name: "production.wiki_read", family: "production.wiki", scope: "production", oneliner: "按 id 完整或按行范围读取文档",
     triggers: ["wiki", "读文档", "打开文档", "看看这篇", "文档内容", "这篇文档"], en: "wiki read document content",
     examples: ["把那篇文档读给我看", "打开这篇文档的内容", "这篇 wiki 写了什么", "帮我读一下现在有的几份排练记录，里面有内容吗", "看看这几篇文档里写了什么", "打开最新的那篇看看"] },
   { name: "production.wiki_backlinks", family: "production.wiki", scope: "production", oneliner: "查询文档的双向链接关系",
@@ -140,6 +140,9 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.wiki_propose_update", family: "production.wiki", scope: "production", oneliner: "提议修改一篇文档（需人工确认）",
     triggers: ["修改文档", "改这篇", "更新文档", "优化这篇文档", "补充到文档"], en: "wiki update edit document",
     examples: ["帮我修改这篇文档", "把会议结论补充进文档", "优化一下这篇的结构"] },
+  { name: "production.wiki_propose_patch", family: "production.wiki", scope: "production", oneliner: "局部修改文档或批量替换文字（需人工确认，无需回传全文）",
+    triggers: ["修改文档", "改这篇", "更新文档", "局部修改", "替换", "补充到文档", "全文替换"], en: "wiki patch replace partial edit document",
+    examples: ["把文档里这个名字全部换掉", "只修改排练安排这一段", "给长文档补充一句"] },
   { name: "production.wiki_propose_delete", family: "production.wiki", scope: "production", oneliner: "提议删除一篇文档（需人工确认）",
     triggers: ["删除文档", "删掉这篇"], en: "wiki delete document",
     examples: ["把这篇文档删掉", "删除这篇过时的文档"] },
@@ -259,6 +262,7 @@ export const DIALECT_CLOSURE_TOOLS = new Set([
   "production.wiki_read",
   "production.wiki_propose_create",
   "production.wiki_propose_update",
+  "production.wiki_propose_patch",
 ]);
 
 function lexicalScore(phrase: string, promptTokens: Set<string>): number {

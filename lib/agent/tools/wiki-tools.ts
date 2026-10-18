@@ -1,5 +1,3 @@
-import { mapMarkdownOutsideCode } from "../../editor/markdown-code";
-import { normalizeTableHtml } from "@/lib/editor/table-html";
 // wiki.* 项目工具——production.* 族的一部分（门 = 成员资格 + 实例级可见性，
 // 复用 production-tools.ts 的 resolveProductionActor/DENIED_NOT_MEMBER）。
 // 语法方言声明见 ./wiki-link-syntax（教会模型别瞎发明 [[标题]] 语法）。
@@ -22,7 +20,8 @@ import type { WikiLevel } from "@/lib/perm/resource-grant-db";
 import { kickRevokedStreams } from "@/lib/perm/revoke-streams";
 import { broadcastWikiUpdate } from "@/lib/wiki/collab";
 import { hasEffectiveGrant, type GrantActor } from "@/lib/perm/grant-check";
-import { getPool } from "@/lib/pg";
+import { lineWindow, type LineRange } from "./wiki-text";
+import { wikiSearchDocument, sectionPath, type WikiSearchOptions } from "./wiki-text-search";
 import {
   getWikiProposalByToolCallId,
   markWikiProposalApplied, markWikiProposalBlocked,
@@ -149,39 +148,9 @@ export async function wikiBacklinks(userId: string, productionId: string, wikiId
 
 // ─── wiki.read ──────────────────────────────────────────────────────────────
 
-async function resolveLinkTitles(ids: string[], productionId: string): Promise<Map<string, string | null>> {
-  if (ids.length === 0) return new Map();
-  const res = await getPool().query<{ id: string; title: string | null }>(
-    `SELECT id::text AS id, title FROM wiki WHERE id = ANY($1::uuid[]) AND production_id = $2`,
-    [ids, productionId],
-  );
-  return new Map(res.rows.map((r) => [r.id, r.title]));
-}
-
-const WIKI_TOKEN_RE = /\[#wiki:([0-9a-fA-F-]{36})\]/g;
-const WIKI_MD_LINK_RE = /\[[^[\]]*\]\(\/__cm__\/wiki\/([0-9a-fA-F-]{36})(?:[?#][^)]*)?\)/g;
-// 只读兼容：wiki_revision 历史正文不迁移
-const WIKI_MD_LINK_V1_RE = /\[[^[\]]*\]\(\/__cm__wiki:([0-9a-fA-F-]{36})(?:[?&][^)]*)?\)/g;
-
-/** 把正文里的 id 形态链接换成可读的 [[标题]]，仅用于本工具的可读性处理——
- *  不碰 wiki_link 边表。只替换 extractWikiLinkTargets 已识别的真实目标
- *  （它本身就是代码块安全的），代码块里的语法示例原样保留，不误标"已删除"。 */
-function resolveBodyLinksForDisplay(body: string, titleMap: Map<string, string | null>, targetSet: Set<string>): string {
-  const sub = (raw: string, id: string): string => {
-    const lower = id.toLowerCase();
-    if (!targetSet.has(lower)) return raw;
-    const title = titleMap.get(lower);
-    return title ? `[[${title}]]` : "[[已删除的文档]]";
-  };
-  return mapMarkdownOutsideCode(body, segment => segment
-    .replace(WIKI_MD_LINK_RE, (m, id) => sub(m, id))
-    .replace(WIKI_MD_LINK_V1_RE, (m, id) => sub(m, id))
-    .replace(WIKI_TOKEN_RE, (m, id) => sub(m, id)));
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function wikiRead(userId: string, productionId: string, wikiId: string): Promise<string> {
+export async function wikiRead(userId: string, productionId: string, wikiId: string, range: LineRange = {}): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   // 误用反馈（2026-09-07 定谳：树里文档/文件同列，用错工具要明确指路）：
@@ -201,24 +170,30 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
   const doc = await getWiki(wikiId, productionId);
   if (!doc) return "没有找到该文档。";
 
-  const targets = extractWikiLinkTargets(doc.body);
-  const titleMap = await resolveLinkTitles(targets, productionId);
-  const body = resolveBodyLinksForDisplay(normalizeTableHtml(doc.body), titleMap, new Set(targets));
-  const shell = await getNodeByWikiId(wikiId);
-
-  const lines = [
-    `《${doc.title ?? "（无标题）"}》${shell?.isPublic ? "（公开）" : ""}`,
-    doc.tags.length > 0 ? `标签：${doc.tags.join("、")}` : null,
-    "",
-    body,
-  ].filter((l): l is string => l !== null);
-  // 标题/正文是成员可写的自由文本——中和注入分隔符再返回（间接注入防护）。
-  return neutralizeInjectionTags(lines.join("\n"));
+  try {
+    const window = lineWindow(doc.body, range);
+    const shell = await getNodeByWikiId(wikiId);
+    const targets = new Set(extractWikiLinkTargets(window.text));
+    const references = targets.size ? (await listOutgoingLinks(wikiId, productionId)).filter(ref => targets.has(ref.id)) : [];
+    const metadata = {
+      wikiId: doc.id, title: doc.title, tags: doc.tags, isPublic: shell?.isPublic ?? false,
+      startLine: window.startLine, endLine: window.endLine, totalLines: window.totalLines,
+      partial: window.startLine !== 1 || window.endLine !== window.totalLines,
+      sectionPath: sectionPath(doc.body, window.start + (window.text.split("\n")[0]?.length ?? 0)),
+      references,
+    };
+    // 定位元数据与正文分开；正文保留存储形态，确保搜索和 patch 逐字同源。
+    return neutralizeInjectionTags(`${JSON.stringify(metadata)}\n\n${window.text}`);
+  } catch (error) {
+    return `读取失败：${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 // ─── wiki.search ────────────────────────────────────────────────────────────
 
-export async function wikiSearch(userId: string, productionId: string, query: string): Promise<string> {
+export async function wikiSearch(userId: string, productionId: string, query: string, options: WikiSearchOptions = {}): Promise<string> {
+  if (options.wikiId) return wikiSearchDocument(userId, productionId, query, options);
+  if (Object.values(options).some(v => v !== undefined)) return "文内搜索参数需要 wikiId；不传 wikiId 时只搜索文档库标题与正文。";
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
 

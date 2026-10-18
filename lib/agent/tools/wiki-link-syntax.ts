@@ -85,7 +85,7 @@ export const WIKI_DIALECT_POINTER_WRITE =
   "方言完整说明若不在当前语境中，必须先调用 production.wiki_dialect_ref 获取——未获得说明前不得生成或改写正文；" +
   "违反方言的提议会被校验拒绝。";
 
-/** 读路径指针（wiki_read 描述用）：读回的正文含私有方言与显示形态。 */
+/** 读路径指针（wiki_read 描述用）：读回的正文保留存储的 Markdown 形态。 */
 export const WIKI_DIALECT_POINTER_READ =
-  "返回的正文含本库私有 Markdown 方言（[[标题]] 是 id 链接的显示形态，另有 callout/分栏等）。" +
+  "返回的正文保留本库私有 Markdown 方言与引用地址（另有 callout/分栏等），可用于精确 patch；行范围元数据不属于正文。" +
   "需要理解或改写正文而语境中没有方言说明时，先调用 production.wiki_dialect_ref。";

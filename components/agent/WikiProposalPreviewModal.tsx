@@ -10,6 +10,8 @@ type ProposalAction = "create" | "update" | "delete" | "move" | "tag";
 type ProposalPreview = {
   action: ProposalAction;
   targetWikiId: string | null;
+  patchDiff: string | null;
+  patchCounts: number[] | null;
   targetTitle: string | null;
   targetBody: string | null;
   targetTags: string[] | null;
@@ -271,7 +273,7 @@ export default function WikiProposalPreviewModal({
                 {data.status === "blocked_business_rule" && (
                   <div style={{ margin: "0 0 14px", padding: "10px 14px", background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 10 }}>
                     <p style={{ margin: 0, fontSize: 12, color: "var(--warn)" }}>
-                      这个操作被业务规则拦下了（比如文档被报告/备注引用、或是系统锚点目录），不是权限问题——申请权限也解决不了，需要先解除挂载/换一篇文档。
+                      {data.patchDiff != null ? "文档在提议后发生了变化，本次修改未执行。请让 AI 重新读取后发起提议。" : "这个操作被业务规则拦下了（比如文档被报告/备注引用、或是系统锚点目录），不是权限问题——申请权限也解决不了，需要先解除挂载/换一篇文档。"}
                     </p>
                   </div>
                 )}
@@ -290,12 +292,18 @@ export default function WikiProposalPreviewModal({
                   </div>
                 )}
 
-                {(data.action === "create" || (data.action === "update" && data.body)) && (
+                {data.patchDiff != null && (
+                  <>
+                    <p style={{ fontSize: 13, color: "var(--muted)" }}>局部修改：共 {data.patchCounts?.reduce((a, b) => a + b, 0)} 处。减号为删除，加号为新增。</p>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12 }}>{data.patchDiff}</pre>
+                  </>
+                )}
+                {(data.action === "create" || (data.action === "update" && data.body && data.patchDiff == null)) && (
                   <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "14px 16px" }}>
                     <WikiMarkdown content={data.body || "（空）"} productionId={productionId} />
                   </div>
                 )}
-                {data.action === "update" && !data.body && (
+                {data.action === "update" && !data.body && data.patchDiff == null && (
                   <p style={{ fontSize: 13, color: "var(--muted)" }}>正文不变。</p>
                 )}
                 {data.action === "delete" && data.targetBody && (
