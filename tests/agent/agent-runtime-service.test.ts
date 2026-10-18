@@ -21,7 +21,7 @@ import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
 import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
 import { CHAT_MODEL, llmRuntime, resolveModel } from "@/lib/agent/runtime/config";
 import { exposedName } from "@/lib/agent/runtime/tools";
-import { TOOL_CATALOG } from "@/lib/agent/tools/tool-catalog";
+import { TOOL_CATALOG, TOOL_FAMILIES } from "@/lib/agent/tools/tool-catalog";
 import { createPendingAttachment, markAttachmentReady } from "@/lib/agent/attachment-db";
 import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
 
@@ -314,6 +314,9 @@ describe("agent-runtime service", () => {
     // 工具三层：制作会话热层在，wiki 族（无页面、无触发词）不在
     expect(seen[0].tools).toContain(exposedName("production.info"));
     expect(seen[0].tools).not.toContain(exposedName("production.wiki_read"));
+    // 真实模型请求仍能看到未加载族的事实范围，不受工具召回结果限制。
+    expect(seen[0].systemPrompt).toContain(TOOL_FAMILIES["production.wiki"].hint);
+    expect(seen[0].systemPrompt).toContain(TOOL_FAMILIES["production.script"].hint);
     expect(seen[0].tools.every((t) => t.startsWith("clickin__"))).toBe(true);
     expect(seen[0].reasoning).toBe("low");
 
@@ -356,6 +359,8 @@ describe("agent-runtime service", () => {
       await waitForIdle(key);
       expect(seen[0].tools).not.toContain(exposedName("my.attachment_rename"));
       expect(seen[1].tools).toContain(exposedName("my.attachment_rename"));
+      // 动态族介绍在后续请求重建 system prompt 时也不能丢失。
+      for (const request of seen) expect(request.systemPrompt).toContain("mmp.test.generate：生成测试音频");
       expect(JSON.stringify(seen[2].messages)).toContain("开场音效.flac");
       expect(lines.some((line) => line.type === "approval")).toBe(false);
       expect(lines).toContainEqual(expect.objectContaining({ type: "mutation", scope: "attachment", ids: [attachmentId] }));

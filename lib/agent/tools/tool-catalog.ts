@@ -36,17 +36,44 @@ export type ToolCatalogEntry = {
   examples?: string[];
 };
 
-/** 工具族：召回/提示的最小单位。label 用于提示块点名。 */
-export const TOOL_FAMILIES: Record<string, { label: string }> = {
-  "my.schedule": { label: "我的日程" },
-  "my.account": { label: "我的账号与记忆" },
-  "my.automation": { label: "定时任务" },
-  "production.overview": { label: "制作概况" },
-  "production.people": { label: "通讯录" },
-  "production.wiki": { label: "文档库" },
-  "production.dramaturgy": { label: "构作（场次与角色）" },
-  "production.script": { label: "剧本正文" },
-  "production.doc": { label: "上传文档解读" },
+/** 工具族：label 用于召回点名；hint 常驻系统 prompt，声明事实范围而非加载状态。 */
+export const TOOL_FAMILIES: Record<string, { label: string; hint: string }> = {
+  "my.schedule": {
+    label: "我的日程",
+    hint: "系统中本人近期通告、相关技术需求、关注事件及可见临近里程碑的查询入口。结果受本人关系、可见范围和时间范围限制，不代表完整项目日程或全部任务。",
+  },
+  "my.account": {
+    label: "我的账号与记忆",
+    hint: "查询本人参与的制作、登记的联系方式，管理个人 AI 指令、长期记忆和会话附件。参与关系与联系方式以对应系统记录为准；历史记忆只说明曾记录或讨论过什么，不证明当前业务状态，也不自动代表用户已确认。会话附件是具体材料，不因上传或生成而成为项目正式记录。",
+  },
+  "my.automation": {
+    label: "定时任务",
+    hint: "本人 AI 定时任务的配置、启停、运行时间与运行记录的权威入口。任务已创建或已运行，不等于目标已经完成；完成情况以实际执行结果为准。",
+  },
+  "production.overview": {
+    label: "制作概况",
+    hint: "当前制作登记的基本信息、本人项目职位与部门、本人项目通知及项目里程碑的权威入口。通知代表收到的消息，不自动证明其中提及的业务状态仍然有效；里程碑不等于完整排练或执行日程。",
+  },
+  "production.people": {
+    label: "通讯录",
+    hint: "当前制作登记的成员、职位、部门与用户组结构及其负责人的权威入口。登记职位或部门负责人不能单独证明某项具体工作的指派情况；不要推断工具未提供的联系方式。",
+  },
+  "production.wiki": {
+    label: "文档库",
+    hint: "查询和管理自由文档、目录、链接及分享设置。它是某篇文档当前内容、组织和分享状态的直接依据，不对其他业务领域具有默认权威性。标题、标签或正文中的正式、终版等字样，不会自动使文档成为对应系统业务记录。",
+  },
+  "production.dramaturgy": {
+    label: "构作（场次与角色）",
+    hint: "系统章节与场次结构、场次构作信息、角色记录和人物小传的权威入口。剧本正文由剧本族读取。文档中的分场方案、人物研究或另一版小传，不自动代表对应系统记录已经更新。",
+  },
+  "production.script": {
+    label: "剧本正文",
+    hint: "项目当前系统剧本正文的权威入口，包括台词、舞台提示及其正文位置。无其他明确指向的剧本正文查询默认从这里开始。文档库或上传文件中的其他稿件与系统剧本分别管理；系统当前正文不自动等于某次演出的执行稿。",
+  },
+  "production.doc": {
+    label: "上传文档解读",
+    hint: "查找与读取项目资产、解析文件内容、保存附件为资产，并支持导入作业。读取结果说明具体文件中的内容；解析、OCR 或导入准备不代表内容已写入系统剧本或其他业务记录。导入日志追踪该次作业的裁决与进度，不自动成为整个项目的通用规则。",
+  },
 };
 
 // model_list 与 subagent 协作工具只放热层，不参与召回（#908）；由 RUNTIME_ONLY_TOOLS 声明目录豁免。

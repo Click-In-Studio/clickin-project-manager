@@ -72,4 +72,10 @@ describe("工具族", () => {
     }
     for (const f of Object.keys(TOOL_FAMILIES)) expect(used.has(f), f).toBe(true);
   });
+
+  it("每个固定族都声明非空事实边界，新增族不能只注册名字", () => {
+    for (const [id, family] of Object.entries(TOOL_FAMILIES)) {
+      expect(family.hint?.trim(), id).toBeTruthy();
+    }
+  });
 });
