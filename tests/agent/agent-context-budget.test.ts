@@ -7,6 +7,7 @@ import {
   DEFAULT_COMPACTION_SETTINGS,
   type CompactionPreparation,
 } from "../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
+import { resolveModel } from "@/lib/agent/runtime/config";
 import { compactionSettingsFor, estimateRequestBudget } from "@/lib/agent/runtime/context-budget";
 import { convertToLlm, createCompactionSummaryMessage } from "../../vendor/openclaw/packages/agent-core/src/harness/messages";
 
@@ -66,6 +67,22 @@ describe("压缩控制指令与用户意图隔离", () => {
 });
 
 describe("模型请求上下文预算", () => {
+  it.each([
+    ["deepseek-flash", 256_000, 1_000_000],
+    ["deepseek-pro", 256_000, 1_000_000],
+    ["resonance", 64_000, 1_000_000],
+    ["inspiration", 65_536, 1_048_576],
+  ])("%s 的长输入与官方普通输出额度可同时容纳", (key, output, window) => {
+    const model = resolveModel(key as Parameters<typeof resolveModel>[0]);
+    const budget = estimateRequestBudget(model, { messages: [user("长文档材料".repeat(40_000))] });
+    expect(budget.outputReserveTokens).toBe(output);
+    expect(budget.effectiveContextWindow).toBe(window);
+    expect(budget.estimatedInputTokens).toBeGreaterThan(128_000);
+    expect(budget.fits).toBe(true);
+    expect(budget.pressured).toBe(false);
+    expect(compactionSettingsFor(model)).toEqual({ enabled: true, reserveTokens: 8192, keepRecentTokens: 8192 });
+  });
+
   it("完整预算覆盖 system、工具、临时消息、有效窗口与输出预留", () => {
     const base = estimateRequestBudget(MODEL, { messages: [user("任务")] });
     const withSystem = estimateRequestBudget(MODEL, {
