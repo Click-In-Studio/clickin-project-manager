@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireOwnership, requireUser, toErrorResponse } from "@/lib/agent/chat/http";
-import { getHistory } from "@/lib/agent/runtime/client";
+import { getHistoryPage } from "@/lib/agent/runtime/chat-history-db";
 
 export const runtime = "nodejs";
 
@@ -15,8 +15,7 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
-    const messages = await getHistory(sessionKey);
-    return NextResponse.json({ messages });
+    return NextResponse.json(await getHistoryPage(sessionKey, req.nextUrl.searchParams.get("cursor")));
   } catch (err) {
     return toErrorResponse(err);
   }

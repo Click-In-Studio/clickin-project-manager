@@ -1,3 +1,4 @@
+import { getHistoryPage } from "@/lib/agent/runtime/chat-history-db";
 import { reserveRequestCost, settleRequestCost } from "@/lib/agent/runtime/cost-budget-db";
 import { TASK_COST_LIMIT_CREDITS } from "@/lib/agent/runtime/cost-budget";
 import { acquire, release } from "@/lib/agent/runtime/admission";
@@ -59,7 +60,6 @@ import {
   abortRun,
   waitForIdle,
   dispatchPendingSession,
-  getHistory,
   listSessions,
 } from "@/lib/agent/runtime/service";
 
@@ -1096,3 +1096,7 @@ describe("持久子 Agent 基建", () => {
     ).toEqual([eventId]);
   });
 });
+
+async function getHistory(sessionId: string) {
+  return (await getHistoryPage(sessionId)).messages.map(({ key: _key, ...message }) => message);
+}

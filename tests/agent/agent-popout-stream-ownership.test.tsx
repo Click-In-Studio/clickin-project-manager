@@ -37,7 +37,11 @@ function watch() {
 }
 const KEY = "clickin:chat:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222";
 const OTHER = "clickin:chat:11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333";
-const json = (data: unknown) => Response.json(data);
+const json = (data: unknown) => {
+  const page = data as { messages?: Array<Record<string, unknown>> };
+  return Response.json(page.messages ? { attachments: [], nextCursor: null, ...page,
+    messages: page.messages.map((message, index) => ({ key: `${index + 1}:fixture:${message.role}`, ...message })) } : data);
+};
 const events = [
   { type: "delta", text: "本轮过程正文" },
   { type: "tool", name: "clickin__production-wiki_read", id: "same-tool" },

@@ -28,7 +28,7 @@ it("重新打开会话，将历史失败原因恢复为可见提示", async () =
   localStorage.setItem("clickin-ai-last-session:personal", key);
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url === "/api/agent/sessions") return Response.json({ sessions: [{ key, title: "失败的对话", status: "done" }], gatewayStatus: { state: "connected" } });
-    if (url.startsWith("/api/agent/chat/history")) return Response.json({ messages: [{ role: "user", content: "帮我回顾一下" }, { role: "notice", content: "模型服务当前不可用" }] });
+    if (url.startsWith("/api/agent/chat/history")) return Response.json({ attachments: [], nextCursor: null, messages: [{ key: "1:fixture:user", role: "user", content: "帮我回顾一下" }, { key: "2:fixture:notice", role: "notice", content: "模型服务当前不可用" }] });
     if (url.startsWith("/api/agent/questions")) return Response.json({ questions: [] });
     if (url.startsWith("/api/agent/models")) return Response.json({ models: [], selection: { modelKey: "deepseek-flash", thinkingLevel: "low", disabledSubagentModels: [] } });
     return Response.json({});
