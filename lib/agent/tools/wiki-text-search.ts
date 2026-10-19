@@ -45,6 +45,7 @@ export async function wikiSearchDocument(userId: string, productionId: string, q
         startLine: window.startLine + locate(m.start) - 1,
         endLine: window.startLine + locate(m.end - 1) - 1,
         matchedText: m.text.slice(0, 400),
+        offsetInStartLine: m.start - (window.text.lastIndexOf("\n", m.start - 1) + 1),
       }));
     const lines = doc.body.split("\n");
     const matches = hits.slice(0, limit).map(hit => {

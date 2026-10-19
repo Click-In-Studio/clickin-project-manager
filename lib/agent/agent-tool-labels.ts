@@ -46,7 +46,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "users-query_sensitive": "读取本人联系方式",
   "production-dramaturgy_permissions": "查询构作写权限",
   "production-scene_list": "浏览场次结构",
-  "production-scene_read": "阅读场次构作",
+  "production-scene_read": "分段阅读场次构作",
   "production-character_list": "浏览角色列表",
   "production-character_read": "阅读角色小传",
   "production-scene_propose_update": "提议修改场次",
@@ -64,7 +64,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-script_propose_rewrite": "提议改写剧本段落",
   "production-script_propose_edit_blocks": "提议修改剧本块",
   "production-doc_outline": "读文档结构概览",
-  "production-doc_read": "读文档内容",
+  "production-doc_read": "分段精读文档",
   "production-doc_search": "搜索文档内容",
   "production-doc_page_ocr": "识别扫描页文字",
   "production-asset_read": "读取素材原件",
@@ -82,7 +82,7 @@ export const TOOL_LABELS: Record<string, string> = {
   "ask_user": "向用户提问",
   "find_tools": "搜索可用工具",
   "web-search": "联网搜索",
-  "web-fetch": "抓取网页或文件",
+  "web-fetch": "抓取网页并保留原文",
 };
 
 /** 暴露名/原始名 → 中文显示名；没配的（未来新工具、gateway 内置工具）

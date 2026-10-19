@@ -223,7 +223,7 @@ export async function sceneList(userId: string, productionId: string, opts: { wi
   return neutralizeInjectionTags(lines.join("\n"));
 }
 
-export async function sceneRead(userId: string, productionId: string, sceneId: string): Promise<string> {
+export async function sceneRead(userId: string, productionId: string, sceneId: string, opts: { field?: string; window?: import("./text-window").TextWindow } = {}): Promise<string> {
   const denied = await sceneReadGate(userId, productionId);
   if (denied) return denied;
   const versionId = await getActiveVersionId(productionId);
@@ -233,7 +233,14 @@ export async function sceneRead(userId: string, productionId: string, sceneId: s
   if (!s) return "没有找到该章节/场次。";
   const parent = s.parentId ? scenes.find((x) => x.id === s.parentId) : null;
   const children = s.kind === "chapter" ? scenes.filter((x) => x.kind === "scene" && x.parentId === s.id) : [];
+  if (opts.field) {
+    if (!(META_FIELDS as readonly string[]).includes(opts.field)) return "field 必须是 synopsis/actionLine/music/stageNotes/expectedDuration";
+    const { formatTextWindow } = await import("./text-window");
+    const value = s[opts.field as typeof META_FIELDS[number]] ?? "";
+    return neutralizeInjectionTags(`sceneId=${sceneId} field=${opts.field}\n${formatTextWindow(value, opts.window)}`);
+  }
   const details = detailLines(s, "", 2000);
+  if (details.length) details.push("字段有省略时，用 scene_read 的 field + window={offset,length} 读取；字符坐标为零起始 UTF-16，首含尾不含。");
   const lines = [
     `【${kindLabel(s.kind)}】${s.number ? `${s.number} ` : ""}${s.name || "（未命名）"}（id: ${s.id}）`,
     parent ? `所属章节：${parent.name || "（未命名）"}（id: ${parent.id}）` : null,

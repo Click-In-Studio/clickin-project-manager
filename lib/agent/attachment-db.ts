@@ -75,7 +75,7 @@ export async function getAttachmentUsage(userId: string, sessionId: string) {
 export async function createPendingAttachment(input: {
   sessionId: string; userId: string; fileName: string; mimeType: string; mediaKind?: string | null; fileSize: number;
   source?:
-    | { kind: "web_fetch"; runId: string; toolCallId: string; url: string; finalUrl: string }
+    | { kind: "web_fetch"; runId: string; toolCallId: string; url: string; finalUrl: string; metadata?: Record<string, unknown> }
     | { kind: "mmp"; runId: string; toolCallId: string; outputName: string; outputIndex: number; metadata: Record<string, unknown> };
 }): Promise<AgentAttachment> {
   const identity = parseSessionIdentity(input.sessionId);
@@ -151,7 +151,7 @@ export async function createPendingAttachment(input: {
         input.source?.kind === "web_fetch" ? input.source.finalUrl : null,
         input.source?.kind === "mmp" ? input.source.outputName : null,
         input.source?.kind === "mmp" ? input.source.outputIndex : null,
-        input.source?.kind === "mmp" ? JSON.stringify(input.source.metadata) : null],
+        input.source ? JSON.stringify(input.source.metadata ?? {}) : null],
     );
     await client.query(
       `INSERT INTO agent_attachment_object

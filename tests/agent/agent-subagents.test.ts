@@ -359,7 +359,9 @@ describe("持久子 Agent 基建", () => {
     const trace = JSON.parse(await readSubagent(p.sessionId, id));
     expect(JSON.stringify(trace)).toContain("剧本第一章第1场");
     expect(JSON.stringify(trace)).toContain("甲：我要留在这里");
-    const offsets = trace.entries
+    const fullEntries = await Promise.all(trace.entries.map(async (e: { seq: number; read?: string; payload: unknown }) => e.read
+      ? { ...e, payload: JSON.parse(JSON.parse(await readSubagent(p.sessionId, id, 0, { entrySeq: e.seq, window: { length: 80000 } })).text) } : e));
+    const offsets = fullEntries
       .filter(
         (e: { payload: { message?: { role: string } } }) =>
           e.payload.message?.role === "toolResult",
@@ -1095,6 +1097,18 @@ describe("持久子 Agent 基建", () => {
       (await pendingEventsForRun(p.sessionId, p.runId)).map((r) => r.id),
     ).toEqual([eventId]);
   });
+  it("子 Agent 长结果仍从持久记录窗口读回，不另造材料副本", async () => {
+    const p = await parent();
+    subagentRuntimeOverrides.streamFn = model(["分析".repeat(10000) + "结果后段证据"], []);
+    const output = await spawnSubagent(p, { task: "分析长材料" }, "long-result-window");
+    const id = /as_[a-z0-9]+/.exec(output)![0];
+    await completed(p, id);
+    const preview = JSON.parse(await readSubagent(p.sessionId, id));
+    expect(JSON.stringify(preview.view)).not.toContain("结果后段证据");
+    const detail = JSON.parse(await readSubagent(p.sessionId, id, 0, { window: { offset: 20000 } }));
+    expect(detail.view.result.text).toContain("结果后段证据");
+  });
+
 });
 
 async function getHistory(sessionId: string) {

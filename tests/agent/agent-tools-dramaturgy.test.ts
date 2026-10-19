@@ -286,3 +286,12 @@ describe("注册表与卡片", () => {
     expect(card.description).toContain("角色 · 编辑角色");
   });
 });
+
+it("场次长字段可以在同一权限门内读回后段", async () => {
+  await runDramaturgyProposal(editorId, prodId, "production-scene_propose_update", {
+    updates: [{ sceneId: chapterA, synopsis: "甲".repeat(3000) + "梗概后段证据" }], summary: "测试长字段读取",
+  });
+  expect(await sceneRead(editorId, prodId, chapterA)).not.toContain("梗概后段证据");
+  expect(await sceneRead(editorId, prodId, chapterA, { field: "synopsis", window: { offset: 3000 } })).toContain("梗概后段证据");
+  expect(await sceneRead(plainId, prodId, chapterA, { field: "synopsis", window: { offset: 3000 } })).toBe(DENIED_SCENE_VIEW);
+});

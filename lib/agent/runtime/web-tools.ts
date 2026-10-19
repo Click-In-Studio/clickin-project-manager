@@ -42,7 +42,7 @@ export function formatSearchHits(query: string, hits: SearchHit[]): string {
 
 // ── 抓页 ────────────────────────────────────────────────────────────────────
 
-export interface FetchedPage { url: string; title: string; text: string; truncated: boolean }
+export interface FetchedPage { url: string; title: string; text: string; truncated: boolean; requestedUrl: string; fetchedAt: string }
 
 export interface FetchedBinary {
   requestedUrl: string;
@@ -144,7 +144,7 @@ export async function webFetch<T>(
   title = sanitizeText(title);
   text = sanitizeText(text);
   const truncated = text.length > WEB_FETCH_MAX_CHARS;
-  return { url: current.href, title, text: truncated ? text.slice(0, WEB_FETCH_MAX_CHARS) : text, truncated };
+  return { url: current.href, requestedUrl: url.href, fetchedAt: new Date().toISOString(), title, text, truncated };
 }
 
 const TEXTUAL_CTYPE = /^text\/|[/+](html|xml|json|javascript|ecmascript|yaml|csv|markdown|x-www-form-urlencoded)$/;
@@ -240,7 +240,7 @@ export function sanitizeText(s: string): string {
 
 export function formatFetchedPage(p: FetchedPage): string {
   const head = p.title ? `标题：${p.title}\n来源：${p.url}` : `来源：${p.url}`;
-  return `${head}\n\n${p.text}${p.truncated ? `\n\n[正文超过 ${WEB_FETCH_MAX_CHARS} 字已截断]` : ""}`;
+  return `${head}\n\n${p.text}`;
 }
 
 /** 极简 HTML → 文本：去 script/style/noscript/template，块级标签换行，实体解码，空白折叠。 */
@@ -290,17 +290,16 @@ async function readCapped(
     const kept = first.subarray(0, max);
     chunks.push(kept);
     total = kept.byteLength;
-    if (first.byteLength > max) await reader.cancel().catch(() => {});
+    if (first.byteLength > max) { await reader.cancel().catch(() => {}); throw new WebToolError("响应超过 2 MiB 抓取上限，未取得完整材料；请使用文件下载链接或缩小来源范围。"); }
   }
-  if (doneAfterFirst || total >= max) {
-    if (!doneAfterFirst) await reader.cancel().catch(() => {});
+  if (doneAfterFirst) {
     return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(chunks));
   }
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > max) { chunks.push(value.subarray(0, value.byteLength - (total - max))); await reader.cancel().catch(() => {}); break; }
+    if (total > max) { await reader.cancel().catch(() => {}); throw new WebToolError("响应超过 2 MiB 抓取上限，未取得完整材料；请使用文件下载链接或缩小来源范围。"); }
     chunks.push(value);
   }
   return new TextDecoder("utf-8", { fatal: false }).decode(Buffer.concat(chunks));

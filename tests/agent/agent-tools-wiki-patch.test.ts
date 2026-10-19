@@ -208,3 +208,16 @@ describe("局部读写真链路", () => {
     expect((await getWiki(doc.id, prodId))?.body).toBe("原文");
   });
 });
+
+it("Wiki 超长单行可以从搜索位置窗口读回，默认预览明确标记省略", async () => {
+  const doc = await createWiki({ productionId: prodId, title: "长行定位", body: "# 标题\n" + "甲".repeat(20000) + "行尾证据", createdBy: ownerId });
+  const preview = await wikiRead(ownerId, prodId, doc.id);
+  expect(preview).not.toContain("行尾证据");
+  expect(JSON.parse(preview.split("\n")[0]).partial).toBe(true);
+  const search = JSON.parse(await wikiSearch(ownerId, prodId, "行尾证据", { wikiId: doc.id }));
+  const match = search.matches[0];
+  expect(match.offsetInStartLine).toBe(20000);
+  const body = await wikiRead(ownerId, prodId, doc.id, { startLine: match.startLine, endLine: match.endLine, window: { offset: match.offsetInStartLine } });
+  expect(body).toContain("行尾证据");
+  expect(await wikiRead(outsiderId, prodId, doc.id, { window: { offset: 20000 } })).toContain("权限被拒绝");
+});

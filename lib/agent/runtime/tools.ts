@@ -148,6 +148,15 @@ function prodTool(mcpName: string, description: string, fn: (uid: string, pid: s
   return { mcpName, description, parameters: NONE, readOnly: true, needsProduction: true, execute: (ctx) => fn(ctx.userId, ctx.productionId) };
 }
 
+const TEXT_WINDOW = Type.Object({
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: "零起始 UTF-16 偏移" })),
+  length: Type.Optional(Type.Integer({ minimum: 1, maximum: 80000, description: "窗口长度，默认8000；首含尾不含" })),
+});
+const DOC_WINDOW = Type.Object({ ...TEXT_WINDOW.properties,
+  block: Type.Optional(Type.Integer({ minimum: 0 })), page: Type.Optional(Type.Integer({ minimum: 1 })),
+  row: Type.Optional(Type.Integer({ minimum: 0 })), column: Type.Optional(Type.Integer({ minimum: 0 })),
+  line: Type.Optional(Type.Integer({ minimum: 0 })), noteId: Type.Optional(Type.String()),
+});
 const LINE_RANGE = {
   startLine: Type.Optional(Type.Integer({ minimum: 1, description: "起始行，1 开始；首尾包含，来自 wiki_search 的行号" })),
   endLine: Type.Optional(Type.Integer({ minimum: 1, description: "结束行，首尾包含；省略则到文末" })),
@@ -200,10 +209,11 @@ export const DEFS: ToolDefinition[] = [
     mcpName: "my.attachment_read",
     description:
       "读取当前会话中用户上传或工具产出的临时文件（EN: read attached uploaded file）。attachmentId 来自附件上下文或工具返回的产物。" +
-      "默认按当前模型能力原生读取；上下文拥挤时先整理历史；格式或原件硬限制不适合原生时走 MMP/文档解析。纯文本默认读取，可用 mode=read + ranges 按零起始字符区间 [from,to) 回查长文本；无法原生读取的 docx/pdf 默认给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索。原件已完整在上下文时无需重复读取。图片或扫描 PDF 识字用 mode=ocr。附件只在当前会话有效。",
+      "默认按当前模型能力原生读取；上下文拥挤时先整理历史；格式或原件硬限制不适合原生时走 MMP/文档解析。纯文本可用 mode=read + window={offset,length}（零起始 UTF-16，首含尾不含）或 ranges 回查，mode=search + query 搜索；无法原生读取的 docx/pdf 默认给结构概览，可用 mode=read + ranges 分段读、mode=search + query 检索。原件已完整在上下文时无需重复读取。图片或扫描 PDF 识字用 mode=ocr。附件只在当前会话有效。",
     parameters: Type.Object({
       attachmentId: Type.String({ description: "临时附件 id" }),
       mode: Type.Optional(Type.Union([Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
+      window: Type.Optional(DOC_WINDOW),
       ranges: Type.Optional(Type.Array(Type.Object({
         from: Type.Integer({ minimum: 0 }),
         to: Type.Integer({ minimum: 0 }),
@@ -315,13 +325,13 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.wiki_read",
-    description: `按 id 读取文档；可用 startLine/endLine 聚焦搜索命中附近，不传则完整读取。返回独立范围元数据和纯 Markdown 正文，不给正文逐行加号。局部读取不能代替全文理解；检查全文关联或矛盾时应扩大范围或读全文（EN: wiki read document content range focus）。${WIKI_DIALECT_POINTER_READ}`,
-    parameters: Type.Object({ wikiId: WIKI_ID, ...LINE_RANGE }), readOnly: true, needsProduction: true,
+    description: `按 id 读取文档；可用 startLine/endLine 聚焦搜索命中附近；大范围默认给有限预览，可用 window={offset,length} 在该行范围内继续读，字符单位零起始 UTF-16。返回独立范围元数据和纯 Markdown 正文，不给正文逐行加号。局部读取不能代替全文理解；检查全文关联或矛盾时应扩大范围或读全文（EN: wiki read document content range focus）。${WIKI_DIALECT_POINTER_READ}`,
+    parameters: Type.Object({ wikiId: WIKI_ID, ...LINE_RANGE, window: Type.Optional(TEXT_WINDOW) }), readOnly: true, needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/agent/tools/wiki-tools")).wikiRead(ctx.userId, ctx.productionId, String(args.wikiId), args),
   },
   {
     mcpName: "production.wiki_search",
-    description: "搜索文档库（标题+正文）；指定 wikiId 则在该文档内搜索，返回命中起止行号、原文及前后文，供范围 read/patch 定位。文内支持 literal 精确、regex 正则、fuzzy 模糊候选；模糊仅用于找位置，禁止用于写入。正则使用 JavaScript 语法，flags 支持 i/m/s/u，不支持零长度匹配。",
+    description: "搜索文档库（标题+正文）；指定 wikiId 则在该文档内搜索，返回命中起止行号、offsetInStartLine（该起始行内的零起始 UTF-16 偏移）、原文及前后文，供范围 read/patch 定位；长行用 wiki_read 对准命中行并传 window.offset。文内支持 literal 精确、regex 正则、fuzzy 模糊候选；模糊仅用于找位置，禁止用于写入。正则使用 JavaScript 语法，flags 支持 i/m/s/u，不支持零长度匹配。",
     parameters: Type.Object({
       query: Type.String({ description: "关键词或正则表达式（不带 / 分隔符）" }),
       wikiId: Type.Optional(WIKI_ID), ...LINE_RANGE,
@@ -484,10 +494,10 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "production.scene_read",
-    description: "读取一个章节/场次的完整构作信息：名称、类型、所属章节、梗概、行动线、音乐、舞台呈现、预计时长、排练标记，章节还会列出下辖场次（EN: read scene details synopsis）。",
-    parameters: Type.Object({ sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }) }),
+    description: "读取章节/场次构作信息；默认长字段给预览，指定 field（synopsis/actionLine/music/stageNotes/expectedDuration）+ window={offset,length} 读完整字段：名称、类型、所属章节、梗概、行动线、音乐、舞台呈现、预计时长、排练标记，章节还会列出下辖场次（EN: read scene details synopsis）。",
+    parameters: Type.Object({ sceneId: Type.String({ description: "章节/场次 id（来自 scene_list）" }), field: Type.Optional(Type.String()), window: Type.Optional(TEXT_WINDOW) }),
     readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).sceneRead(ctx.userId, ctx.productionId, String(args.sceneId)),
+    execute: async (ctx, args) => (await import("@/lib/agent/tools/dramaturgy-tools")).sceneRead(ctx.userId, ctx.productionId, String(args.sceneId), args),
   },
   prodTool("production.character_list",
     "列出当前制作的全部角色：id、名称、单人/聚合（含聚合成员）、角色类型、性别、小传摘要（EN: list characters cast）。需要角色 id 的工具从这里取。",
@@ -729,23 +739,24 @@ export const DEFS: ToolDefinition[] = [
     mcpName: "production.doc_read",
     description:
       "按区间批量读取 docx/pdf 资产内容，行式输出信号标注——信号只报不判，怎么解读（角色名？唱词？cue 标注？）由你结合映射假设判断（EN: read docx pdf paragraphs pages ranges signals）。" +
-      "docx：区间=块号，`[¶N 样式/对齐/缩进/粗斜体/字体]`，表格整块出、脚注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在），单次 150 块。" +
+      "window 精读：docx 用 block，可选 row/column 或 noteId；pdf 用 page，可选 line；offset/length 是选中对象内零起始 UTF-16 字符窗口（首含尾不含），row/column/line 零起始、page 一起始。docx：区间=块号，`[¶N 样式/对齐/缩进/粗斜体/字体]`，表格整块出、脚注随段附出、图片与内嵌对象以 ⟦图⟧/⟦对象⟧ 占位（它们不可读，但你必须知道它们存在），单次 150 块。" +
       "pdf：区间=页序（1 起，印刷页码可能不同），行锚 `[pN.i x=行首坐标]`，词距已按坐标还原、大间隙显式标 ⟨N⟩pt（竖排文档中间隙常是发话时序等记号，别丢），跨页重复行标 ≡，单次 10 页/400 行。",
     parameters: Type.Object({
       assetId: Type.String({ description: "资产 id" }),
-      ranges: Type.Array(
+      window: Type.Optional(DOC_WINDOW),
+      ranges: Type.Optional(Type.Array(
         Type.Object({
           from: Type.Integer({ minimum: 0, description: "起始（docx=块号 0 起；pdf=页序 1 起，含）" }),
           to: Type.Integer({ minimum: 0, description: "结束（含）" }),
         }),
-        { minItems: 1, description: "区间数组（锚点见 doc_outline / doc_search）" },
-      ),
+        { minItems: 1, description: "区间数组（锚点见 doc_outline / doc_search）；或传 window 精读" },
+      )),
     }),
     readOnly: true, needsProduction: true,
     execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docRead(
       ctx.userId, ctx.productionId, String(args.assetId),
-      (args.ranges as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })),
-      { sessionId: ctx.run?.sessionId ?? null },
+      ((args.ranges ?? []) as Array<{ from: number; to: number }>).map((r) => ({ from: Number(r.from), to: Number(r.to) })),
+      { sessionId: ctx.run?.sessionId ?? null, window: args.window as import("../tools/doc-window").DocWindow | undefined },
     ),
   },
   {
@@ -771,26 +782,30 @@ export const DEFS: ToolDefinition[] = [
       "对 pdf 的栅格化 / 抽取不完整页，或 png/jpeg/tiff/webp 图片文件，按页识别文字（EN: OCR scanned pages image text recognize rasterized）。" +
       "doc_outline 标了栅格化的页用它读；有文本层的页用 doc_read（更便宜且无错字）。" +
       "默认快档（每页文本行 + 质量信号）；结果里提示「建议升慢档的页」时，再只对那些页用 tier: \"full\" 重跑（版面结构 + markdown + 表格/印章元素，慢且贵）。" +
-      "识别结果可能有错字，关键内容要让用户核对；单次快档 10 页 / 慢档 5 页。GPU 推理按用量计入 AI 额度。",
+      "识别结果可能有错字，关键内容要让用户核对；单次快档 10 页 / 慢档 5 页；长识别结果完整保存为附件，后续按附件窗口读，不必重跑识别。GPU 推理按用量计入 AI 额度。",
     parameters: Type.Object({
       assetId: Type.String({ description: "资产 id" }),
       pages: Type.Array(Type.Integer({ minimum: 1 }), { minItems: 1, description: "页序（1 起）；图片文件传 [1]" }),
       tier: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("full")], { description: "fast=快档（默认）；full=慢档，只对快档提示需要升档的页用" })),
     }),
     readOnly: true, needsProduction: true,
-    execute: async (ctx, args) => (await import("@/lib/agent/tools/doc-tools")).docPageOcr(
+    execute: async (ctx, args, toolCallId) => (await import("@/lib/agent/tools/doc-tools")).docPageOcr(
       ctx.userId, ctx.productionId, String(args.assetId),
       (args.pages as unknown[]).map(Number),
-      { tier: args.tier === "full" ? "full" : "fast", sessionId: ctx.run?.sessionId ?? null, signal: ctx.run?.signal },
+      { tier: args.tier === "full" ? "full" : "fast", sessionId: ctx.run?.sessionId ?? null, runId: ctx.run?.runId, toolCallId, signal: ctx.run?.signal },
     ),
   },
   {
     mcpName: "production.asset_read",
     description: "读取当前制作素材原件（EN: read asset media file）。assetId 来自 production.asset_list、Wiki 树或当前素材。" +
       "默认按模型能力原生读取，历史占用导致放不下时先压缩；不支持或原件超出硬限制时用 MMP/文档解析。docx/pdf 的概览、分段阅读和搜索也可使用 doc_outline/doc_read/doc_search。",
-    parameters: Type.Object({ assetId: Type.String({ description: "当前制作素材 id" }) }),
+    parameters: Type.Object({ assetId: Type.String({ description: "当前制作素材 id" }), window: Type.Optional(DOC_WINDOW),
+      mode: Type.Optional(Type.Union([Type.Literal("outline"), Type.Literal("read"), Type.Literal("search"), Type.Literal("ocr")])),
+      query: Type.Optional(Type.String()), pages: Type.Optional(Type.Array(Type.Integer({ minimum: 1 }))),
+      tier: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("full")])),
+    }),
     readOnly: true, needsProduction: true,
-    execute: async (ctx, args, callId) => (await import("./model-read")).readModelMedia({ ...ctx, productionId: ctx.productionId || null }, { assetId: String(args.assetId) }, callId),
+    execute: async (ctx, args, callId) => (await import("./model-read")).readModelMedia({ ...ctx, productionId: ctx.productionId || null }, { ...args, assetId: String(args.assetId) } as Parameters<typeof import("./model-read").readModelMedia>[1], callId),
   },
   {
     mcpName: "production.asset_list",
@@ -1004,7 +1019,7 @@ export const DEFS: ToolDefinition[] = [
   },
   {
     mcpName: "web.fetch",
-    description: "抓取公开 URL（EN: web fetch page or file）。网页抽出正文；PDF、图片、音视频、压缩包等原文件保存为当前会话临时附件并返回 attachmentId。内网地址不可抓，正文超长会截断。",
+    description: "抓取公开 URL（EN: web fetch page or file）。网页抽出正文；PDF、图片、音视频、压缩包等原文件保存为当前会话临时附件并返回 attachmentId。内网地址不可抓；长正文完整保存为附件，返回概览和附件 ID，按窗口或搜索回查同一快照。",
     parameters: Type.Object({ url: Type.String({ minLength: 1, description: "http/https 地址" }) }),
     readOnly: true,
     execute: async (ctx, args, toolCallId) => {
@@ -1026,7 +1041,11 @@ export const DEFS: ToolDefinition[] = [
           await ctx.run.warmAttachments?.([saved.attachment.id]);
           return formatSavedWebAttachment(saved);
         });
-        return typeof result === "string" ? result : formatFetchedPage(result);
+        if (typeof result === "string") return result;
+        if (!result.truncated) return formatFetchedPage(result);
+        if (!ctx.run?.sessionId) throw new WebToolError("长网页没有会话附件落点，未返回残缺正文。");
+        const { saveWebPage } = await import("../tools/web-fetch-tools");
+        return saveWebPage({ userId: ctx.userId, sessionId: ctx.run.sessionId, runId: ctx.run.runId, toolCallId }, result);
       } catch (err) {
         if (err instanceof WebToolError) return err.message;
         if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "抓取超时";

@@ -198,3 +198,12 @@ describe("docx 结构信号抽取", () => {
     await expect(parse(noDoc)).rejects.toThrow(/word\/document\.xml/);
   });
 });
+
+it("长表格的后段及长单元格完整保留且可检索", async () => {
+  const rows = Array.from({ length: 65 }, (_, i) => `<w:tr><w:tc><w:p><w:r><w:t>${i === 64 ? "后段关键证据" : "前".repeat(500) + "单元格末尾"}</w:t></w:r></w:p></w:tc></w:tr>`).join("");
+  const doc = await parseDocx(bufferByteSource(docxOf(`<w:tbl>${rows}</w:tbl>`)));
+  const table = doc.items[0] as DocxTable;
+  expect(table.rows).toHaveLength(65);
+  expect(table.rows[64][0]).toBe("后段关键证据");
+  expect(table.rows[0][0]).toContain("单元格末尾");
+});
