@@ -46,12 +46,9 @@ export async function canEditProductionInstructions(userId: string, productionId
   return decision.allowed;
 }
 
-/** 存储上限（PUT 校验）——注入预算（INJECT_MAX_PER_SCOPE）比它小，超出部分
- * 注入时截断但存储保留，编辑面回显完整内容。 */
+/** 存储上限（PUT 校验）——注入预算与存储上限一致，允许保存的指令必须完整生效。 */
 export const INSTRUCTIONS_MAX_LEN = 4000;
 
-/** 每级注入预算（字符）。 */
-const INJECT_MAX_PER_SCOPE = 2000;
 
 export async function getAgentInstructions(scope: InstructionScope, scopeId: string): Promise<string | null> {
   const { rows } = await getPool().query<{ content: string }>(
@@ -78,14 +75,12 @@ export async function setAgentInstructions(
 }
 
 /** 注入用净化：标题防御性降级（#/##/### → ####，防与包裹块的 ### 段标题
- * 同级串段——与 memory 注入的降级同一思路）+ 预算截断。 */
+ * 同级串段——与 memory 注入的降级同一思路）。 */
 function sanitizeForInject(content: string): string {
-  // 先中和注入分隔符（防伪造/提前闭合包裹块），再降级标题、截断预算。
+  // 先中和注入分隔符（防伪造/提前闭合包裹块），再降级标题，允许保存的正文完整保留。
   const safe = neutralizeInjectionTags(content);
   const demoted = safe.replace(/^#{1,3}(?=\s)/gm, "####");
-  return demoted.length > INJECT_MAX_PER_SCOPE
-    ? `${demoted.slice(0, INJECT_MAX_PER_SCOPE)}\n…（指令过长已截断）`
-    : demoted;
+  return demoted;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments } from "./model-attachments";
 import { restoreModelMedia, refreshMediaReferences, attachmentReadNeeded } from "./model-media-state";
+import { textWindow, type TextWindow } from "../tools/text-window";
 import { selectMediaCompactionModel } from "./media-compaction-model";
 import { convertToLlm } from "../../../vendor/openclaw/packages/agent-core/src/harness/messages";
 import type { ModelKey } from "../model-types";
@@ -275,8 +276,15 @@ async function executeBody(
     },
   ];
   if (job.attachment_ids.length) tools.push({ mcpName: "my.attachment_read", name: exposedName("my.attachment_read"), label: "重读交接原件", readOnly: true,
-    description: "重新读取此次子任务交接的原生媒体。仅接受明确交接的 attachmentId，缺少其他材料请 need_context。",
-    parameters: Type.Object({ attachmentId: Type.String() }),
+    description: "按需读取此次子任务交接的附件；长文本可用 window={offset,length} 或 mode=search + query，文档可用块/页内窗口。仅接受明确交接的 attachmentId，缺少其他材料请 need_context。",
+    parameters: Type.Object({ attachmentId: Type.String(),
+      mode: Type.Optional(Type.Union([Type.Literal("read"), Type.Literal("search"), Type.Literal("outline")])),
+      query: Type.Optional(Type.String()),
+      window: Type.Optional(Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), length: Type.Optional(Type.Integer({ minimum: 1, maximum: 80000 })),
+        block: Type.Optional(Type.Integer({ minimum: 0 })), page: Type.Optional(Type.Integer({ minimum: 1 })),
+        row: Type.Optional(Type.Integer({ minimum: 0 })), column: Type.Optional(Type.Integer({ minimum: 0 })), line: Type.Optional(Type.Integer({ minimum: 0 })), noteId: Type.Optional(Type.String()) })),
+      ranges: Type.Optional(Type.Array(Type.Object({ from: Type.Integer({ minimum: 0 }), to: Type.Integer({ minimum: 0 }) }))),
+    }),
     execute: async (_call, args) => {
       const id = String((args as { attachmentId: string }).attachmentId);
       if (!job.attachment_ids.includes(id)) throw new Error("附件不在此次交接范围内");
@@ -284,7 +292,7 @@ async function executeBody(
         runId: job.id, sessionId: job.parent_session_id, signal: abort.signal,
         publish: () => {}, setStatus: async () => {}, isDetached: () => detached,
         prepareMediaRead,
-      } }, { attachmentId: id }, _call);
+      } }, { ...(args as Record<string, unknown>), attachmentId: id } as Parameters<typeof readModelMedia>[1], _call);
     } });
   setToolObservationSources({ resident: tools.map(t => t.name) });
   const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => {
@@ -520,14 +528,20 @@ export async function readSubagent(
   parentSessionId: string,
   id: string,
   cursor = 0,
+  options: { entrySeq?: number; window?: TextWindow } = {},
 ): Promise<string> {
   const view = await db.ownSubagent(parentSessionId, id);
+  if (options.entrySeq !== undefined) {
+    const selected = (await db.childTranscript(id, options.entrySeq - 1, 1)).find(e => e.seq === options.entrySeq);
+    if (!selected) throw new Error("子任务记录不存在");
+    return neutralizeInjectionTags(JSON.stringify({ subagentId: id, entrySeq: selected.seq, unit: "UTF-16", ...textWindow(JSON.stringify(selected.payload), options.window) }));
+  }
   const entries = await db.childTranscript(id, cursor, 30);
   const page = entries.slice(0, 30);
   return neutralizeInjectionTags(
     JSON.stringify({
-      view,
-      entries: page,
+      view: { ...view, ...(view.result && (options.window || view.result.length > 8000) ? { result: textWindow(view.result, options.window), resultRead: "subagent.read + window={offset,length}" } : {}) },
+      entries: page.map(e => { const body = JSON.stringify(e.payload); return body.length <= 8000 ? e : { seq: e.seq, payload: textWindow(body), read: `subagent.read + entrySeq=${e.seq} + window={offset,length}` }; }),
       nextCursor: page.at(-1)?.seq ?? cursor,
       hasMore: entries.length > 30,
     }),

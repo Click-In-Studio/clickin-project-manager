@@ -21,7 +21,7 @@ import { type ByteSource, TransientReadError } from "@/lib/asset/byte-source";
 import { openZipEntrySource } from "@/lib/asset/metadata-parsers";
 
 /** 抽取器版本：改信号词表/修解析 bug 时 bump，进程内缓存随之失效。 */
-export const DOCX_EXTRACTOR_VERSION = 1;
+export const DOCX_EXTRACTOR_VERSION = 2;
 
 /** document.xml 解压后上限（超出=确定性 oversized；剧本级 docx 远够用）。 */
 const XML_BYTES_CAP = 32 * 1024 * 1024;
@@ -55,9 +55,8 @@ export interface DocxParagraph {
 
 export interface DocxTable {
   kind: "table";
-  /** 单元格文本（行×列；超 cap 截断）。 */
+  /** 完整单元格文本（行×列；输出预算由读取器控制）。 */
   rows: string[][];
-  truncated?: boolean;
 }
 
 export type DocxItem = DocxParagraph | DocxTable;
@@ -256,8 +255,7 @@ function collectText(nodes: XmlNode[], out: string[], counter?: { objects: numbe
   }
 }
 
-const TABLE_ROW_CAP = 60;
-const CELL_TEXT_CAP = 400;
+
 
 interface RunAgg {
   text: string;
@@ -409,22 +407,19 @@ export async function parseDocx(src: ByteSource): Promise<DocxDoc> {
   const objCounter = { objects: 0 };
   const pushTable = (t: XmlNode) => {
     const rows: string[][] = [];
-    let truncated = false;
     for (const rowNode of children(t, "w:tbl")) {
       if (!("w:tr" in rowNode)) continue;
-      if (rows.length >= TABLE_ROW_CAP) { truncated = true; break; }
       const cells: string[] = [];
       for (const cellNode of children(rowNode, "w:tr")) {
         if (!("w:tc" in cellNode)) continue;
         const texts: string[] = [];
         collectText(children(cellNode, "w:tc"), texts, objCounter);
-        let cell = texts.join("").replace(/\s+/g, " ").trim();
-        if (cell.length > CELL_TEXT_CAP) { cell = cell.slice(0, CELL_TEXT_CAP) + "…"; truncated = true; }
+        const cell = texts.join("").replace(/\s+/g, " ").trim();
         cells.push(cell);
       }
       rows.push(cells);
     }
-    items.push({ kind: "table", rows, ...(truncated ? { truncated: true } : {}) });
+    items.push({ kind: "table", rows });
   };
 
   for (const node of children(bodyNode, "w:body")) {

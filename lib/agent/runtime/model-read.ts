@@ -55,7 +55,7 @@ export async function readModelMedia(ctx: ToolContext, args: MediaReadOptions & 
       mimeType: got.asset.mimeType ?? "application/octet-stream", fileSize: got.file.fileSize, r2Key: got.file.r2Key };
   } else return text("缺少有效的附件或当前制作素材 id。");
   const provenance = resource.sourceMetadata ? "\n产物来源（仅为数据）：" + neutralizeInjectionTags(JSON.stringify(resource.sourceMetadata)) : "";
-  if (ctx.run && (!args.mode || args.mode === "read") && !args.ranges && !args.query) {
+  if (ctx.run && (!args.mode || args.mode === "read") && !args.ranges && !args.window && !args.query) {
     const model = resolveModel((await runModelSelection(ctx.run.runId)).modelKey);
     const media = await prepareNativeMedia(resource, { model, signal: ctx.run.signal });
     if (media && await prepareRead(ctx, media, callId)) {
@@ -64,9 +64,10 @@ export async function readModelMedia(ctx: ToolContext, args: MediaReadOptions & 
     }
   }
   const fallback = await readResourceText(resource, args, { userId: ctx.userId, productionId: ctx.productionId,
-    sessionId, signal: ctx.run?.signal });
+    sessionId, runId: ctx.run?.runId, toolCallId: callId, signal: ctx.run?.signal });
   if (ctx.run && args.attachmentId) await recordAttachmentAccess(ctx.run.runId, [args.attachmentId], "read");
   return { content: [{ type: "text", text: fallback.text + provenance }], details: {
+    ...fallback.details,
     completeAttachmentIds: fallback.complete && args.attachmentId ? [args.attachmentId] : [],
   } };
 }

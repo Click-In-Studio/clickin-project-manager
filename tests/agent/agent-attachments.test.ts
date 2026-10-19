@@ -128,6 +128,24 @@ describe("会话临时附件路由（#704）", () => {
     expect(streamMock).toHaveBeenCalledWith(first.attachment.r2Key, null);
   });
 
+  it("网页快照来源与抓取时间真实落库，重试仍保留第一次的元数据", async () => {
+    const key = createNewSessionKey(userId);
+    sessions.push(key);
+    const runId = newRunId();
+    await getPool().query("INSERT INTO agent_session(id,user_id) VALUES($1,$2)", [key, userId]);
+    await getPool().query("INSERT INTO agent_run(id,session_id) VALUES($1,$2)", [runId, key]);
+    const input = { sessionId: key, userId, fileName: "web-page.txt", mimeType: "text/plain", fileSize: 100,
+      source: { kind: "web_fetch" as const, runId, toolCallId: "web-snapshot", url: "https://test/start", finalUrl: "https://test/final",
+        metadata: { fetchedAt: "2026-10-19T00:00:00Z", title: "第一次抓取" } } };
+    const first = await createPendingAttachment(input);
+    expect(first.sourceMetadata).toEqual(input.source.metadata);
+    const row = await getPool().query("SELECT source_metadata FROM agent_session_attachment WHERE id=$1", [first.id]);
+    expect(row.rows[0].source_metadata).toEqual(input.source.metadata);
+    const replay = await createPendingAttachment({ ...input, source: { ...input.source, metadata: { fetchedAt: "2026-10-19T01:00:00Z" } } });
+    expect(replay.id).toBe(first.id);
+    expect(replay.sourceMetadata).toEqual(input.source.metadata);
+  });
+
   it("MMP 产物按 run/tool/output 原子占位并幂等复用，不借用 web_fetch URL 字段", async () => {
     const key = createNewSessionKey(userId);
     sessions.push(key);

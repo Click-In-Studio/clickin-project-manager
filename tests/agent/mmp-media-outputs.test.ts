@@ -43,7 +43,7 @@ beforeEach(() => {
   metadata = { files: [{ sample_rate: 48000, channels: 2, duration_sec: 0.25 }] };
   state.create.mockImplementation(async (input) => {
     const id = `${input.source.outputName}-${input.source.outputIndex}`;
-    const row = { ...input, id, r2Key: id, status: "pending" } as AgentAttachment;
+    const row = { ...input, id, r2Key: id, sourceOutputName: input.source.outputName, status: "pending" } as AgentAttachment;
     reservations.set(id, row); return row;
   });
   state.ready.mockImplementation(async (id, _session, _user, bytes, sourceMetadata, file) => ({
@@ -201,4 +201,16 @@ describe("MMP 产物接收与呈现能力独立", () => {
     expect(result.text).toContain("attachmentId=score-0");
     expect(result.text.length).toBeLessThan(24_100);
   });
+});
+
+it("纯长 JSON 产物先保存完整结果，模型通过附件回查", async () => {
+  metadata = { body: "甲".repeat(30_000) + "JSON末尾证据" };
+  const capability = cap([contentType]);
+  capability.output.fields = [{ name: "metadata", kind: "json", required: true, schema: { type: "object" } }];
+  const { result } = await execute(capability);
+  expect(state.put).toHaveBeenCalledWith(expect.any(String), expect.any(Buffer), "application/json");
+  const json = state.put.mock.calls.find((call: unknown[]) => call[2] === "application/json")!;
+  expect(JSON.parse(json[1].toString()).outputs.metadata.value.body).toContain("JSON末尾证据");
+  expect(result.text).toContain("attachmentId=");
+  expect(result.text).not.toContain("JSON末尾证据");
 });

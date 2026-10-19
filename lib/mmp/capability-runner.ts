@@ -42,11 +42,9 @@ export type CapabilityMediaResolver = (
   capability: Capability,
 ) => Promise<{ value: MediaHandle | MediaHandle[]; cacheKeys: string[] }>;
 
-function clipped(text: string): string {
+function sanitized(text: string): string {
   const safe = neutralizeInjectionTags(text.replace(/\u0000/g, "�"));
-  return safe.length <= MMP_RESULT_MAX_CHARS
-    ? safe
-    : `${safe.slice(0, MMP_RESULT_MAX_CHARS)}\n…（MMP 结果超过 ${MMP_RESULT_MAX_CHARS} 字符，已截断）`;
+  return safe;
 }
 
 function jsonOutputs(done: Awaited<ReturnType<MmpClient["run"]>>): Record<string, unknown> {
@@ -69,10 +67,13 @@ function renderTextOutputs(capability: Capability, done: Awaited<ReturnType<MmpC
   for (const field of capability.output.fields) {
     const output = done.outputs[field.name];
     if (!output || Array.isArray(output)) continue;
-    if (output.kind === "text") lines.push(`${field.name}：${output.text}`);
+    if (output.kind === "text") {
+      const saved = attachments.find(a => a.sourceOutputName === field.name);
+      lines.push(`${field.name}：${saved && output.text.length > 4000 ? output.text.slice(0, 4000) + `\n（有省略；完整内容 attachmentId=${saved.id}，按窗口读取）` : output.text}`);
+    }
     if (output.kind === "json") lines.push(`${field.name}：${JSON.stringify(output.value)}`);
   }
-  return clipped(lines.join("\n"));
+  return sanitized(lines.join("\n"));
 }
 
 function mediaOutputFields(capability: Capability) {
@@ -219,7 +220,20 @@ export async function runMmpCapability(
     }
     await deliverMediaOutputs(client, current, done, args, reservations, opts.signal);
     const attachments = await verifyAndFinalize(current, done, reservations, args);
-    return { text: renderTextOutputs(current, done, attachments), attachments, media: [] };
+    let text = renderTextOutputs(current, done, attachments);
+    if (text.length > MMP_RESULT_MAX_CHARS) {
+      const { saveTextResult, savedTextPreview } = await import("@/lib/agent/tools/result-attachment");
+      const saved = await saveTextResult({ userId: args.userId, sessionId: args.sessionId, fileName: "mmp-result.json", mimeType: "application/json",
+        text: JSON.stringify({ source: done.source, jobId: done.job_id, agentContext: done.agent_context,
+          outputs: Object.fromEntries(Object.entries(done.outputs).filter(([, value]) => !Array.isArray(value) && value.kind === "json")),
+          // 文本/媒体已有附件，只保存引用，避免重复正文。
+          attachments: attachments.map(a => ({ attachmentId: a.id, fileName: a.fileName, outputName: a.sourceOutputName })) }, null, 2),
+        source: { kind: "mmp", runId: args.runId, toolCallId: args.toolCallId, outputName: "__result__", outputIndex: 0,
+          metadata: { capabilityId: current.id, jobId: done.job_id, generatedAt: done.source.generated_at } } });
+      attachments.push(saved.attachment);
+      text = savedTextPreview(saved);
+    }
+    return { text, attachments, media: [] };
   } catch (error) {
     await Promise.all(reservations.map(({ attachment }) =>
       scheduleAttachmentDeletion(attachment.id, attachment.sessionId, args.userId).catch(() => false)));

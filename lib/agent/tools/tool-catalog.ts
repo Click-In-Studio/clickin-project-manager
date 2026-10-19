@@ -44,7 +44,7 @@ export const TOOL_FAMILIES: Record<string, { label: string; hint: string }> = {
   },
   "my.account": {
     label: "我的账号与记忆",
-    hint: "查询本人参与的制作、登记的联系方式，管理个人 AI 指令、长期记忆和会话附件。参与关系与联系方式以对应系统记录为准；记忆帮助理解背景、已有约定和持续要求，须结合来源、适用范围及当前事实，不把 AI 整理的推测当作已确认指令。会话附件是具体材料，不因上传或生成而成为项目正式记录。",
+    hint: "查询本人参与的制作、登记的联系方式，管理个人 AI 指令、长期记忆和会话附件。参与关系与联系方式以对应系统记录为准；记忆帮助理解背景、已有约定和持续要求，须结合来源、适用范围及当前事实，不把 AI 整理的推测当作已确认指令。会话附件支持文本窗口与搜索，保存结果按返回的附件 ID 回查；附件是具体材料，不因上传或生成而成为项目正式记录。",
   },
   "my.automation": {
     label: "定时任务",
@@ -60,11 +60,11 @@ export const TOOL_FAMILIES: Record<string, { label: string; hint: string }> = {
   },
   "production.wiki": {
     label: "文档库",
-    hint: "查询和管理自由文档、目录、链接及分享设置。它是某篇文档当前内容、组织和分享状态的直接依据，不对其他业务领域具有默认权威性。可结合目录、名称、正文和已有约定合理理解文档用途与采用状态；这些线索不自动更新对应系统业务记录。",
+    hint: "查询和管理自由文档、目录、链接及分享设置；正文按行范围及字符窗口读取。它是某篇文档当前内容、组织和分享状态的直接依据，不对其他业务领域具有默认权威性。可结合目录、名称、正文和已有约定合理理解文档用途与采用状态；这些线索不自动更新对应系统业务记录。",
   },
   "production.dramaturgy": {
     label: "构作（场次与角色）",
-    hint: "系统章节与场次结构、场次构作信息、角色记录和人物小传的权威入口。剧本正文由剧本族读取。文档中的分场方案、人物研究或另一版小传，不自动代表对应系统记录已经更新。",
+    hint: "系统章节与场次结构、场次构作信息、角色记录和人物小传的权威入口。场次长字段支持 field 与字符窗口细读；剧本正文由剧本族读取。文档中的分场方案、人物研究或另一版小传，不自动代表对应系统记录已经更新。",
   },
   "production.script": {
     label: "剧本正文",
@@ -72,7 +72,7 @@ export const TOOL_FAMILIES: Record<string, { label: string; hint: string }> = {
   },
   "production.doc": {
     label: "上传文档解读",
-    hint: "查找与读取项目资产、解析文件内容、保存附件为资产，并支持导入作业。读取结果说明具体文件中的内容；解析、OCR 或导入准备不代表内容已写入系统剧本或其他业务记录。导入日志追踪该次作业的裁决与进度，不自动成为整个项目的通用规则。",
+    hint: "查找与读取项目资产、解析文件内容、保存附件为资产，并支持导入作业。文件按块、页及内部窗口细读，OCR 长结果保存在会话附件中回查。读取结果说明具体文件中的内容；解析、OCR 或导入准备不代表内容已写入系统剧本或其他业务记录。导入日志追踪该次作业的裁决与进度，不自动成为整个项目的通用规则。",
   },
 };
 
@@ -101,7 +101,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "my.memory_search", family: "my.account", scope: "personal", oneliner: "检索长期记忆与更早的历史对话",
     triggers: ["之前说过", "上次讨论", "之前的决定", "还记得", "更早的对话"], en: "search my memory history",
     examples: ["我们之前聊过这个吗", "你还记得上次说的那个决定吗", "帮我回忆一下之前讨论的内容"] },
-  { name: "my.attachment_read", family: "my.account", scope: "personal", oneliner: "读取用户上传或工具产出的附件；按当前模型能力原生读取、解析或分段回查文本",
+  { name: "my.attachment_read", family: "my.account", scope: "personal", oneliner: "读取附件原件；文本窗口与搜索回查，文档按块/页及内部窗口细读",
     triggers: ["这个附件", "附带的文件", "上传的文件", "看看这个文件", "读附件", "这张图"], en: "read attached uploaded temporary file document image",
     examples: ["看看我刚附带的文件", "读一下这个附件", "这张图里写了什么"] },
   { name: "my.attachment_rename", family: "my.account", scope: "personal", oneliner: "给会话附件改名，保留扩展名；生成媒体后可主动命名",
@@ -155,7 +155,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     // 误报代价只是召回提示里多一行，可接受。
     triggers: ["wiki", "文档", "搜文档", "找资料", "查资料", "搜索文档", "文档里找", "找一篇", "文档库", "搜索"], en: "wiki search documents fulltext",
     examples: ["帮我在文档里找一下关于灯光的内容", "搜一下排练笔记", "文档库里有没有提到预算"] },
-  { name: "production.wiki_read", family: "production.wiki", scope: "production", oneliner: "按 id 完整或按行范围读取文档",
+  { name: "production.wiki_read", family: "production.wiki", scope: "production", oneliner: "按 id、行范围及字符窗口读取文档",
     triggers: ["wiki", "读文档", "打开文档", "看看这篇", "文档内容", "这篇文档"], en: "wiki read document content",
     examples: ["把那篇文档读给我看", "打开这篇文档的内容", "这篇 wiki 写了什么", "帮我读一下现在有的几份排练记录，里面有内容吗", "看看这几篇文档里写了什么", "打开最新的那篇看看"] },
   { name: "production.wiki_backlinks", family: "production.wiki", scope: "production", oneliner: "查询文档的双向链接关系",
@@ -191,7 +191,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.scene_list", family: "production.dramaturgy", scope: "production", oneliner: "列出章节/场次结构树（含 id）",
     triggers: ["场次", "章节", "分场", "场次结构", "有哪些场", "构作视图", "构作"], en: "list scenes chapters structure",
     examples: ["列一下这个戏的章节和场次", "这部剧一共几场", "构作视图里有什么", "把分场结构给我"] },
-  { name: "production.scene_read", family: "production.dramaturgy", scope: "production", oneliner: "读取一场的梗概/行动线/音乐/舞台呈现",
+  { name: "production.scene_read", family: "production.dramaturgy", scope: "production", oneliner: "按字段与字符窗口读取场次梗概/行动线/音乐/舞台呈现",
     triggers: ["梗概", "行动线", "舞台呈现", "这一场", "第几场", "场次详情"], en: "read scene details synopsis",
     examples: ["第三场的梗概是什么", "看看这一场的行动线", "这场的音乐设计写了什么"] },
   { name: "production.character_list", family: "production.dramaturgy", scope: "production", oneliner: "列出全部角色（含 id、聚合成员、小传摘要）",
@@ -245,7 +245,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.doc_outline", family: "production.doc", scope: "production", oneliner: "读 docx/pdf 资产的结构概览（直方图/密度带+预览，导入第一步）",
     triggers: ["导入剧本", "解析文档", "读这个文档", "读docx", "读pdf", "word文档", "pdf文档", "文档结构", "上传的剧本"], en: "docx pdf document outline structure import",
     examples: ["帮我把这个 Word 剧本导入进来", "看看这个 pdf 里是什么结构", "解析一下我上传的剧本文档"] },
-  { name: "production.doc_read", family: "production.doc", scope: "production", oneliner: "按区间读 docx/pdf 内容（带排版信号标注；docx=块号、pdf=页序）",
+  { name: "production.doc_read", family: "production.doc", scope: "production", oneliner: "按块/页及段内、表格、页内窗口读 docx/pdf 完整内容",
     triggers: ["文档内容", "读文档第", "文档里的", "pdf第几页"], en: "read docx pdf paragraphs pages ranges signals",
     examples: ["把文档 40 到 80 段读出来", "读一下 pdf 第 5 到 8 页", "看看这个文档开头写了什么"] },
   { name: "production.doc_search", family: "production.doc", scope: "production", oneliner: "在 docx/pdf 全文里检索文字（先定位再精读）",

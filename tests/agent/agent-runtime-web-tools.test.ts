@@ -36,6 +36,9 @@ describe("web.fetch", () => {
       } else if (req.url === "/long") {
         res.setHeader("content-type", "text/plain");
         res.end("x".repeat(WEB_FETCH_MAX_CHARS + 500));
+      } else if (req.url === "/oversized") {
+        res.setHeader("content-type", "text/plain");
+        res.end("x".repeat(2 * 1024 * 1024 + 10));
       } else if (req.url === "/redirect") {
         res.writeHead(302, { location: `${base}/page` });
         res.end();
@@ -134,11 +137,12 @@ describe("web.fetch", () => {
     expect(pdf).toEqual({ mimeType: "application/pdf", chunks: [Buffer.from("%PDF-1.7\nwhole-file")] });
   });
 
-  it("超长正文截断并标记；重定向跟随；404 报错", async () => {
+  it("长正文完整保留并标记预览阈值；超硬上限失败；重定向跟随；404 报错", async () => {
     process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "1";
     const long = await webFetch(`${base}/long`);
-    expect(long.text.length).toBe(WEB_FETCH_MAX_CHARS);
+    expect(long.text.length).toBe(WEB_FETCH_MAX_CHARS + 500);
     expect(long.truncated).toBe(true);
+    await expect(webFetch(`${base}/oversized`)).rejects.toThrow("未取得完整材料");
     expect((await webFetch(`${base}/redirect`)).title).toBe("排练 & 通告");
     await expect(webFetch(`${base}/missing`)).rejects.toThrow("HTTP 404");
   });

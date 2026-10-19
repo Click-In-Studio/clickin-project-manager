@@ -116,3 +116,13 @@ function limitStream(body: ReadableStream<Uint8Array>, maxBytes: number): {
     size: () => bytes,
   };
 }
+
+/** 网页文本保存本次实际抽取快照，重复抓取复用的预览也必须来自已保存内容。 */
+export async function saveWebPage(input: { userId: string; sessionId: string; runId: string; toolCallId: string }, page: import("../runtime/web-tools").FetchedPage): Promise<import("./result-attachment").SavedTextToolResult> {
+  const { saveTextResult, savedTextToolResult } = await import("./result-attachment");
+  const saved = await saveTextResult({ ...input, fileName: "web-page.txt", mimeType: "text/plain",
+    text: `来源：${page.url}\n抓取时间：${page.fetchedAt}\n标题：${page.title}\n\n${page.text}`,
+    source: { kind: "web_fetch", runId: input.runId, toolCallId: input.toolCallId, url: page.requestedUrl, finalUrl: page.url,
+      metadata: { fetchedAt: page.fetchedAt, title: page.title } } }).catch(() => { throw new WebToolError("网页完整快照保存失败，未返回残缺正文；请稍后重试。"); });
+  return savedTextToolResult(saved);
+}

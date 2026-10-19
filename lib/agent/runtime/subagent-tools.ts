@@ -84,12 +84,15 @@ export const SUBAGENT_DEFS: ToolDefinition[] = [
     parameters: Type.Object({
       subagentId: Type.String({ minLength: 1 }),
       cursor: Type.Optional(Type.Integer({ minimum: 0 })),
+      entrySeq: Type.Optional(Type.Integer({ minimum: 1, description: "精读某条轨迹；省略则 window 读取最终结果" })),
+      window: Type.Optional(Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), length: Type.Optional(Type.Integer({ minimum: 1, maximum: 80000 })) })),
     }),
     execute: async (ctx, args) =>
       (await import("./subagents")).readSubagent(
         requireRun(ctx).sessionId,
         String(args.subagentId),
         Number(args.cursor ?? 0),
+        args as { entrySeq?: number; window?: import("../tools/text-window").TextWindow },
       ),
   },
   {

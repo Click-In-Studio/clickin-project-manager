@@ -24,6 +24,7 @@ import { ocrPages, type OcrPage, type OcrTier } from "@/lib/mmp/ocr";
 import { recordMmpUsage } from "@/lib/mmp/usage-db";
 import type { Asset, AssetFile } from "@/lib/asset/db";
 import type { DocxDoc, DocxItem, DocxParagraph } from "@/lib/doc-extract/docx";
+import { readDocWindow, tableText } from "./doc-window";
 import type { PdfDoc, PdfPage } from "@/lib/doc-extract/pdf";
 
 export const DENIED_ASSET_VIEW = "权限被拒绝：你没有查看该资产的权限。";
@@ -38,7 +39,7 @@ const READ_PDF_LINE_CAP = 400;
 const READ_CHAR_BUDGET = 24_000;
 /** pdf 单次最多读的页数。 */
 const READ_PDF_PAGE_CAP = 10;
-/** 单段文本上限（保上下文预算；超长段截断并标注，模型可按锚点用更小范围重读）。 */
+/** 单段文本上限（保上下文预算；超长段提供字符窗口续读参数）。 */
 const READ_TEXT_CAP = 1200;
 const SEARCH_DEFAULT_LIMIT = 20;
 const SEARCH_MAX_LIMIT = 50;
@@ -95,6 +96,7 @@ type Loaded =
 /** 工具透传的会话上下文：解析超时转后台时，worker 终局后按它插话唤醒本会话。 */
 export interface DocToolOpts {
   sessionId?: string | null;
+  runId?: string; toolCallId?: string; window?: import("./doc-window").DocWindow;
 }
 
 /** 权限门 + 取文件行：doc_* 与 doc_page_ocr 共用（口径 = asset meta face，与预览同门）。 */
@@ -167,11 +169,12 @@ async function loadDocFile(file: DocFileRef, opts: DocToolOpts = {}): Promise<Lo
 /** #704 会话附件复用同一套文档解析，但所有权门由 attachment-tools 在调用前完成。 */
 export async function attachmentDocRead(
   file: DocFileRef,
-  input: { mode?: "outline" | "read" | "search"; ranges?: Array<{ from: number; to: number }>; query?: string; limit?: number },
+  input: { mode?: "outline" | "read" | "search"; ranges?: Array<{ from: number; to: number }>; query?: string; limit?: number; window?: import("./doc-window").DocWindow },
   opts: DocToolOpts = {},
 ): Promise<string> {
   const loaded = await loadDocFile(file, opts);
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded);
+  if (input.window) return neutralizeInjectionTags(readDocWindow(loaded, input.window));
   if (input.mode === "search") {
     const query = input.query?.trim() ?? "";
     if (!query) return "query 不能为空。";
@@ -212,14 +215,13 @@ function docxSignalTags(p: DocxParagraph): string {
 function renderDocxItem(idx: number, item: DocxItem, textCap: number): string {
   if (item.kind === "table") {
     const cols = item.rows[0]?.length ?? 0;
-    const head = `[¶${idx} 表格 ${item.rows.length}×${cols}${item.truncated ? " 截断" : ""}]`;
-    const rows = item.rows.slice(0, 20).map((r) => "  " + r.join(" | "));
-    if (item.rows.length > 20) rows.push(`  …（共 ${item.rows.length} 行，用更小范围或按需另读）`);
-    return [head, ...rows].join("\n");
+    const head = `[¶${idx} 表格 ${item.rows.length}×${cols}]`;
+    const body = tableText(item.rows);
+    return [head, body.slice(0, textCap), ...(body.length > textCap ? [`…（有省略；window={block:${idx},offset:${textCap},length:8000} 续读；可用 row/column 选择单元格）`] : [])].join("\n");
   }
   const tags = docxSignalTags(item);
   let text = item.text.replace(/\n/g, "⏎");
-  if (text.length > textCap) text = text.slice(0, textCap) + `…（段过长截断，全段 ${item.text.length} 字符）`;
+  if (text.length > textCap) text = text.slice(0, textCap) + `…（段过长截断，全段 ${item.text.length} 字符；window={block:${idx},offset:${textCap},length:8000} 续读）`;
   return `[¶${idx}${tags ? " " + tags : ""}] ${text}`;
 }
 
@@ -237,7 +239,7 @@ function renderPdfPage(p: PdfPage, budget: { left: number; chars: number }): str
   const out = [head];
   for (let i = 0; i < p.lines.length; i++) {
     if (budget.left <= 0 || budget.chars >= READ_CHAR_BUDGET) {
-      out.push(`…（单次上限已满（行数/字符），从 p${p.n}.${i} 起分批续读）`);
+      out.push(`…（单次上限已满（行数/字符），用 window={page:${p.n},line:${i},offset:0,length:8000} 续读）`);
       break;
     }
     const ln = p.lines[i];
@@ -250,7 +252,7 @@ function renderPdfPage(p: PdfPage, budget: { left: number; chars: number }): str
       ln.contPrev ? "⤴接上页?" : null,
     ].filter(Boolean).join(" ");
     let text = ln.text;
-    if (text.length > READ_TEXT_CAP) text = text.slice(0, READ_TEXT_CAP) + "…";
+    if (text.length > READ_TEXT_CAP) text = text.slice(0, READ_TEXT_CAP) + `…（window={page:${p.n},line:${i},offset:${READ_TEXT_CAP},length:8000} 续读）`;
     const line = `[p${p.n}.${i} ${tags}] ${text}`;
     out.push(line);
     budget.left--;
@@ -383,6 +385,7 @@ export async function docRead(
 ): Promise<string> {
   const loaded = await loadDoc(userId, productionId, assetId, opts);
   if (typeof loaded === "string") return neutralizeInjectionTags(loaded); // 错误消息可含用户可控文件名/标题
+  if (opts.window) return neutralizeInjectionTags(readDocWindow(loaded, opts.window));
   if (!ranges.length) return "ranges 不能为空（docx 例：[{from:0,to:40}]（块号）；pdf 例：[{from:1,to:5}]（页序））。";
   if (loaded.kind === "docx") return docxRead(loaded.doc, ranges);
   return pdfRead(loaded.doc, ranges);
@@ -417,7 +420,10 @@ function docxRead(doc: DocxDoc, ranges: Array<{ from: number; to: number }>): st
     lines.push("涉及的脚注/尾注：");
     for (const id of notesWanted) {
       const t = doc.footnotes[id];
-      lines.push(`⟦${id.startsWith("e") ? "尾注" + id.slice(1) : "脚注" + id}⟧ ${t ?? "（未找到）"}`);
+      const note = t ?? "（未找到）";
+      const room = Math.max(0, Math.min(READ_TEXT_CAP, READ_CHAR_BUDGET - chars));
+      lines.push(`⟦${id.startsWith("e") ? "尾注" + id.slice(1) : "脚注" + id}⟧ ${note.slice(0, room)}${note.length > room ? `…（window={noteId:${JSON.stringify(id)},offset:${room},length:8000} 续读）` : ""}`);
+      chars += room;
     }
   }
   return neutralizeInjectionTags(lines.join("\n"));
@@ -482,7 +488,7 @@ function searchLoaded(loaded: Loaded, q: string, requestedLimit?: number): strin
     if (hits.length >= limit) return;
     const at = text.toLowerCase().indexOf(qLower);
     const ctx = text.slice(Math.max(0, at - 40), at + q.length + 60).replace(/\n/g, "⏎");
-    hits.push(`${label} …${ctx}…`);
+    hits.push(`${label} offset=${at}（对象内零起始 UTF-16） …${ctx}…`);
   };
 
   if (loaded.kind === "docx") {
@@ -492,8 +498,9 @@ function searchLoaded(loaded: Loaded, q: string, requestedLimit?: number): strin
       if (it.kind === "p") {
         if (it.text.toLowerCase().includes(qLower)) push(`[¶${i}]`, it.text);
       } else {
-        const flat = it.rows.map((r) => r.join(" | ")).join("\n");
-        if (flat.toLowerCase().includes(qLower)) push(`[¶${i} 表格]`, flat);
+        it.rows.forEach((row, r) => row.forEach((cell, c) => {
+          if (cell.toLowerCase().includes(qLower)) push(`[¶${i} row=${r} column=${c}]`, cell);
+        }));
       }
     }
     for (const [id, t] of Object.entries(doc.footnotes)) {
@@ -536,7 +543,7 @@ export async function docPageOcr(
   userId: string, productionId: string, assetId: string,
   pages: number[],
   opts: DocPageOcrOpts = {},
-): Promise<string> {
+): Promise<string | import("./result-attachment").SavedTextToolResult> {
   const got = await resolveReadableAsset(userId, productionId, assetId);
   if (typeof got === "string") return neutralizeInjectionTags(got);
   const { asset, file } = got;
@@ -559,7 +566,7 @@ export async function attachmentFileOcr(
   declaredMime: string | null,
   pages: number[],
   opts: DocPageOcrOpts = {},
-): Promise<string> {
+): Promise<string | import("./result-attachment").SavedTextToolResult> {
   const name = file.fileName;
   const ext = name.toLowerCase().split(".").pop() ?? "";
   const mime = OCR_MIME_BY_EXT[ext] ?? (declaredMime && Object.values(OCR_MIME_BY_EXT).includes(declaredMime) ? declaredMime : null);
@@ -622,14 +629,21 @@ export async function attachmentFileOcr(
     `《${name}》OCR（${OCR_TIER_LABEL[out.tier]}，引擎 ${out.engine || "?"}，${out.pages.length} 页${billingNote}）${imageNote}。` +
     "识别文本可能有错字 / 漏行，关键处要让用户核对。",
   );
-  const budget = { chars: 0 };
-  for (const p of out.pages) lines.push(...renderOcrPage(p, textLayerPages.has(p.page), budget));
-  if (budget.chars >= READ_CHAR_BUDGET) lines.push("…（单次字符上限已满，其余页分批再识别）");
+  for (const p of out.pages) lines.push(...renderOcrPage(p, textLayerPages.has(p.page)));
   if (truncated.length) lines.push(`（单次最多 ${cap} 页，未处理：p${truncated.join(", p")}——分批续跑）`);
   if (out.tier === "gpu-fast" && out.suggestUpgradePages.length) {
     lines.push(`建议升慢档的页（质量信号异常）：p${out.suggestUpgradePages.join(", p")}——用 tier: "full" 只对这些页重跑，能拿到版面结构与更稳的识别。`);
   }
-  return neutralizeInjectionTags(lines.join("\n"));
+  const full = lines.join("\n");
+  const material = JSON.stringify({ source: { fileId: file.fileId, fileName: name, jobId: out.jobId, engine: out.engine, tier: out.tier },
+    pages: out.pages, suggestUpgradePages: out.suggestUpgradePages, requestedPages: wanted }, null, 2);
+  if (full.length <= READ_CHAR_BUDGET && material.length <= READ_CHAR_BUDGET) return neutralizeInjectionTags(full);
+  if (!opts.sessionId || !opts.runId || !opts.toolCallId) throw new Error("长 OCR 结果缺少会话保存上下文，未返回残缺识别结果。");
+  const { saveTextResult, savedTextToolResult } = await import("./result-attachment");
+  const saved = await saveTextResult({ userId, sessionId: opts.sessionId, fileName: "ocr-result.json", mimeType: "application/json", text: material,
+    source: { kind: "mmp", runId: opts.runId, toolCallId: opts.toolCallId, outputName: "ocr_result", outputIndex: 0,
+      metadata: { fileId: file.fileId, pages: wanted, tier: out.tier, engine: out.engine, jobId: out.jobId, generatedAt: new Date().toISOString() } } });
+  return savedTextToolResult(saved);
 }
 
 const OCR_FLAG_LABEL: Record<string, string> = {
@@ -638,7 +652,7 @@ const OCR_FLAG_LABEL: Record<string, string> = {
   empty: "没认出文字",
 };
 
-function renderOcrPage(p: OcrPage, hasTextLayer: boolean, budget: { chars: number }): string[] {
+function renderOcrPage(p: OcrPage, hasTextLayer: boolean): string[] {
   const q = p.quality;
   const meta = [
     `行=${q.lines}`,
@@ -646,13 +660,9 @@ function renderOcrPage(p: OcrPage, hasTextLayer: boolean, budget: { chars: numbe
     p.flags.length ? `⚠ ${p.flags.map((f) => OCR_FLAG_LABEL[f] ?? f).join("、")}` : null,
   ].filter(Boolean).join(" ");
   const out = [`── p${p.page} [OCR ${meta}]${hasTextLayer ? "（该页有文本层，doc_read 可直接读，OCR 仅作核对）" : ""} ──`];
-  if (budget.chars >= READ_CHAR_BUDGET) return out;
   let body = p.tier === "gpu" && p.markdown ? p.markdown : p.text;
   if (!body.trim()) body = "（本页没有识别到文字）";
-  const room = READ_CHAR_BUDGET - budget.chars;
-  if (body.length > room) body = body.slice(0, room) + "…";
   out.push(body);
-  budget.chars += body.length;
   if (p.tier === "gpu" && p.elements?.length) {
     const counts = new Map<string, number>();
     for (const e of p.elements) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);

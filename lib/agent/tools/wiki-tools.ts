@@ -150,7 +150,7 @@ export async function wikiBacklinks(userId: string, productionId: string, wikiId
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function wikiRead(userId: string, productionId: string, wikiId: string, range: LineRange = {}): Promise<string> {
+export async function wikiRead(userId: string, productionId: string, wikiId: string, range: LineRange & { window?: import("./text-window").TextWindow } = {}): Promise<string> {
   const resolved = await resolveProductionActor(userId, productionId);
   if (!resolved) return DENIED_NOT_MEMBER;
   // 误用反馈（2026-09-07 定谳：树里文档/文件同列，用错工具要明确指路）：
@@ -172,18 +172,21 @@ export async function wikiRead(userId: string, productionId: string, wikiId: str
 
   try {
     const window = lineWindow(doc.body, range);
+    const { formatTextWindow, textWindow } = await import("./text-window");
+    const selected = textWindow(window.text, range.window);
     const shell = await getNodeByWikiId(wikiId);
-    const targets = new Set(extractWikiLinkTargets(window.text));
+    const targets = new Set(extractWikiLinkTargets(selected.text));
     const references = targets.size ? (await listOutgoingLinks(wikiId, productionId)).filter(ref => targets.has(ref.id)) : [];
     const metadata = {
       wikiId: doc.id, title: doc.title, tags: doc.tags, isPublic: shell?.isPublic ?? false,
       startLine: window.startLine, endLine: window.endLine, totalLines: window.totalLines,
-      partial: window.startLine !== 1 || window.endLine !== window.totalLines,
+      partial: window.startLine !== 1 || window.endLine !== window.totalLines || selected.offset > 0 || selected.nextOffset !== null,
       sectionPath: sectionPath(doc.body, window.start + (window.text.split("\n")[0]?.length ?? 0)),
       references,
     };
+    const body = range.window || window.text.length > 8000 ? formatTextWindow(window.text, range.window) : window.text;
     // 定位元数据与正文分开；正文保留存储形态，确保搜索和 patch 逐字同源。
-    return neutralizeInjectionTags(`${JSON.stringify(metadata)}\n\n${window.text}`);
+    return neutralizeInjectionTags(`${JSON.stringify(metadata)}\n\n${body}`);
   } catch (error) {
     return `读取失败：${error instanceof Error ? error.message : String(error)}`;
   }

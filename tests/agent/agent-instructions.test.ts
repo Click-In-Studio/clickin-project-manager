@@ -87,11 +87,11 @@ describe("buildInstructionsBlock", () => {
     expect(block).toContain("#### 三级");
   });
 
-  it("clips over-budget content with a truncation marker", async () => {
+  it("已允许保存的完整指令全部注入", async () => {
     await setAgentInstructions("user", userId, "长".repeat(3000), userId);
     const block = await buildInstructionsBlock(userId, null, false);
-    expect(block!.length).toBeLessThan(2200);
-    expect(block).toContain("（指令过长已截断）");
+    expect(block).toContain("长".repeat(3000));
+    expect(block).not.toContain("（指令过长已截断）");
   });
 
   it("returns null when no instructions exist at all", async () => {
