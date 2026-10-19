@@ -363,8 +363,9 @@ export default function AgentPopout({
       let lastByteAt = Date.now();
       let watchdogFired = false;
       watchdog = setInterval(() => {
+        if (!isCurrentOperation(operation)) return;
         // 服务端每 15 秒发心跳；正常工具/模型等待不应被提示为网络缓慢。
-        if (isCurrentOperation(operation)) setStreamWaiting(Date.now() - lastByteAt > 20_000);
+        setStreamWaiting(Date.now() - lastByteAt > 20_000);
         if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
           watchdogFired = true;
           setStreamWaiting(true);
@@ -1992,7 +1993,7 @@ function mergeHistoryBubbles(previous: Bubble[], incoming: Bubble[], earlier: bo
   const restored = [...incoming].reverse().map(item => {
     const old = existing.get(item.historyKey) ?? (!earlier ? [...previous].reverse().find(candidate => {
       if (used.has(candidate.key!) || /^\d+:/.test(candidate.historyKey ?? "") || candidate.kind !== item.kind) return false;
-      if (candidate.kind === "tool" && item.kind === "tool") return candidate.id === item.id;
+      if (candidate.kind === "tool" && item.kind === "tool") return !!candidate.id && candidate.id === item.id;
       if ("text" in candidate && "text" in item) return candidate.text === item.text;
       return false;
     }) : undefined);
