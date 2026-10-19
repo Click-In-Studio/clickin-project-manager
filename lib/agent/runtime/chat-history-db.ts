@@ -2,6 +2,7 @@ import { getPool } from "@/lib/pg";
 import { attachmentIdsFromContext, stripUiContext } from "@/lib/agent/agent-ui-context";
 import { listAttachmentsForHistory, type AgentAttachment } from "@/lib/agent/attachment-db";
 import { TOOL_PAYLOAD_MAX_CHARS, type ChatHistoryPage } from "@/lib/agent/chat/types";
+import { attachmentReferences } from "@/lib/agent/chat/attachment-references";
 import { InMemorySessionStorage } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/memory-storage";
 import type { SessionTreeEntry } from "../../../vendor/openclaw/packages/agent-core/src/harness/types";
 import { assistantFailureReason } from "./stream-lines";
@@ -47,8 +48,9 @@ export async function getHistoryPage(sessionId: string, cursor: string | null = 
   for (const { payload } of rows.rows) {
     if (payload.type !== "message") continue;
     const raw = textOf("content" in payload.message ? payload.message.content : "");
+    // 用户附件信封与助手行内引用是两种协议，后者沿用聊天展示的完整片段解析。
     for (const id of attachmentIdsFromContext(raw)) ids.add(id);
-    for (const match of raw.matchAll(/\[\[attachment:([a-z0-9_]+)/gi)) ids.add(match[1]);
+    for (const reference of attachmentReferences(raw).items) ids.add(reference.id);
     if (payload.message.role === "toolResult") calls.push(payload.message.toolCallId);
   }
   const attachments = (await listAttachmentsForHistory(sessionId, [...ids], calls)).map(chatAttachment);

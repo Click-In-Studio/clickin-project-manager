@@ -93,7 +93,7 @@ describe("聊天历史分页", () => {
     for (let i = 0; i < CHAT_HISTORY_PAGE_SIZE; i++) await append(session, `中间记录-${i}`);
     // assistant 引用可指向上一页的附件；即使模型写了他人 id，也不能跨会话取元数据。
     await session.appendMessage({ role: "assistant", content: [{ type: "thinking", thinking: "核对原件" },
-      { type: "text", text: `参考 [[attachment:${original}|舞台]] 和 [[attachment:${foreignId}|不可见]]` }],
+      { type: "text", text: `参考 [[attachment:${original}|舞台]] 和 [[attachment:${foreignId}|不可见]]，未完成片段 [[attachment:${unused}|稍后补齐` }],
       api: "openai-completions", provider: "deepseek", model: "fake", stopReason: "length", timestamp: Date.now(),
       usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });

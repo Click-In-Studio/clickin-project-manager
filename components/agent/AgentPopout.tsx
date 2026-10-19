@@ -26,6 +26,7 @@ import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
+import { attachmentReferences } from "@/lib/agent/chat/attachment-references";
 import ChatViewport, { type ChatViewportHandle } from "./ChatViewport";
 import ChatLoadingNotice from "./ChatLoadingNotice";
 import type { ChatHistoryPage } from "@/lib/agent/chat/types";
@@ -1670,14 +1671,6 @@ function attachmentPreviewUrl(sessionKey: string, attachmentId: string): string 
   return `/api/agent/attachments/${encodeURIComponent(attachmentId)}?sessionKey=${encodeURIComponent(sessionKey)}`;
 }
 
-function attachmentReferences(text: string): { text: string; items: Array<{ id: string; alt: string; key: string }> } {
-  const items: Array<{ id: string; alt: string; key: string }> = [];
-  const cleaned = text.replace(/\[\[attachment:([a-z0-9_]+)(?:\|([^\]\r\n]{0,200}))?\]\]/gi, (_all, id: string, alt?: string) => {
-    items.push({ id, alt: alt?.trim() ?? "", key: `${id}:${items.length}` });
-    return "";
-  });
-  return { text: cleaned.trim(), items };
-}
 
 /** 调用参数里插件注入的调用者身份字段（_caller_user_id 等）——对模型是
  * 强制覆写的信道，对用户是噪声，展示时剥掉。 */
