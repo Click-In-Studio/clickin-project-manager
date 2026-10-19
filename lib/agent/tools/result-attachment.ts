@@ -30,3 +30,13 @@ export function savedTextPreview(saved: Awaited<ReturnType<typeof saveTextResult
     + `用 my.attachment_read 的 mode=read + window={offset,length} 续读，mode=search + query 搜索；附件仅在当前会话权限与有效期内可用。\n`
     + formatTextWindow(saved.text, { length }));
 }
+
+export type SavedTextDetails = { attachments: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }> };
+export type SavedTextToolResult = import("../../../vendor/openclaw/packages/agent-core/src/types").AgentToolResult<SavedTextDetails>;
+/** 模型预览和用户附件卡使用同一个成功保存结果，避免实时流只出现无法打开的文本 ID。 */
+export function savedTextToolResult(saved: Awaited<ReturnType<typeof saveTextResult>>): SavedTextToolResult {
+  const a = saved.attachment;
+  return { content: [{ type: "text", text: savedTextPreview(saved) }], details: {
+    attachments: [{ attachmentId: a.id, fileName: a.fileName, mimeType: a.mimeType, fileSize: a.fileSize }],
+  } };
+}

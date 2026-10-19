@@ -36,6 +36,8 @@ import { saveWebPage } from "@/lib/agent/tools/web-fetch-tools";
 import { saveTextResult } from "@/lib/agent/tools/result-attachment";
 import { readModelMedia } from "@/lib/agent/runtime/model-read";
 import { readResourceText } from "@/lib/agent/tools/media-read-tools";
+import { createStreamLineAdapter } from "@/lib/agent/runtime/stream-lines";
+import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
 import { createPendingAttachment, scheduleAttachmentDeletion } from "@/lib/agent/attachment-db";
 const context = { userId: "owner", sessionId: "session", runId: "run", toolCallId: "call" };
 const file = { fileId: "file", fileName: "source.docx", r2Key: "file", fileSize: 100 };
@@ -45,7 +47,11 @@ describe("同一份长材料可定位并读回", () => {
   it("长网页保存完整快照，摘要外的后段可搜索和窗口读回；跨会话拒绝", async () => {
     const body = "开头".repeat(15000) + "网页后段关键证据";
     const preview = await saveWebPage(context, { requestedUrl: "https://test/start", url: "https://test/final", fetchedAt: "2026-10-19T00:00:00Z", title: "资料", text: body, truncated: true });
-    expect(preview).toContain("attachmentId=a0"); expect(preview).not.toContain("网页后段关键证据");
+    expect(JSON.stringify(preview)).toContain("attachmentId=a0"); expect(JSON.stringify(preview)).not.toContain("网页后段关键证据");
+    expect(preview.details?.attachments[0]).toMatchObject({ attachmentId: "a0", mimeType: "text/plain" });
+    const lines: StreamLine[] = [];
+    createStreamLineAdapter(line => lines.push(line))({ type: "tool_execution_end", toolCallId: "call", toolName: "web.fetch", result: preview, isError: false });
+    expect(lines.find(line => line.type === "tool-result")).toMatchObject({ attachments: [{ id: "a0", fileName: "web-page.txt", status: "ready" }] });
     const saved = state.files.get("a0") as unknown as AgentAttachment;
     expect(state.objects.get("a0")!.toString()).toContain(body);
     expect(saved.sourceMetadata).toMatchObject({ fetchedAt: "2026-10-19T00:00:00Z" });
@@ -88,7 +94,8 @@ describe("同一份长材料可定位并读回", () => {
   it("长 OCR 保存本次完整结果，后文直接回查而非重跑识别", async () => {
     state.ocr.mockResolvedValue({ status: "ok", cached: true, tier: "gpu-fast", engine: "test", jobId: "ocr-job", pages: [{ page: 1, tier: "gpu-fast", text: "字".repeat(25000) + "识别末尾", quality: { lines: 1 }, flags: [] }], suggestUpgradePages: [] });
     const preview = await attachmentFileOcr("owner", null, { ...file, fileName: "scan.png" }, "image/png", [1], context);
-    expect(preview).toContain("attachmentId=a0"); expect(preview).not.toContain("识别末尾");
+    expect(JSON.stringify(preview)).toContain("attachmentId=a0"); expect(JSON.stringify(preview)).not.toContain("识别末尾");
+    expect(typeof preview !== "string" && preview.details?.attachments[0]).toMatchObject({ attachmentId: "a0", mimeType: "application/json" });
     expect(state.objects.get("a0")!.toString()).toContain("识别末尾");
     const saved = state.files.get("a0") as unknown as AgentAttachment;
     const read = await readResourceText(saved, { mode: "search", query: "识别末尾" }, { ...context, productionId: null });

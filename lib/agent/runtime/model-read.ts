@@ -67,6 +67,7 @@ export async function readModelMedia(ctx: ToolContext, args: MediaReadOptions & 
     sessionId, runId: ctx.run?.runId, toolCallId: callId, signal: ctx.run?.signal });
   if (ctx.run && args.attachmentId) await recordAttachmentAccess(ctx.run.runId, [args.attachmentId], "read");
   return { content: [{ type: "text", text: fallback.text + provenance }], details: {
+    ...fallback.details,
     completeAttachmentIds: fallback.complete && args.attachmentId ? [args.attachmentId] : [],
   } };
 }

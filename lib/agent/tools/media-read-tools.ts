@@ -14,10 +14,15 @@ export interface MediaReadOptions {
   limit?: number;
 }
 
+type TextReadResult = { text: string; complete: boolean; details?: import("./result-attachment").SavedTextDetails };
+function parsedResult(value: string | import("./result-attachment").SavedTextToolResult): TextReadResult {
+  return typeof value === "string" ? { text: value, complete: false }
+    : { text: value.content.filter(part => part.type === "text").map(part => part.text).join("\n"), complete: false, details: value.details };
+}
 /** 非原生读取共用现有文档/MMP 能力；完整文本与概览、片段、预检严格区分。 */
 export async function readResourceText(resource: MediaResource, options: MediaReadOptions,
   context: { userId: string; productionId: string | null; sessionId: string | null; runId?: string; toolCallId?: string; signal?: AbortSignal },
-): Promise<{ text: string; complete: boolean }> {
+): Promise<TextReadResult> {
   const lower = resource.fileName.toLowerCase();
   const file = { fileId: resource.id, r2Key: resource.r2Key, fileSize: resource.fileSize, fileName: resource.fileName };
   if (lower.endsWith(".docx") || lower.endsWith(".pdf")) {
@@ -27,14 +32,13 @@ export async function readResourceText(resource: MediaResource, options: MediaRe
       })
       : await attachmentDocRead(file, { mode: options.mode === "search" ? "search" : options.mode === "read" && (options.ranges?.length || options.window) ? "read" : "outline",
         ranges: options.ranges, window: options.window, query: options.query, limit: options.limit }, { sessionId: context.sessionId });
-    return { text, complete: false };
+    return parsedResult(text);
   }
   const mediaKind = resource.mediaKind ?? /^(audio|image|video)\//.exec(resource.mimeType)?.[1];
-  if (mediaKind === "image" && options.mode === "ocr") return {
-    text: await attachmentFileOcr(context.userId, context.productionId, file, resource.mimeType, options.pages ?? [1], {
+  if (mediaKind === "image" && options.mode === "ocr") return parsedResult(
+    await attachmentFileOcr(context.userId, context.productionId, file, resource.mimeType, options.pages ?? [1], {
       tier: options.tier, sessionId: context.sessionId, runId: context.runId, toolCallId: context.toolCallId, signal: context.signal,
-    }), complete: false,
-  };
+    }));
   if (mediaKind) {
     const outcome = await preflightAttachment({ attachmentId: resource.id, mediaKind: resource.mediaKind,
       mimeType: resource.mimeType, r2Key: resource.r2Key }, {

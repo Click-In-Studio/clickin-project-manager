@@ -543,7 +543,7 @@ export async function docPageOcr(
   userId: string, productionId: string, assetId: string,
   pages: number[],
   opts: DocPageOcrOpts = {},
-): Promise<string> {
+): Promise<string | import("./result-attachment").SavedTextToolResult> {
   const got = await resolveReadableAsset(userId, productionId, assetId);
   if (typeof got === "string") return neutralizeInjectionTags(got);
   const { asset, file } = got;
@@ -566,7 +566,7 @@ export async function attachmentFileOcr(
   declaredMime: string | null,
   pages: number[],
   opts: DocPageOcrOpts = {},
-): Promise<string> {
+): Promise<string | import("./result-attachment").SavedTextToolResult> {
   const name = file.fileName;
   const ext = name.toLowerCase().split(".").pop() ?? "";
   const mime = OCR_MIME_BY_EXT[ext] ?? (declaredMime && Object.values(OCR_MIME_BY_EXT).includes(declaredMime) ? declaredMime : null);
@@ -639,11 +639,11 @@ export async function attachmentFileOcr(
     pages: out.pages, suggestUpgradePages: out.suggestUpgradePages, requestedPages: wanted }, null, 2);
   if (full.length <= READ_CHAR_BUDGET && material.length <= READ_CHAR_BUDGET) return neutralizeInjectionTags(full);
   if (!opts.sessionId || !opts.runId || !opts.toolCallId) throw new Error("长 OCR 结果缺少会话保存上下文，未返回残缺识别结果。");
-  const { saveTextResult, savedTextPreview } = await import("./result-attachment");
+  const { saveTextResult, savedTextToolResult } = await import("./result-attachment");
   const saved = await saveTextResult({ userId, sessionId: opts.sessionId, fileName: "ocr-result.json", mimeType: "application/json", text: material,
     source: { kind: "mmp", runId: opts.runId, toolCallId: opts.toolCallId, outputName: "ocr_result", outputIndex: 0,
       metadata: { fileId: file.fileId, pages: wanted, tier: out.tier, engine: out.engine, jobId: out.jobId, generatedAt: new Date().toISOString() } } });
-  return savedTextPreview(saved);
+  return savedTextToolResult(saved);
 }
 
 const OCR_FLAG_LABEL: Record<string, string> = {
