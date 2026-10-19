@@ -137,8 +137,8 @@ describe("Agent 接流所有权", () => {
     expect(count("本轮过程正文")).toBe(1);
     expect(count("阅读文档")).toBe(1);
     expect(count("本轮确认卡")).toBe(1);
-    // 结束后的历史替换仍需执行，但不能再靠它清理运行中的重复显示。
-    historyMessages = [{ role: "assistant", content: "本轮完整回复" }];
+    // 结束后的历史同步仍需执行，运行中的重复显示不依靠它清理。
+    historyMessages = [{ key: "10:fixture:assistant", role: "assistant", content: "本轮完整回复" }];
     await act(async () => { StatusStream.current.send(null); stream.send({ type: "final", text: "本轮完整回复" }); stream.close(); });
     expect(historyCalls()).toHaveLength(2);
     expect(count("本轮完整回复")).toBe(1);

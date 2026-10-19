@@ -15,6 +15,7 @@ import { createOrReuseQuestion } from "@/lib/agent/runtime/questions";
 import { newApprovalId, newQuestionId, newRunId, newSessionId } from "@/lib/agent/runtime/ids";
 import { EventPublisher } from "@/lib/agent/runtime/events";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
+import type { ChatHistoryPage } from "@/lib/agent/chat/types";
 
 // #367 S2：路由分流的端到端——AGENT_RUNTIME=runner 时，同一套路由（stream/history/
 // sessions/abort/[key]）走自建运行时；SSE 帧格式与行协议与网关时代一致，前端零改动。
@@ -86,7 +87,13 @@ describe("agent routes（自建运行时）", () => {
 
     const { GET: history } = await import("@/app/api/agent/chat/history/route");
     const h = await history(req(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`));
-    expect((await h.json()).messages).toEqual([{ role: "user", content: "你好" }, { role: "assistant", content: "你好呀" }]);
+    const page = await h.json() as ChatHistoryPage;
+    expect(page).toEqual({ messages: [
+      { key: expect.stringMatching(/^1:[^:]+:user$/), role: "user", content: "你好" },
+      { key: expect.stringMatching(/^2:[^:]+:assistant$/), role: "assistant", content: "你好呀" },
+    ], attachments: [], nextCursor: null });
+    const restored = await (await history(req(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`))).json() as ChatHistoryPage;
+    expect(restored.messages.map(message => message.key)).toEqual(page.messages.map(message => message.key));
 
     const { GET: list } = await import("@/app/api/agent/sessions/route");
     const l = await (await list(req("/api/agent/sessions"))).json();

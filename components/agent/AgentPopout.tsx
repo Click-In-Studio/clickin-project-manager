@@ -498,7 +498,7 @@ export default function AgentPopout({
         const history = historyBubbles(data);
         setHistoryCursor(data.nextCursor);
         setHistoryAttachments(prev => new Map([...prev, ...data.attachments.map(item => [item.id, item] as const)]));
-        setBubbles(prev => switchingSession ? history : mergeHistoryBubbles(prev, history, false));
+        setBubbles(prev => switchingSession ? history : mergeHistoryBubbles(prev, history));
       } else {
         throw new Error("加载对话失败，请稍后重试");
       }
@@ -553,7 +553,7 @@ export default function AgentPopout({
       if (!response.ok) throw new Error("较早的对话加载失败，请重试");
       const data = await response.json() as ChatHistoryPage;
       if (controller.signal.aborted || activeKeyRef.current !== key) return;
-      setBubbles(prev => restoreLoadedQuestions(mergeHistoryBubbles(prev, historyBubbles(data), true), restoredQuestions.current));
+      setBubbles(prev => restoreLoadedQuestions(mergeHistoryBubbles(prev, historyBubbles(data)), restoredQuestions.current));
       setHistoryCursor(data.nextCursor);
       setHistoryAttachments(prev => new Map([...prev, ...data.attachments.map(item => [item.id, item] as const)]));
     } catch (error) {
@@ -1979,34 +1979,62 @@ function historyBubbles(page: ChatHistoryPage): Bubble[] {
       ...(message.role === "user" && message.attachments?.length ? { attachments: message.attachments } : {}) });
 }
 
-function mergeHistoryBubbles(previous: Bubble[], incoming: Bubble[], earlier: boolean): Bubble[] {
+function mergeHistoryBubbles(previous: Bubble[], incoming: Bubble[]): Bubble[] {
+  const sequence = (item: Bubble) => /^\d+:/.test(item.historyKey ?? "") ? Number(item.historyKey!.split(":")[0]) : undefined;
+  const lower: number[] = [], upper: number[] = [];
+  let bound = -Infinity;
+  for (const item of previous) {
+    lower.push(bound);
+    bound = sequence(item) ?? bound;
+  }
+  bound = Infinity;
+  for (let index = previous.length - 1; index >= 0; index--) {
+    upper[index] = bound;
+    bound = sequence(previous[index]) ?? bound;
+  }
   const used = new Set<string>();
   const existing = new Map(previous.filter(item => item.historyKey).map(item => [item.historyKey, item]));
-  // 实时气泡转成落库历史时沿用显示 key，避免重挂媒体或重置已展开卡片。
+  // 以已落库的前后邻居约束匹配范围，较早页面不能误认后来的同文输入。
   const restored = [...incoming].reverse().map(item => {
-    const old = existing.get(item.historyKey) ?? (!earlier ? [...previous].reverse().find(candidate => {
-      if (used.has(candidate.key!) || /^\d+:/.test(candidate.historyKey ?? "") || candidate.kind !== item.kind) return false;
+    const seq = sequence(item);
+    const old = existing.get(item.historyKey) ?? previous.findLast((candidate, index) => {
+      if (used.has(candidate.key!) || sequence(candidate) !== undefined || candidate.kind !== item.kind) return false;
+      if (candidate.historyKey && item.historyKey?.endsWith(`:${candidate.historyKey}`)) return true;
+      if (seq !== undefined && (seq < lower[index] || seq > upper[index])) return false;
       if (candidate.kind === "tool" && item.kind === "tool") return !!candidate.id && candidate.id === item.id;
-      if ("text" in candidate && "text" in item) return candidate.text === item.text;
-      return false;
-    }) : undefined);
+      if (candidate.kind === "user" && item.kind === "user" &&
+        candidate.attachments?.map(a => a.id).join() !== item.attachments?.map(a => a.id).join()) return false;
+      return "text" in candidate && "text" in item && candidate.text === item.text;
+    });
     if (!old) return item;
     used.add(old.key!);
     return { ...item, key: old.key };
   }).reverse();
-  const map = new Map(previous.filter(item => /^\d+:/.test(item.historyKey ?? "")).map(item => [item.historyKey, item]));
+  const map = new Map(previous.filter(item => sequence(item) !== undefined).map(item => [item.historyKey, item]));
   for (const item of restored) map.set(item.historyKey, item);
   const rank: Record<string, number> = { user: 0, thinking: 1, assistant: 2, tool: 3, notice: 4 };
-  const order = (item: Bubble) => /^\d+:/.test(item.historyKey ?? "") ? Number(item.historyKey!.split(":")[0]) : Infinity;
-  const ordered = [...map.values()].sort((a, b) => order(a) - order(b) || rank[a.kind] - rank[b.kind]);
-  if (earlier) ordered.push(...previous.filter(item => !/^\d+:/.test(item.historyKey ?? "") && item.kind !== "question" && item.kind !== "approval" && !used.has(item.key!)));
+  const ordered = [...map.values()].sort((a, b) => (sequence(a) ?? Infinity) - (sequence(b) ?? Infinity) || rank[a.kind] - rank[b.kind]);
+  const present = new Set(ordered.map(item => item.key));
+  const waiting = new Map<string | undefined, Bubble[]>();
+  let next: string | undefined;
+  // 最新页未覆盖的实时内容仍留在原邻居之前，补齐对应旧页后再原位转成历史。
+  for (let index = previous.length - 1; index >= 0; index--) {
+    const item = previous[index];
+    if (present.has(item.key)) { next = item.key; continue; }
+    if (item.kind === "question" || item.kind === "approval") continue;
+    const group = waiting.get(next) ?? [];
+    group.push(item);
+    waiting.set(next, group);
+  }
+  const merged = ordered.flatMap(item => [...(waiting.get(item.key) ?? []).reverse(), item]);
+  merged.push(...(waiting.get(undefined) ?? []).reverse());
   for (const card of previous.filter(item => item.kind === "question" || item.kind === "approval")) {
     const callId = card.kind === "question" ? card.question.toolCallId : card.kind === "approval" ? card.approval.toolCallId : undefined;
-    const tool = ordered.findIndex(item => item.kind === "tool" && item.id === callId);
-    if (tool < 0) ordered.push(card);
-    else ordered.splice(tool + 1, 0, card);
+    const tool = merged.findIndex(item => item.kind === "tool" && item.id === callId);
+    if (tool < 0) merged.push(card);
+    else merged.splice(tool + 1, 0, card);
   }
-  return ordered;
+  return merged;
 }
 
 function restoreLoadedQuestions(bubbles: Bubble[], questions: QuestionInfo[]): Bubble[] {

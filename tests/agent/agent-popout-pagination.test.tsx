@@ -76,3 +76,21 @@ it("一轮超过最新一页时，刷新不丢本地已显示内容；补齐旧�
   expect(container.contains(firstTool)).toBe(true);
   expect(firstTool.getAttribute("aria-expanded")).toBe("true");
 });
+
+it("接流期间补更早页面，不把同文旧消息误认成本次输入", async () => {
+  history[0] = json([{ key: "10:fixture:assistant", role: "assistant", content: "最近的回复" }], "10.10");
+  await act(async () => root.render(<AgentPopout open onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
+  const input = container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "重复输入");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+  const live = [...container.querySelectorAll<HTMLElement>("[data-transcript-key]")].find(el => el.textContent === "重复输入")!;
+  history.push(json([{ key: "1:fixture:user", role: "user", content: "重复输入" }]));
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find(el => el.textContent === "加载更早的对话")!.click());
+  const copies = [...container.querySelectorAll<HTMLElement>("[data-transcript-key]")].filter(el => el.textContent === "重复输入");
+  expect(copies).toHaveLength(2);
+  expect(copies.at(-1)).toBe(live);
+  expect(copies[0].dataset.transcriptKey).toBe("1:fixture:user");
+});
