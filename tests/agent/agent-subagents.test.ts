@@ -1097,6 +1097,35 @@ describe("持久子 Agent 基建", () => {
       (await pendingEventsForRun(p.sessionId, p.runId)).map((r) => r.id),
     ).toEqual([eventId]);
   });
+  it("子 Agent 对明确交接的长文本附件能搜索并窗口读回后段", async () => {
+    const p = await parent();
+    const full = "甲".repeat(90000) + "附件后段证据";
+    const { createPendingAttachment, markAttachmentReady, recordAttachmentAccess } = await import("@/lib/agent/attachment-db");
+    const attachment = await createPendingAttachment({ sessionId: p.sessionId, userId, fileName: "long-material.txt", mimeType: "text/plain", fileSize: Buffer.byteLength(full) });
+    await markAttachmentReady(attachment.id, p.sessionId, userId, Buffer.byteLength(full));
+    await recordAttachmentAccess(p.runId, [attachment.id], "attached");
+    const r2 = await import("@/lib/r2");
+    const preflight = await import("@/lib/mmp/attachment-preflight");
+    const stream = vi.spyOn(r2, "getR2Stream").mockImplementation(async () => new Response(full));
+    const prepare = vi.spyOn(preflight, "preflightAttachments").mockResolvedValue({});
+    try {
+      subagentRuntimeOverrides.streamFn = model([
+        [{ type: "toolCall", id: "search-tail", name: exposedName("my.attachment_read"), arguments: { attachmentId: attachment.id, mode: "search", query: "附件后段证据" } }],
+        [{ type: "toolCall", id: "read-tail", name: exposedName("my.attachment_read"), arguments: { attachmentId: attachment.id, mode: "read", window: { offset: 90000, length: 100 } } }],
+        "已核对附件后段。",
+      ], []);
+      const output = await spawnSubagent(p, { task: "核对附件后段", attachmentIds: [attachment.id] }, "attachment-window");
+      const id = /as_[a-z0-9]+/.exec(output)![0];
+      await completed(p, id);
+      const trace = JSON.parse(await readSubagent(p.sessionId, id));
+      const results = trace.entries.filter((e: { payload: { message?: { role: string } } }) => e.payload.message?.role === "toolResult");
+      expect(results).toHaveLength(2);
+      expect(JSON.stringify(results[0])).toContain("附件后段证据");
+      expect(JSON.stringify(results[1])).toContain("附件后段证据");
+      expect(stream).toHaveBeenCalledTimes(2);
+    } finally { stream.mockRestore(); prepare.mockRestore(); }
+  });
+
   it("子 Agent 长结果仍从持久记录窗口读回，不另造材料副本", async () => {
     const p = await parent();
     subagentRuntimeOverrides.streamFn = model(["分析".repeat(10000) + "结果后段证据"], []);
