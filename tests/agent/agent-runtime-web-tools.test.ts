@@ -137,7 +137,7 @@ describe("web.fetch", () => {
     expect(pdf).toEqual({ mimeType: "application/pdf", chunks: [Buffer.from("%PDF-1.7\nwhole-file")] });
   });
 
-  it("超长正文截断并标记；重定向跟随；404 报错", async () => {
+  it("长正文完整保留并标记预览阈值；超硬上限失败；重定向跟随；404 报错", async () => {
     process.env.AGENT_WEB_FETCH_ALLOW_PRIVATE = "1";
     const long = await webFetch(`${base}/long`);
     expect(long.text.length).toBe(WEB_FETCH_MAX_CHARS + 500);

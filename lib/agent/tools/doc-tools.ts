@@ -39,7 +39,7 @@ const READ_PDF_LINE_CAP = 400;
 const READ_CHAR_BUDGET = 24_000;
 /** pdf 单次最多读的页数。 */
 const READ_PDF_PAGE_CAP = 10;
-/** 单段文本上限（保上下文预算；超长段截断并标注，模型可按锚点用更小范围重读）。 */
+/** 单段文本上限（保上下文预算；超长段提供字符窗口续读参数）。 */
 const READ_TEXT_CAP = 1200;
 const SEARCH_DEFAULT_LIMIT = 20;
 const SEARCH_MAX_LIMIT = 50;
@@ -220,7 +220,7 @@ function renderDocxItem(idx: number, item: DocxItem, textCap: number): string {
     return [head, body.slice(0, textCap), ...(body.length > textCap ? [`…（有省略；window={block:${idx},offset:${textCap},length:8000} 续读；可用 row/column 选择单元格）`] : [])].join("\n");
   }
   const tags = docxSignalTags(item);
-  let text = item.text;
+  let text = item.text.replace(/\n/g, "⏎");
   if (text.length > textCap) text = text.slice(0, textCap) + `…（段过长截断，全段 ${item.text.length} 字符；window={block:${idx},offset:${textCap},length:8000} 续读）`;
   return `[¶${idx}${tags ? " " + tags : ""}] ${text}`;
 }

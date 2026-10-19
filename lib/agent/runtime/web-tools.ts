@@ -276,7 +276,7 @@ function codePointOrReplacement(n: number): string {
   return String.fromCodePoint(n);
 }
 
-/** 按字节上限读体。截断点落在多字节字符中间时那个字符会解成 �——正文只是给模型看的，best-effort。 */
+/** 按字节上限读体。超过上限明确失败，不把残缺响应伪装成完整材料。 */
 async function readCapped(
   reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
   first: Uint8Array,

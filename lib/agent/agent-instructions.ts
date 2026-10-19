@@ -75,9 +75,9 @@ export async function setAgentInstructions(
 }
 
 /** 注入用净化：标题防御性降级（#/##/### → ####，防与包裹块的 ### 段标题
- * 同级串段——与 memory 注入的降级同一思路）+ 预算截断。 */
+ * 同级串段——与 memory 注入的降级同一思路）。 */
 function sanitizeForInject(content: string): string {
-  // 先中和注入分隔符（防伪造/提前闭合包裹块），再降级标题、截断预算。
+  // 先中和注入分隔符（防伪造/提前闭合包裹块），再降级标题，允许保存的正文完整保留。
   const safe = neutralizeInjectionTags(content);
   const demoted = safe.replace(/^#{1,3}(?=\s)/gm, "####");
   return demoted;
