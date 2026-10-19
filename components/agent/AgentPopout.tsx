@@ -1,14 +1,14 @@
 "use client";
 
 import { AttachmentMedia } from "./AttachmentMedia";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import Markdown from "@/components/ui/Markdown";
 import {
   applyStreamLine,
   mergeRestoredQuestions,
-  type Bubble,
+  type Bubble as StreamBubble,
   type QuestionInfo,
   type QuestionItem,
   type StreamLine,
@@ -26,7 +26,12 @@ import VoiceRecordButton from "@/components/agent/VoiceRecordButton";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import DropdownPicker from "@/components/ui/DropdownPicker";
 import { isAgentChatSubmitShortcut } from "@/components/ui/multiline-keyboard";
-import type { ChatTranscriptEntry } from "@/lib/agent/chat/types";
+import { attachmentReferences } from "@/lib/agent/chat/attachment-references";
+import ChatViewport, { type ChatViewportHandle } from "./ChatViewport";
+import ChatLoadingNotice from "./ChatLoadingNotice";
+import type { ChatHistoryPage } from "@/lib/agent/chat/types";
+
+type Bubble = StreamBubble & { key?: string; historyKey?: string };
 
 /** 按语境（个人 / 某个制作）分桶持久化最后一次活跃会话，重开 popout 时恢复。 */
 function lastSessionStorageKey(productionId: string | null): string {
@@ -116,7 +121,24 @@ export default function AgentPopout({
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [bubbles, setBubbleState] = useState<Bubble[]>([]);
+  const bubbleSequence = useRef(0);
+  const setBubbles = useCallback((update: SetStateAction<Bubble[]>) => {
+    setBubbleState(prev => {
+      const next = typeof update === "function" ? update(prev) : update;
+      return next.map((bubble, index) => bubble.key ? bubble : { ...bubble, key:
+        bubble.kind === "question" ? `question:${bubble.question.id}` :
+        bubble.kind === "approval" ? `approval:${bubble.approval.id}` :
+        prev[index]?.kind === bubble.kind ? prev[index].key : `live-${++bubbleSequence.current}` });
+    });
+  }, []);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const earlierRequest = useRef<AbortController | null>(null);
+  const [historyAttachments, setHistoryAttachments] = useState<Map<string, ChatAttachment>>(new Map());
+  const restoredQuestions = useRef<QuestionInfo[]>([]);
+  const [streamWaiting, setStreamWaiting] = useState(false);
+  const chatViewport = useRef<ChatViewportHandle>(null);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [pendingModelSaves, setPendingModelSaves] = useState(0);
@@ -138,8 +160,6 @@ export default function AgentPopout({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceRetryFile, setVoiceRetryFile] = useState<File | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollContentRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,10 +171,13 @@ export default function AgentPopout({
     const previous = operationRef.current;
     operationRef.current = null;
     previous?.controller.abort();
+    earlierRequest.current?.abort();
+    earlierRequest.current = null;
     void previous?.reader?.cancel().catch(() => {});
   }, []);
   const beginOperation = useCallback((key: string, phase: ChatOperation["phase"]): ChatOperation => {
     cancelOperation();
+    setLoadingEarlier(false);
     const operation: ChatOperation = { key, phase, controller: new AbortController() };
     operationRef.current = operation;
     return operation;
@@ -199,6 +222,13 @@ export default function AgentPopout({
     [productionId],
   );
   const scopedSessions = sessions.filter((s) => inScope(s.key));
+  const knownAttachments = useMemo(() => {
+    const known = new Map(historyAttachments);
+    for (const bubble of bubbles) if (bubble.kind === "user" || bubble.kind === "tool") {
+      for (const attachment of bubble.attachments ?? []) known.set(attachment.id, attachment);
+    }
+    return known;
+  }, [bubbles, historyAttachments]);
   const pendingQuestions = bubbles.filter(
     (bubble): bubble is Extract<Bubble,{ kind: "question" }> =>
       bubble.kind === "question" && !bubble.status && bubble.question.status === "pending",
@@ -230,10 +260,15 @@ export default function AgentPopout({
       setStreaming(false);
       setLoadingHistory(false);
       setActiveKey(null);
+      setHistoryCursor(null);
+      setHistoryAttachments(new Map());
+      restoredQuestions.current = [];
+      setLoadingEarlier(false);
+      setStreamWaiting(false);
       setBubbles([]);
       setCompacting(false);
     }
-  }, [productionId, activeKey, inScope, cancelOperation]);
+  }, [productionId, activeKey, inScope, cancelOperation, setBubbles]);
 
   // 按语境记住最后一次活跃的会话——重开 popout/刷新页面后自动接回去，
   // 不用每次都从空白开始。恢复逻辑见下面依赖 openSession 的那个 effect。
@@ -297,22 +332,6 @@ export default function AgentPopout({
     };
   }, [open, onClose]);
 
-  const pinChatToBottom = useCallback(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, []);
-
-  useEffect(() => {
-    pinChatToBottom();
-  }, [bubbles, streaming, pinChatToBottom]);
-
-  useEffect(() => {
-    const content = scrollContentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(pinChatToBottom);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [pinChatToBottom]);
-
   // 输入框随内容平滑长高（ChatGPT 等主流 webchat 的惯例），封顶后转内部滚动。
   useEffect(() => {
     const el = textareaRef.current;
@@ -345,11 +364,15 @@ export default function AgentPopout({
       let lastByteAt = Date.now();
       let watchdogFired = false;
       watchdog = setInterval(() => {
+        if (!isCurrentOperation(operation)) return;
+        // 服务端每 15 秒发心跳；正常工具/模型等待不应被提示为网络缓慢。
+        setStreamWaiting(Date.now() - lastByteAt > 20_000);
         if (!watchdogFired && Date.now() - lastByteAt > 60_000) {
           watchdogFired = true;
+          setStreamWaiting(true);
           reader.cancel().catch(() => {});
         }
-      }, 5_000);
+      }, 1_000);
 
       // 写操作后自动刷新（#367 自建运行时的形态）：runner 在写工具成功后发 `mutation` 行
       // （落 agent_event，断线重连可补），这里只派发给页面订阅者（lib/agent/agent-mutations.ts），
@@ -375,6 +398,7 @@ export default function AgentPopout({
         const { done, value } = await reader.read();
         if (done || !isCurrentOperation(operation)) break;
         lastByteAt = Date.now();
+        setStreamWaiting(false);
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
@@ -409,6 +433,7 @@ export default function AgentPopout({
       if (fallbackTimer && !isCurrentOperation(operation)) clearTimeout(fallbackTimer);
       // 被替换的消费者既不能写气泡，也不能在 finally 清掉新流的忙碌状态。
       if (isCurrentOperation(operation)) {
+        setStreamWaiting(false);
         operation.phase = "idle";
         setStreaming(false);
         setCompacting(false);
@@ -424,6 +449,7 @@ export default function AgentPopout({
           .then((data: { attachments?: ChatAttachment[] } | null) => {
             if (!isCurrentOperation(operation) || !data?.attachments) return;
             const byId = new Map(data.attachments.map((item) => [item.id, item]));
+            setHistoryAttachments(prev => new Map([...prev, ...byId]));
             setBubbles((prev) => prev.map((bubble) => {
               if (bubble.kind === "user") return {
                 ...bubble,
@@ -440,7 +466,7 @@ export default function AgentPopout({
         refreshSessions();
       }
     }
-  }, [refreshSessions, router, isCurrentOperation]);
+  }, [refreshSessions, router, isCurrentOperation, setBubbles]);
 
   const openSession = useCallback(async (key: string, status?: SessionSummary["status"]) => {
     setPickerOpen(false);
@@ -451,7 +477,14 @@ export default function AgentPopout({
     activeKeyRef.current = key;
     setActiveKey(key);
     setStreaming(false);
-    if (switchingSession) setBubbles([]);
+    setStreamWaiting(false);
+    if (switchingSession) {
+      setBubbles([]);
+      setHistoryCursor(null);
+      setHistoryAttachments(new Map());
+      restoredQuestions.current = [];
+    }
+    setLoadingEarlier(false);
     setCompacting(status === "compacting");
     setLoadingHistory(true);
     let handedOff = false;
@@ -460,21 +493,23 @@ export default function AgentPopout({
       const res = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}`, { signal });
       if (!isCurrentOperation(operation)) return;
       if (res.ok) {
-        const data = (await res.json()) as { messages: ChatTranscriptEntry[] };
+        const data = (await res.json()) as ChatHistoryPage;
         if (!isCurrentOperation(operation)) return;
-        const history = data.messages.map((m) =>
-          m.role === "tool"
-            ? { kind: "tool", name: m.name, id: m.id, done: true, ...(m.result ? { result: m.result } : {}), ...(m.attachments?.length ? { attachments: m.attachments } : {}) }
-            : { kind: m.role, text: m.content, ...(m.role === "user" && m.attachments?.length ? { attachments: m.attachments } : {}) }
-        ) as Bubble[];
-        setBubbles(history);
+        const history = historyBubbles(data);
+        setHistoryCursor(data.nextCursor);
+        setHistoryAttachments(prev => new Map([...prev, ...data.attachments.map(item => [item.id, item] as const)]));
+        setBubbles(prev => switchingSession ? history : mergeHistoryBubbles(prev, history));
+      } else {
+        throw new Error("加载对话失败，请稍后重试");
       }
+      setLoadingHistory(false);
       try {
         const qres = await fetch(`/api/agent/questions?sessionKey=${encodeURIComponent(key)}`, { signal });
         if (qres.ok) {
           const data = (await qres.json()) as { questions?: QuestionInfo[] };
           if (isCurrentOperation(operation) && data.questions?.length) {
-            setBubbles((prev) => mergeRestoredQuestions(prev, data.questions!));
+            restoredQuestions.current = data.questions;
+            setBubbles((prev) => restoreLoadedQuestions(prev, data.questions!));
           }
         }
       } catch {
@@ -485,6 +520,7 @@ export default function AgentPopout({
       if (status === "queued" || status === "running" || status === "compacting") {
         operation.phase = "stream";
         setStreaming(true);
+        setStreamWaiting(true);
         const res = await fetch(`/api/agent/chat/stream?sessionKey=${encodeURIComponent(key)}`, { signal });
         handedOff = true;
         void consumeStream(res, operation);
@@ -498,12 +534,39 @@ export default function AgentPopout({
         setLoadingHistory(false);
         if (!handedOff) {
           operation.phase = "idle";
+          setStreamWaiting(false);
           setStreaming(false);
           setCompacting(false);
         }
       }
     }
-  }, [beginOperation, consumeStream, isCurrentOperation]);
+  }, [beginOperation, consumeStream, isCurrentOperation, setBubbles]);
+
+  const loadEarlier = useCallback(async () => {
+    if (!activeKey || !historyCursor || earlierRequest.current || loadingHistory) return;
+    const controller = new AbortController();
+    earlierRequest.current = controller;
+    const key = activeKey;
+    setLoadingEarlier(true);
+    try {
+      const response = await fetch(`/api/agent/chat/history?sessionKey=${encodeURIComponent(key)}&cursor=${encodeURIComponent(historyCursor)}`, { signal: controller.signal });
+      if (!response.ok) throw new Error("较早的对话加载失败，请重试");
+      const data = await response.json() as ChatHistoryPage;
+      if (controller.signal.aborted || activeKeyRef.current !== key) return;
+      setBubbles(prev => restoreLoadedQuestions(mergeHistoryBubbles(prev, historyBubbles(data)), restoredQuestions.current));
+      setHistoryCursor(data.nextCursor);
+      setHistoryAttachments(prev => new Map([...prev, ...data.attachments.map(item => [item.id, item] as const)]));
+    } catch (error) {
+      if (!controller.signal.aborted && activeKeyRef.current === key) {
+        setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "加载失败" }]);
+      }
+    } finally {
+      if (earlierRequest.current === controller) {
+        earlierRequest.current = null;
+        setLoadingEarlier(false);
+      }
+    }
+  }, [activeKey, historyCursor, loadingHistory, setBubbles]);
 
   const onSubagentParentRun = useCallback(
     async (status: "queued" | "running" | "compacting" | "done") => {
@@ -568,10 +631,15 @@ export default function AgentPopout({
     activeKeyRef.current = key;
     setActiveKey(key);
     setBubbles([]);
+    setHistoryCursor(null);
+    setHistoryAttachments(new Map());
+    restoredQuestions.current = [];
+    setLoadingEarlier(false);
+    setStreamWaiting(false);
     setStreaming(false);
     setLoadingHistory(false);
     setCompacting(false);
-  }, [productionId, cancelOperation]);
+  }, [productionId, cancelOperation, setBubbles]);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     const current = activeKeyRef.current;
@@ -693,9 +761,10 @@ export default function AgentPopout({
         }),
       };
     }));
-  }, [activeKey]);
+  }, [activeKey, setBubbles]);
 
   const dispatchMessage = useCallback(async (key: string, raw: string, selectedAttachments: ChatAttachment[]): Promise<boolean> => {
+    chatViewport.current?.follow();
     const visibleText = raw || (selectedAttachments.some((item) => item.mediaKind === "audio") ? "请听一下这段语音。" : "请查看附件。");
     setBubbles((prev) => [...prev, {
       kind: "user",
@@ -725,6 +794,7 @@ export default function AgentPopout({
     if (!steer) {
       setLoadingHistory(false);
       setStreaming(true);
+      setStreamWaiting(true);
     }
     try {
       const res = await fetch("/api/agent/chat/stream", {
@@ -750,12 +820,13 @@ export default function AgentPopout({
         setBubbles(prev => [...prev, { kind: "notice", text: error instanceof Error ? error.message : "发送失败" }]);
         if (!steer) {
           operation.phase = "idle";
+          setStreamWaiting(false);
           setStreaming(false);
         }
       }
       return false;
     }
-  }, [beginOperation, consumeStream, isCurrentOperation, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
+  }, [setBubbles, beginOperation, consumeStream, isCurrentOperation, docAttached, currentWikiId, currentDocTitle, currentDocTags, assetAttached, currentAssetId, currentAssetName, pageAttached, pageLabel, focusAttached, scriptFocusActive]);
 
   const send = useCallback(async () => {
     const raw = input.trim();
@@ -871,7 +942,7 @@ export default function AgentPopout({
       );
       setBubbles((prev) => [...prev, { kind: "notice", text: err.error || "确认请求处理失败" }]);
     }
-  }, []);
+  }, [setBubbles]);
 
   const answerQuestion = useCallback(
     async (questionId: string, payload: { answers: Record<string, string[]> } | { cancel: true }) => {
@@ -902,13 +973,11 @@ export default function AgentPopout({
       );
       void refreshSessions();
     },
-    [refreshSessions]
+    [refreshSessions, setBubbles]
   );
 
   const revealQuestion = useCallback((id: string) => {
-    const element = scrollRef.current?.querySelector<HTMLElement>(`[data-question-id="${id}"]`);
-    element?.scrollIntoView({ behavior: "smooth",block: "center" });
-    element?.focus({ preventScroll: true });
+    chatViewport.current?.reveal(`question:${id}`);
   },[]);
 
   const removeSession = useCallback(async (key: string) => {
@@ -920,11 +989,16 @@ export default function AgentPopout({
       setStreaming(false);
       setLoadingHistory(false);
       setActiveKey(null);
+      setHistoryCursor(null);
+      setHistoryAttachments(new Map());
+      restoredQuestions.current = [];
+      setLoadingEarlier(false);
+      setStreamWaiting(false);
       setBubbles([]);
       setCompacting(false);
     }
     refreshSessions();
-  }, [refreshSessions, cancelOperation]);
+  }, [refreshSessions, cancelOperation, setBubbles]);
 
   const renameSession = useCallback(async (key: string, current: string) => {
     const title = prompt("重命名对话", current)?.trim();
@@ -1086,17 +1160,18 @@ export default function AgentPopout({
       )}
 
       {/* 聊天区 */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div ref={scrollContentRef} className="min-h-full space-y-3">
-        {loadingHistory && bubbles.length === 0 && <p className="text-center text-sm text-zinc-400">加载中…</p>}
-        {!loadingHistory && bubbles.length === 0 && (
-          <div className="flex h-full items-center justify-center px-6 text-center">
-            <p className="text-sm text-zinc-400">
-              {productionId ? `向 AI 助手提问关于《${scopeLabel}》的问题` : "向 AI 助手提问吧"}
-            </p>
-          </div>
-        )}
-        {bubbles.map((b, i) => {
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <ChatLoadingNotice key={`loading:${activeKey}`} active={loadingHistory || loadingEarlier || streamWaiting}
+        label={loadingEarlier ? "正在加载较早的对话…" : loadingHistory ? "正在加载对话…" : "正在等待回复…"} />
+      <ChatViewport ref={chatViewport} sessionKey={activeKey} items={bubbles}
+        header={<>
+          {historyCursor && <div className="mb-3 text-center"><button type="button" onClick={() => void loadEarlier()}
+            disabled={loadingEarlier || loadingHistory} className="text-xs text-zinc-500 underline disabled:opacity-50">加载更早的对话</button></div>}
+          {!loadingHistory && bubbles.length === 0 && <p className="text-center text-sm text-zinc-400">
+            {productionId ? `向 AI 助手提问关于《${scopeLabel}》的问题` : "向 AI 助手提问吧"}
+          </p>}
+        </>}
+        renderItem={(b, i) => {
           if (b.kind === "user") {
             return (
               <div key={i} className="flex justify-end">
@@ -1123,7 +1198,6 @@ export default function AgentPopout({
           }
           if (b.kind === "assistant") {
             const refs = attachmentReferences(b.text);
-            const known = new Map(bubbles.flatMap((item) => item.kind === "user" || item.kind === "tool" ? item.attachments ?? [] : []).map((item) => [item.id, item]));
             const previous = i > 0 ? bubbles[i - 1] : undefined;
             const previousIds = new Set(previous?.kind === "tool" ? previous.attachments?.map((item) => item.id) ?? [] : []);
             return (
@@ -1131,7 +1205,7 @@ export default function AgentPopout({
                 <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-100 px-3.5 py-2 text-sm">
                   <Markdown content={refs.text} size="sm" />
                   {refs.items.map((ref) => {
-                    const attachment = known.get(ref.id);
+                    const attachment = knownAttachments.get(ref.id);
                     if (previousIds.has(ref.id)) return null;
                     if (!attachment || attachment.status && attachment.status !== "ready") {
                       return <p key={ref.key} className="mt-1.5 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500">附件 {ref.id} 当前不可用{ref.alt ? `：${ref.alt}` : ""}</p>;
@@ -1300,8 +1374,8 @@ export default function AgentPopout({
               {b.text}
             </p>
           );
-        })}
-        {streaming &&
+        }}
+        footer={streaming &&
           (() => {
             const last = bubbles[bubbles.length - 1];
             if (compacting) {
@@ -1331,7 +1405,7 @@ export default function AgentPopout({
               </div>
             );
           })()}
-        </div>
+      />
       </div>
 
       {/* 页面感知栏：本页建议（点击填入输入框，不发送）+ 附带 chip（页面/文档，
@@ -1597,14 +1671,6 @@ function attachmentPreviewUrl(sessionKey: string, attachmentId: string): string 
   return `/api/agent/attachments/${encodeURIComponent(attachmentId)}?sessionKey=${encodeURIComponent(sessionKey)}`;
 }
 
-function attachmentReferences(text: string): { text: string; items: Array<{ id: string; alt: string; key: string }> } {
-  const items: Array<{ id: string; alt: string; key: string }> = [];
-  const cleaned = text.replace(/\[\[attachment:([a-z0-9_]+)(?:\|([^\]\r\n]{0,200}))?\]\]/gi, (_all, id: string, alt?: string) => {
-    items.push({ id, alt: alt?.trim() ?? "", key: `${id}:${items.length}` });
-    return "";
-  });
-  return { text: cleaned.trim(), items };
-}
 
 /** 调用参数里插件注入的调用者身份字段（_caller_user_id 等）——对模型是
  * 强制覆写的信道，对用户是噪声，展示时剥掉。 */
@@ -1903,4 +1969,76 @@ export function QuestionCard({
       </div>
     </div>
   );
+}
+
+function historyBubbles(page: ChatHistoryPage): Bubble[] {
+  return page.messages.map(message => message.role === "tool"
+    ? { key: message.key, historyKey: message.key, kind: "tool", name: message.name, id: message.id, done: true,
+      ...(message.result ? { result: message.result } : {}), ...(message.attachments?.length ? { attachments: message.attachments } : {}) }
+    : { key: message.key, historyKey: message.key, kind: message.role, text: message.content,
+      ...(message.role === "user" && message.attachments?.length ? { attachments: message.attachments } : {}) });
+}
+
+function mergeHistoryBubbles(previous: Bubble[], incoming: Bubble[]): Bubble[] {
+  const sequence = (item: Bubble) => /^\d+:/.test(item.historyKey ?? "") ? Number(item.historyKey!.split(":")[0]) : undefined;
+  const lower: number[] = [], upper: number[] = [];
+  let bound = -Infinity;
+  for (const item of previous) {
+    lower.push(bound);
+    bound = sequence(item) ?? bound;
+  }
+  bound = Infinity;
+  for (let index = previous.length - 1; index >= 0; index--) {
+    upper[index] = bound;
+    bound = sequence(previous[index]) ?? bound;
+  }
+  const used = new Set<string>();
+  const existing = new Map(previous.filter(item => item.historyKey).map(item => [item.historyKey, item]));
+  // 以已落库的前后邻居约束匹配范围，较早页面不能误认后来的同文输入。
+  const restored = [...incoming].reverse().map(item => {
+    const seq = sequence(item);
+    const old = existing.get(item.historyKey) ?? previous.findLast((candidate, index) => {
+      if (used.has(candidate.key!) || sequence(candidate) !== undefined || candidate.kind !== item.kind) return false;
+      if (candidate.historyKey && item.historyKey?.endsWith(`:${candidate.historyKey}`)) return true;
+      if (seq !== undefined && (seq < lower[index] || seq > upper[index])) return false;
+      if (candidate.kind === "tool" && item.kind === "tool") return !!candidate.id && candidate.id === item.id;
+      if (candidate.kind === "user" && item.kind === "user" &&
+        candidate.attachments?.map(a => a.id).join() !== item.attachments?.map(a => a.id).join()) return false;
+      return "text" in candidate && "text" in item && candidate.text === item.text;
+    });
+    if (!old) return item;
+    used.add(old.key!);
+    return { ...item, key: old.key };
+  }).reverse();
+  const map = new Map(previous.filter(item => sequence(item) !== undefined).map(item => [item.historyKey, item]));
+  for (const item of restored) map.set(item.historyKey, item);
+  const rank: Record<string, number> = { user: 0, thinking: 1, assistant: 2, tool: 3, notice: 4 };
+  const ordered = [...map.values()].sort((a, b) => (sequence(a) ?? Infinity) - (sequence(b) ?? Infinity) || rank[a.kind] - rank[b.kind]);
+  const present = new Set(ordered.map(item => item.key));
+  const waiting = new Map<string | undefined, Bubble[]>();
+  let next: string | undefined;
+  // 最新页未覆盖的实时内容仍留在原邻居之前，补齐对应旧页后再原位转成历史。
+  for (let index = previous.length - 1; index >= 0; index--) {
+    const item = previous[index];
+    if (present.has(item.key)) { next = item.key; continue; }
+    if (item.kind === "question" || item.kind === "approval") continue;
+    const group = waiting.get(next) ?? [];
+    group.push(item);
+    waiting.set(next, group);
+  }
+  const merged = ordered.flatMap(item => [...(waiting.get(item.key) ?? []).reverse(), item]);
+  merged.push(...(waiting.get(undefined) ?? []).reverse());
+  for (const card of previous.filter(item => item.kind === "question" || item.kind === "approval")) {
+    const callId = card.kind === "question" ? card.question.toolCallId : card.kind === "approval" ? card.approval.toolCallId : undefined;
+    const tool = merged.findIndex(item => item.kind === "tool" && item.id === callId);
+    if (tool < 0) merged.push(card);
+    else merged.splice(tool + 1, 0, card);
+  }
+  return merged;
+}
+
+function restoreLoadedQuestions(bubbles: Bubble[], questions: QuestionInfo[]): Bubble[] {
+  const calls = new Set(bubbles.flatMap(bubble => bubble.kind === "tool" && bubble.id ? [bubble.id] : []));
+  // 待答卡始终可操作；已处理卡只随对应工具的历史页出现，不能堆在最新回复之后。
+  return mergeRestoredQuestions(bubbles, questions.filter(question => question.status === "pending" || calls.has(question.toolCallId)));
 }

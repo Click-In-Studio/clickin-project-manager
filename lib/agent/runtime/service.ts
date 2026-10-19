@@ -27,9 +27,8 @@ import { getPool } from "@/lib/pg";
 import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
 import { appendRunRecord } from "@/lib/agent/memory/store";
-import { attachmentIdsFromContext, stripUiContext } from "@/lib/agent/agent-ui-context";
-import type { ChatSessionSummary, ChatTranscriptEntry } from "@/lib/agent/chat/types";
-import { TOOL_PAYLOAD_MAX_CHARS } from "@/lib/agent/chat/types";
+import { stripUiContext } from "@/lib/agent/agent-ui-context";
+import type { ChatSessionSummary } from "@/lib/agent/chat/types";
 import type { StreamLine } from "@/lib/agent/chat/stream-reducer";
 import { CoreAgentHarness } from "../../../vendor/openclaw/packages/agent-core/src/harness/agent-harness";
 import { Session } from "../../../vendor/openclaw/packages/agent-core/src/harness/session/session";
@@ -41,7 +40,7 @@ import type { StreamFn } from "../../../vendor/openclaw/packages/llm-core/src/ty
 import type { MmpClient } from "@mmp/client";
 import { PgSessionStorage } from "./pg-session-storage";
 import { EventPublisher, pruneStreamingUpdates } from "./events";
-import { assistantFailureReason, createStreamLineAdapter } from "./stream-lines";
+import { createStreamLineAdapter } from "./stream-lines";
 import { buildTools, bareName, exposedName, type RuntimeToolDef, type RunHandle } from "./tools";
 import { describeMutation, type MutationRecord } from "./mutation-audit";
 import { getSchedule, finishScheduledRun, type ScheduleReport } from "./schedules";
@@ -69,9 +68,7 @@ import { creditsFromUsd } from "@/lib/account/plan";
 import { activatePendingPermissions } from "@/lib/perm/permission-activation-db";
 import {
   getReadyAttachments,
-  listAttachmentsForSession,
   scheduleSessionAttachmentDeletionInTx,
-  type AgentAttachment,
 } from "@/lib/agent/attachment-db";
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
@@ -1166,67 +1163,6 @@ function str(v: unknown): string | undefined {
 }
 
 // ── 历史与列表（前端契约同网关时代）────────────────────────────────────────────
-
-export async function getHistory(sessionId: string): Promise<ChatTranscriptEntry[]> {
-  const storage = await PgSessionStorage.load(sessionId);
-  if (!storage) return [];
-  const ctx = await new Session(storage).buildContext();
-  const attachments = new Map((await listAttachmentsForSession(sessionId)).map((a) => [a.id, a]));
-  const entries: ChatTranscriptEntry[] = [];
-  for (const m of ctx.messages) {
-    if (m.role === "user") {
-      const raw = textOf(m.content);
-      const content = stripUiContext(raw);
-      const attached = attachmentIdsFromContext(raw)
-        .map((id) => attachments.get(id))
-        .filter((a) => a !== undefined)
-        .map(chatAttachment);
-      if (content) entries.push({ role: "user", content, ...(attached.length ? { attachments: attached } : {}) });
-    } else if (m.role === "toolResult") {
-      const result = textOf(m.content).slice(0, TOOL_PAYLOAD_MAX_CHARS);
-      const attached = [...attachments.values()]
-        .filter((a) => (a.sourceKind === "web_fetch" || a.sourceKind === "mmp") && a.sourceToolCallId === m.toolCallId)
-        .map(chatAttachment);
-      entries.push({
-        role: "tool", name: m.toolName, id: m.toolCallId || undefined,
-        ...(result ? { result } : {}), ...(attached.length ? { attachments: attached } : {}),
-      });
-    } else if (m.role === "assistant") {
-      const thinking = thinkingOf(m.content);
-      if (thinking) entries.push({ role: "thinking", content: thinking });
-      const t = textOf(m.content);
-      if (t) entries.push({ role: "assistant", content: t });
-      const failure = assistantFailureReason(m);
-      if (failure) entries.push({ role: "notice", content: failure });
-    }
-  }
-  for (const pending of await pendingInputsForSession(sessionId)) {
-    entries.push({
-      role: "user",
-      content: stripUiContext(pending.message),
-      attachments: pending.attachment_ids
-        .map((id) => attachments.get(id))
-        .filter((attachment): attachment is AgentAttachment => attachment !== undefined)
-        .map(chatAttachment),
-    });
-  }
-  return entries;
-}
-
-function chatAttachment(a: AgentAttachment): import("@/lib/agent/chat/types").ChatAttachment {
-  return {
-    id: a.id, fileName: a.fileName, mimeType: a.mimeType, mediaKind: a.mediaKind,
-    ...(a.status !== "ready" ? { status: a.status } : {}),
-    ...(a.releaseUntil ? { releaseUntil: a.releaseUntil } : {}),
-    ...(a.promotedAssetId ? { promotedAssetId: a.promotedAssetId } : {}),
-    ...(a.sourceToolCallId ? { sourceToolCallId: a.sourceToolCallId } : {}),
-  };
-}
-
-function thinkingOf(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content.filter((c) => c?.type === "thinking" && !c.redacted).map((c) => String(c.thinking ?? "")).join("");
-}
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;

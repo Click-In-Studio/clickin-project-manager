@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown as MarkdownExt } from "tiptap-markdown";
@@ -11,7 +11,7 @@ type Props = {
   size?: "sm" | "base";
 };
 
-export default function Markdown({ content, size = "base" }: Props) {
+export default memo(function Markdown({ content, size = "base" }: Props) {
   const editor = useEditor({
     immediatelyRender: false,
     editable: false,
@@ -33,4 +33,4 @@ export default function Markdown({ content, size = "base" }: Props) {
   }, [editor, content]);
 
   return <EditorContent editor={editor} />;
-}
+});

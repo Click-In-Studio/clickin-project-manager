@@ -66,7 +66,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await service.deleteSessionRows(sessionId);
 }
 
-export { getHistory, listSessions, renameSession, isRunnerSession } from "./service";
+export { listSessions, renameSession, isRunnerSession } from "./service";
 
 export async function stopSubagent(
   sessionId: string,

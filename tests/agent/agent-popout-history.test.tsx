@@ -27,7 +27,12 @@ function deferred<T>() {
 }
 const KEY = "clickin:chat:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222";
 const OTHER_KEY = "clickin:chat:11111111-1111-4111-8111-111111111111:33333333-3333-4333-8333-333333333333";
-const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+const json = (data: unknown) => {
+  const page = data as { messages?: Array<Record<string, unknown>> };
+  const body = page.messages ? { attachments: [], nextCursor: null, ...page,
+    messages: page.messages.map((message, index) => ({ key: `${index + 1}:fixture:${message.role}`, ...message })) } : data;
+  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+};
 const originalHistory = [{ role: "assistant", content: "上一轮回复" }];
 
 describe("Agent 同一会话的后台历史同步", () => {
@@ -85,12 +90,12 @@ describe("Agent 同一会话的后台历史同步", () => {
     vi.restoreAllMocks();
   });
 
-  async function open(messages: unknown[] = originalHistory) {
+  async function open(messages: unknown[] = originalHistory, nextCursor: string | null = null) {
     const first = history[0];
     await act(async () => root.render(<AgentPopout open onClose={() => {}} productionId={null} productionName={null} currentWikiId={null} currentAssetId={null} />));
-    expect(container.textContent).toContain("加载中…");
-    await act(async () => first.resolve(json({ messages })));
-    expect(container.textContent).not.toContain("加载中…");
+    expect(container.textContent).toContain("正在加载对话…");
+    await act(async () => first.resolve(json({ messages, nextCursor })));
+    expect(container.textContent).not.toContain("正在加载对话…");
   }
   function stream(line: unknown) {
     chatController.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(line)}\n\n`));
@@ -99,7 +104,7 @@ describe("Agent 同一会话的后台历史同步", () => {
     return Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes(text))!;
   }
 
-  it("正常回复结束后同步历史，等待期间不清空回复或闪现加载提示", async () => {
+  it("正常回复结束后同步历史，等待期间保留回复并显示轻量加载提示", async () => {
     await open();
     const input = container.querySelector("textarea")!;
     await act(async () => {
@@ -120,7 +125,7 @@ describe("Agent 同一会话的后台历史同步", () => {
     });
     expect(historyRequests).toHaveLength(2);
     expect(container.textContent).toContain("本轮完整回复");
-    expect(container.textContent).not.toContain("加载中…");
+    expect(container.textContent).toContain("正在加载对话…");
     await act(async () => refreshed.resolve(json({ messages: [...originalHistory, { role: "user", content: "继续" }, { role: "assistant", content: "本轮完整回复" }] })));
     expect(container.textContent).toContain("本轮完整回复");
   });
@@ -132,7 +137,7 @@ describe("Agent 同一会话的后台历史同步", () => {
     questionResponse = { questions: [{ id: "question_background", toolCallId: "tool_background", waitMode: "continue_independent", status: "pending", questions: [{ questionId: "choice", header: "风格", question: "希望哪种风格？", options: [{ label: "写实" }, { label: "舞台化" }] }] }] };
     await act(async () => StatusStream.current.send("快速后台轮次", null));
     expect(container.textContent).toContain("上一轮回复");
-    expect(container.textContent).not.toContain("加载中…");
+    expect(container.textContent).toContain("正在加载对话…");
     await act(async () => refreshed.resolve(json({ messages: [...originalHistory, { role: "assistant", content: "后台研读结果" }] })));
     expect(container.textContent).toContain("后台研读结果");
     expect(container.textContent).toContain("希望哪种风格？");
@@ -156,6 +161,67 @@ describe("Agent 同一会话的后台历史同步", () => {
     expect(expanded.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("实时工具落成历史后沿用组件，保留展开详情", async () => {
+    await open();
+    const input = container.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "读取文档");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="发送"]')!.click());
+    await act(async () => stream({ type: "tool", id: "live-read", name: "clickin__production-wiki_read", input: { wikiId: "test" } }));
+    await act(async () => button("阅读文档").click());
+    const expanded = button("阅读文档");
+    const refreshed = deferred<Response>();
+    history.push(refreshed);
+    await act(async () => {
+      StatusStream.current.send("落库轮次", null);
+      stream({ type: "tool-result", id: "live-read", result: "读取完成" });
+      stream({ type: "final", text: "读取完成" });
+      chatController.close();
+    });
+    await act(async () => refreshed.resolve(json({ messages: [...originalHistory,
+      { role: "user", content: "读取文档" },
+      { role: "tool", id: "live-read", name: "clickin__production-wiki_read", result: "读取完成" },
+      { role: "assistant", content: "读取完成" },
+    ] })));
+    expect(button("阅读文档")).toBe(expanded);
+    expect(expanded.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("后台同步响应到达后，问题卡的未提交输入仍留在原组件", async () => {
+    questionResponse = { questions: [{ id: "draft_question", toolCallId: "draft_tool", waitMode: "continue_independent", status: "pending",
+      createdAtMs: Date.now(), questions: [{ questionId: "choice", header: "风格", question: "希望哪种风格？", isOther: true, options: [{ label: "写实" }] }] }] };
+    await open();
+    const draft = container.querySelector<HTMLInputElement>('input[placeholder="其他：自由输入…"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(draft, "偏舞台化");
+      draft.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const refreshed = deferred<Response>();
+    history.push(refreshed);
+    await act(async () => StatusStream.current.send("同步问题", null));
+    await act(async () => refreshed.resolve(json({ messages: originalHistory })));
+    expect(container.querySelector('input[placeholder="其他：自由输入…"]')).toBe(draft);
+    expect(draft.value).toBe("偏舞台化");
+  });
+
+  it("较早已回答的问题只随对应历史页恢复，不堆到最新回复之后", async () => {
+    questionResponse = { questions: [{ id: "old_question", toolCallId: "old_tool", waitMode: "required", status: "answered",
+      createdAtMs: Date.now(), answer: { choice: ["写实"] },
+      questions: [{ questionId: "choice", header: "风格", question: "此前选择的风格", options: [{ label: "写实" }] }] }] };
+    await open([{ key: "20:fixture:assistant", role: "assistant", content: "最新回复" }], "20.20");
+    expect(container.textContent).not.toContain("此前选择的风格");
+    const older = deferred<Response>();
+    history.push(older);
+    await act(async () => button("加载更早的对话").click());
+    expect(container.textContent).toContain("最新回复");
+    await act(async () => older.resolve(json({ messages: [
+      { key: "10:fixture:tool", role: "tool", id: "old_tool", name: "clickin__ask_user", result: "已回答" },
+    ] })));
+    expect(container.textContent).toContain("此前选择的风格");
+  });
+
   it("切换到另一段对话仍清空原内容，并显示加载状态", async () => {
     await open();
     const other = deferred<Response>();
@@ -163,9 +229,9 @@ describe("Agent 同一会话的后台历史同步", () => {
     await act(async () => button("当前对话").click());
     await act(async () => Array.from(container.querySelectorAll("span")).find((item) => item.textContent === "另一段对话")!.click());
     expect(container.textContent).not.toContain("上一轮回复");
-    expect(container.textContent).toContain("加载中…");
+    expect(container.textContent).toContain("正在加载对话…");
     await act(async () => other.resolve(json({ messages: [{ role: "assistant", content: "另一段历史" }] })));
     expect(container.textContent).toContain("另一段历史");
-    expect(container.textContent).not.toContain("加载中…");
+    expect(container.textContent).not.toContain("正在加载对话…");
   });
 });

@@ -1,3 +1,4 @@
+import { getHistoryPage } from "@/lib/agent/runtime/chat-history-db";
 import type { Capability, MmpClient } from "@mmp/client";
 import { saveModelSelection } from "@/lib/agent/runtime/model-settings-db";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -13,7 +14,7 @@ import { addProductionMember } from "@/lib/perm/member-db";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { applyStreamLine, type Bubble, type StreamLine } from "@/lib/agent/chat/stream-reducer";
 import {
-  startRun, steerRun, abortRun, getHistory, listSessions, resumeOrphans, waitForIdle, runtimeOverrides, sessionRunState, __internal,
+  startRun, steerRun, abortRun, listSessions, resumeOrphans, waitForIdle, runtimeOverrides, sessionRunState, __internal,
 } from "@/lib/agent/runtime/service";
 import { readEventsSince, subscribeSessionEvents } from "@/lib/agent/runtime/events";
 import { resolveApproval, approvalSession } from "@/lib/agent/runtime/approvals";
@@ -1756,3 +1757,7 @@ describe("冷层兜底：find_tools 搜到 → 按名直接调（resolveDeferred
     expect(seen[3].tools).toContain(exposedName("production.script_propose_rewrite"));
   });
 });
+
+async function getHistory(sessionId: string) {
+  return (await getHistoryPage(sessionId)).messages.map(({ key: _key, ...message }) => message);
+}

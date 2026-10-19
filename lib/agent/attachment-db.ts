@@ -266,6 +266,17 @@ export async function listAttachmentsForSession(sessionId: string): Promise<Agen
   return r.rows.map(mapRow);
 }
 
+/** 历史分页只取该页的消息附件与引用，跨页引用也按真实附件身份恢复。 */
+export async function listAttachmentsForHistory(sessionId: string, ids: string[], calls: string[]): Promise<AgentAttachment[]> {
+  if (!ids.length && !calls.length) return [];
+  const result = await getPool().query<Row>(
+    `SELECT * FROM agent_session_attachment WHERE session_id=$1
+     AND (id=ANY($2::text[]) OR (source_kind IN ('web_fetch','mmp') AND source_tool_call_id=ANY($3::text[])))
+     ORDER BY created_at`, [sessionId, ids, calls],
+  );
+  return result.rows.map(mapRow);
+}
+
 export async function listReadyAttachmentsForSession(sessionId: string): Promise<AgentAttachment[]> {
   return (await listAttachmentsForSession(sessionId)).filter((item) => item.status === "ready");
 }
