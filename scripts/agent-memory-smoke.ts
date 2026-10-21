@@ -69,6 +69,7 @@ async function main() {
     ];
     let final = "";
     let tokens = 0;
+    const visibleText: string[] = [];
     try {
       const run = {
         runId,
@@ -111,15 +112,18 @@ async function main() {
         )
           throw new Error(`模型未完成:${response.stopReason}`);
         messages.push(response);
+        const responseText = response.content
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join("")
+          .trim();
+        if (responseText) visibleText.push(responseText);
         tokens += response.usage.input + response.usage.output;
         const pending = response.content.filter(
           (p): p is ToolCall => p.type === "toolCall",
         );
         if (!pending.length) {
-          final = response.content
-            .filter((p) => p.type === "text")
-            .map((p) => p.text)
-            .join("");
+          final = visibleText.join("\n\n");
           break;
         }
         for (const call of pending) {
@@ -138,7 +142,7 @@ async function main() {
               toolCallId: call.id,
               toolName: call.name,
               content: result.content,
-              isError: false,
+              isError: "isError" in result && result.isError === true,
               timestamp: Date.now(),
             });
           } catch (error) {
@@ -166,6 +170,104 @@ async function main() {
         "UPDATE agent_run SET status='completed' WHERE id=$1",
         [runId],
       );
+    }
+  }
+  async function selectionSmoke() {
+    const unrelated = [
+      "海报主色采用深蓝，标题为米白色。",
+      "服装每轮演出后送洗，按角色编号装袋。",
+      "演员餐食不要辣，素食单独标记。",
+      "周三排练使用二号排练室。",
+      "舞台地毯采用哑光黑色，边缘用黑胶固定。",
+      "外地住宿按双床房预订。",
+      "字幕字体采用思源黑体，不使用花体。",
+      "交通报销需要保存车票。",
+    ];
+    const labels = new Map<string, string>();
+    for (let i = 0; i < unrelated.length; i++) {
+      const id = await mutateMemoryEntry(uid, prodId, {
+        action: "create",
+        actor: "agent",
+        body: unrelated[i],
+        brief: unrelated[i],
+      });
+      labels.set(id, `无关${i + 1}`);
+    }
+    const decoy = await mutateMemoryEntry(uid, prodId, {
+      action: "create",
+      actor: "agent",
+      body: "《视频音响cue表》用于宣传片剪辑，只供视频后期，不是正式演出的音响或音乐cue依据，也不适用巡演剧场交接。",
+      brief: "宣传片也有《视频音响cue表》及交接要求；适用范围和内容在正文。",
+    });
+    labels.set(decoy, "近似但不适用");
+    const relevant = await mutateMemoryEntry(uid, prodId, {
+      action: "create",
+      actor: "agent",
+      body: "导演已确认：正式演出巡演的音响与音乐cue以《巡演音响cue表》为准。交给新剧场时，除主表外必须附《声道映射表》和《播放机备份清单》，两份附件缺一不可。",
+      brief:
+        "正式演出巡演的音响音乐cue以《巡演音响cue表》为准；交接有两份必带附件，具体文件名在正文。",
+    });
+    labels.set(relevant, "确实相关");
+    const groups = await readMemoryGroups(uid, prodId);
+    if (groups.length !== 10) throw new Error("选择场景没有完整10条缓存记忆");
+    const groupEntries = new Map(groups.map((g) => [g.id, g.entries[0].id]));
+    const snapshot = async () =>
+      new Map(
+        (await readMemoryGroups(uid, prodId)).map((g) => [
+          g.entries[0].id,
+          g.lastTouchedAt,
+        ]),
+      );
+    const prompts = [
+      {
+        name: "10条混合brief中定位正文，读取不适用项不应续期",
+        message:
+          "我们明天把正式演出的音响交给新剧场，需要带哪些文件？按已经定下的巡演交接安排列出来即可。",
+      },
+      {
+        name: "相同10条中brief已足够时直接使用",
+        message: "正式演出巡演音响cue用哪张主表？只告诉我表名就好。",
+      },
+    ];
+    for (let i = 0; i < prompts.length; i++) {
+      const before = await snapshot();
+      const result = await turn(prompts[i].message);
+      const after = await snapshot();
+      const changed = [...after]
+        .filter(([id, at]) => before.get(id) !== at)
+        .map(([id]) => id);
+      const reads = result.actions
+        .filter((a) => a.name === "my.memory_read")
+        .map((a) => ({
+          type: a.args.groupId ? "正文分页" : "brief概览",
+          entries: a.args.groupId
+            ? [groupEntries.get(String(a.args.groupId))]
+            : ((a.args.ids as string[] | undefined) ?? [...labels.keys()]),
+        }))
+        .map((r) => ({
+          ...r,
+          entries: r.entries.map((id) => labels.get(id ?? "") ?? id),
+        }));
+      reports.push({
+        case: prompts[i].name,
+        ...result,
+        reads,
+        changedLru: changed.map((id) => labels.get(id) ?? id),
+        injectedBriefs: groups.length,
+      });
+      if (changed.some((id) => id !== relevant))
+        throw new Error("无关或已排除记忆被刷新LRU");
+      if (!changed.includes(relevant))
+        throw new Error("实际使用的相关记忆没有touch");
+      if (!result.final.includes("巡演音响cue表"))
+        throw new Error("没有使用正确主表");
+      if (result.final.includes("视频音响cue表"))
+        throw new Error("混入不适用的宣传片cue表");
+      if (
+        i === 0 &&
+        !["声道映射表", "播放机备份清单"].every((t) => result.final.includes(t))
+      )
+        throw new Error("正文细节没有按需读取或漏掉必带附件");
     }
   }
   async function confirmationSmoke() {
@@ -218,7 +320,9 @@ async function main() {
       memory: memory.entries,
     });
     check(
-      /？|\?|是否|请确认|需要确认|想确认|请告诉|请提供|请说明/.test(missing.final),
+      /？|\?|是否|请确认|需要确认|想确认|请告诉|请提供|请说明/.test(
+        missing.final,
+      ),
       "缺少信息却没有询问",
     );
     for (const entry of memory.entries) {
@@ -486,11 +590,14 @@ async function main() {
   }
   try {
     if (
-      process.argv.includes("--semantics") ||
-      process.argv.includes("--confirmation")
+      ["--semantics", "--confirmation", "--selection"].some((arg) =>
+        process.argv.includes(arg),
+      )
     ) {
       try {
-        if (process.argv.includes("--confirmation")) await confirmationSmoke();
+        if (process.argv.includes("--selection")) await selectionSmoke();
+        else if (process.argv.includes("--confirmation"))
+          await confirmationSmoke();
         else await semanticSmoke();
       } finally {
         console.log(

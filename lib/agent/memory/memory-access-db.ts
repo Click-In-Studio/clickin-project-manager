@@ -24,7 +24,7 @@ export async function requireMemoryAccess(
   if (!rows.length) throw new MemoryAccessError("当前没有这个项目的访问资格");
 }
 
-// 所有条目写入、历史落库与 dream 提交共用用户锁，截断和晚完成归档有确定顺序。
+// 所有条目写入、历史落库与整理提交共用用户锁，截断和晚完成归档有确定顺序。
 export async function lockMemoryUser(
   client: PoolClient,
   userId: string,

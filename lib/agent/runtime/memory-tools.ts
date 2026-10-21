@@ -128,7 +128,7 @@ export const MEMORY_DEFS: ToolDefinition[] = [
     mcpName: "my.memory_touch",
     ...ownWrite,
     description:
-      "实际使用了brief即可批量touch对应条目，整组刷新访问并回到中期缓存，无须读取正文。注入或搜索命中本身不算使用，不修改正文及事实时间。",
+      "实际采用记忆信息时必须先批量touch对应条目，再给最终答复，整组刷新访问并回到中期缓存。brief足够时直接touch，无须读取正文；只答一个名称也要记录使用。注入、读取或搜索命中本身不算使用，已排除或未采用的条目不要touch。不修改正文及事实时间。",
     parameters: Type.Object({ scope, ids }),
     mutates: (args) => ({
       scope: "memory",

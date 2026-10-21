@@ -155,9 +155,10 @@ export async function maintainMemoryCache(
   userId: string,
   productionId: string | null,
 ): Promise<void> {
-  await indexMemoryEntries(userId, productionId);
-  if ((await cachePressure(userId, productionId)) < MEMORY_CACHE_TRIGGER)
+  if ((await cachePressure(userId, productionId)) < MEMORY_CACHE_TRIGGER) {
+    await indexMemoryEntries(userId, productionId);
     return;
+  }
   try {
     await organizeMemoryScope(userId, productionId);
   } finally {

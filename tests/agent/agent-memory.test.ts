@@ -376,6 +376,26 @@ describe("核对提交与水位接线", () => {
       }),
     ).rejects.toThrow(/用户编辑/);
   });
+  it("高水位索引失败仍整组回落，不因外部服务失败突破缓存水位", async () => {
+    for (let i = 0; i < 36; i++) await create(`索引故障时的条目${i}`);
+    const { maintainMemoryCache } = await import("@/lib/agent/memory/organize");
+    const searchDb = await import("@/lib/agent/memory/memory-search-db");
+    const indexer = vi
+      .spyOn(searchDb, "indexMemoryEntries")
+      .mockRejectedValue(new Error("索引服务暂不可用"));
+    try {
+      await expect(maintainMemoryCache(uid, pid)).rejects.toThrow(/索引服务/);
+      expect(
+        (await readMemoryGroups(uid, pid)).reduce(
+          (n, g) => n + g.memberCount,
+          0,
+        ),
+      ).toBe(24);
+      expect((await readMemoryScope(uid, pid)).entries).toHaveLength(36);
+    } finally {
+      indexer.mockRestore();
+    }
+  });
 });
 
 describe("整理接线与防偏", () => {
