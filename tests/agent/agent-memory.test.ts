@@ -34,6 +34,7 @@ import { buildInjectContext } from "@/lib/agent/memory/inject";
 import {
   organizeMemoryScope,
   parseRelations,
+  summarizeMemoryGroup,
 } from "@/lib/agent/memory/organize";
 import { MEMORY_GROUP_BRIEF_MAX } from "@/lib/agent/memory/memory-types";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
@@ -378,6 +379,47 @@ describe("核对提交与水位接线", () => {
 });
 
 describe("整理接线与防偏", () => {
+  it("分页摘要累计覆盖正文，最后一页不沿用前批未完整状态", async () => {
+    const ids = [];
+    for (let i = 0; i < 6; i++) ids.push(await create(`待核对原文${i}`));
+    for (let i = 1; i < ids.length; i++) await link(ids[i - 1], ids[i]);
+    const g = (await readMemoryGroups(uid, pid, [ids[0]]))[0];
+    expect(g.summaryPending).toBe(true);
+    const inputs: Array<Array<Record<string, unknown>>> = [];
+    llm.mockImplementation(async (messages: Array<{ content: string }>) => {
+      const materials = JSON.parse(messages[1].content);
+      inputs.push(materials);
+      return {
+        value:
+          inputs.length === 1
+            ? "已读5条，末条正文待补"
+            : "6条原文均已处理，分歧尚未解决",
+      };
+    });
+    expect(await summarizeMemoryGroup(uid, pid, g.id, g.revision)).toBe(true);
+    expect(inputs[0][0].coverage).toEqual({
+      offset: 0,
+      currentEntries: 5,
+      coveredEntries: 5,
+      totalEntries: 6,
+      complete: false,
+    });
+    expect(inputs[1][0]).toMatchObject({
+      previousSummary: "已读5条，末条正文待补",
+      previousCoveredEntries: 5,
+    });
+    expect(inputs[1][1].coverage).toEqual({
+      offset: 5,
+      currentEntries: 1,
+      coveredEntries: 6,
+      totalEntries: 6,
+      complete: true,
+    });
+    const result = (await readMemoryGroups(uid, pid, [ids[0]]))[0];
+    expect(result.summary).toBe("6条原文均已处理，分歧尚未解决");
+    expect(result.memberCount).toBe(6);
+    expect(result.entries).toEqual([]);
+  });
   it("整理只建候选关系，不改写事实，重复扫描不反复提升", async () => {
     const a = await create("采用音响表v1"),
       b = await create("采用音响表v2");

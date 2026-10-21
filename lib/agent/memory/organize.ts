@@ -82,12 +82,19 @@ export async function summarizeMemoryGroup(
       offset,
     );
     const materials = [
-      ...(summary ? [{ previousSummary: summary }] : []),
+      ...(summary
+        ? [{ previousSummary: summary, previousCoveredEntries: offset }]
+        : []),
       {
         entries: page.group.entries,
         relations: page.group.relations,
-        offset,
-        total: page.total,
+        coverage: {
+          offset,
+          currentEntries: page.group.entries.length,
+          coveredEntries: offset + page.group.entries.length,
+          totalEntries: page.total,
+          complete: page.nextOffset === null,
+        },
       },
     ];
     summary = await summarizeMaterials(materials);
