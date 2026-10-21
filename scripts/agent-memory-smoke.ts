@@ -168,6 +168,96 @@ async function main() {
       );
     }
   }
+  async function confirmationSmoke() {
+    const check = (ok: unknown, message: string) => {
+      if (!ok) throw new Error(message);
+    };
+    const proposed = await turn("画外音有什么做法可以考虑？给我一个简短建议。");
+    let memory = await readMemoryScope(uid, prodId);
+    reports.push({
+      case: "助手建议未被采纳不写入",
+      ...proposed,
+      memory: memory.entries,
+    });
+    check(memory.entries.length === 0, "把助手自行提出的方案写成了记忆");
+
+    const stated = await turn(
+      "已和导演确认：正式演出四位演员固定使用1—4号话筒，画外音方案还没定。",
+    );
+    memory = await readMemoryScope(uid, prodId);
+    reports.push({
+      case: "自然明确交代即可记录，不需重复确认",
+      ...stated,
+      memory: memory.entries,
+    });
+    check(
+      stated.calls.includes("my.memory_write"),
+      "用户明确交代后没有主动记录",
+    );
+    check(
+      memory.entries.some(
+        (e) => /四位演员/.test(e.body) && /话筒/.test(e.body),
+      ),
+      "漏记已确认的话筒配置",
+    );
+
+    const sufficient = await turn(
+      "帮我把已经确定的话筒配置记完整。画外音究竟现场说还是录音放还没有定；如果记忆里必须补充什么，就先问我。",
+    );
+    memory = await readMemoryScope(uid, prodId);
+    reports.push({
+      case: "已有信息足够时不补写，不要求重复确认",
+      ...sufficient,
+      memory: memory.entries,
+    });
+    const missing = await turn("导演已经把画外音方案定了，帮我更新一下配置。");
+    memory = await readMemoryScope(uid, prodId);
+    reports.push({
+      case: "新配置的必要信息缺失时先询问",
+      ...missing,
+      memory: memory.entries,
+    });
+    check(
+      /？|\?|是否|请确认|需要确认|想确认|请告诉|请提供|请说明/.test(missing.final),
+      "缺少信息却没有询问",
+    );
+    for (const entry of memory.entries) {
+      const content = `${entry.body}\n${entry.brief}`;
+      check(
+        !/暂停|书面批准|现场判断/.test(content),
+        "记忆中新增了用户未确认的执行要求",
+      );
+      check(
+        !/画外音(?:方案)?(?:确定|决定|统一)?(?:采用|使用|改为)(?:预录|录音|现场)/.test(
+          content,
+        ),
+        "画外音未定时自行选定了方案",
+      );
+    }
+
+    const adopted = await turn(
+      "导演已经确认：画外音采用预录，只在第五场使用，其他场次没有画外音，不走演员的1—4号话筒。",
+    );
+    memory = await readMemoryScope(uid, prodId);
+    reports.push({
+      case: "得到明确答复后写入，保留场次和否定范围",
+      ...adopted,
+      memory: memory.entries,
+    });
+    const content = memory.entries.map((e) => e.body).join("\n");
+    check(
+      /预录/.test(content) && /第五场/.test(content),
+      "未保存已确认方案或丢失场次范围",
+    );
+    check(
+      /其他场次.{0,5}(?:没有|无|不设|不用|不使用)/.test(content),
+      "丢失其他场次没有画外音的否定条件",
+    );
+    check(
+      /不走|不使用|不用|不占用|不经/.test(content),
+      "丢失不走演员话筒的条件",
+    );
+  }
   async function semanticSmoke() {
     const create = (body: string, brief: string) =>
       mutateMemoryEntry(uid, prodId, {
@@ -395,9 +485,13 @@ async function main() {
       check(finalBody.includes(term), `大组维护丢失条件：${term}`);
   }
   try {
-    if (process.argv.includes("--semantics")) {
+    if (
+      process.argv.includes("--semantics") ||
+      process.argv.includes("--confirmation")
+    ) {
       try {
-        await semanticSmoke();
+        if (process.argv.includes("--confirmation")) await confirmationSmoke();
+        else await semanticSmoke();
       } finally {
         console.log(
           JSON.stringify(

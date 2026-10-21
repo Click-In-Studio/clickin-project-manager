@@ -72,7 +72,7 @@ export const MEMORY_DEFS: ToolDefinition[] = [
     mcpName: "my.memory_write",
     ...ownWrite,
     description:
-      "主动维护个人协作记忆，免逐条确认。用户自然交代资料入口、采用约定、持续要求和阶段配置时按需记录；项目内容scope=project。create写body和独立完整brief；update/delete需已有id/revision，不能覆盖用户编辑。疑似重复/冲突组用memory_resolve维护，不制造矛盾副本。删除只移出有效记忆，用户可恢复；不保存助手提议为用户决定。",
+      "主动维护用户明确确认的个人协作信息，免逐条确认。用户自然明确交代的事实/要求或明确采纳的方案可按需记录；助手提议和模型推断不算确认。正文和brief不得添加信息，必须补充时先问用户，得到明确答复再写入。项目内容scope=project。create写body和独立完整brief；update/delete需已有id/revision，不能覆盖用户编辑。疑似重复/冲突组用memory_resolve维护，不制造矛盾副本。删除只移出有效记忆，用户可恢复。",
     parameters: Type.Object({
       scope,
       action: Type.Optional(
@@ -118,7 +118,8 @@ export const MEMORY_DEFS: ToolDefinition[] = [
       }
       return text({
         id,
-        message: "个人记忆已维护；AI记录不代表用户确认事实。",
+        message:
+          "个人记忆已维护；保存成功不代替用户确认，写入内容须忠于用户明确表达或采纳的信息。",
         note,
       });
     },
@@ -171,7 +172,7 @@ export const MEMORY_DEFS: ToolDefinition[] = [
     mcpName: "my.memory_resolve",
     ...ownWrite,
     description:
-      "主模型核对后原子解决待核对组。传概览的groupId/revision、已核对的relationIds和changes。重复需保真合并（修改保留条目，remove其他条目），不是简单替代。冲突依当前语境裁决；信息不足先问用户或保持未解决。relationIds也可仅解除误判关系。所有修改须条目revision，用户编辑受保护。",
+      "主模型依据用户明确确认的信息原子解决待核对组。传概览的groupId/revision、已核对的relationIds和changes。重复需保真合并（修改保留条目，remove其他条目），不是简单替代；正文和brief不得添加未确认信息。解决冲突或补充内容所需信息不足时先问用户，得到明确答复再写入，期间保持未解决。relationIds也可仅解除误判关系。所有修改须条目revision，用户编辑受保护。",
     parameters: Type.Object({
       scope,
       groupId: Type.String(),
