@@ -62,6 +62,6 @@ describe("个人记忆管理API", () => {
     expect((await PATCH(request("PATCH", user, { action: "update", id: e.id, revision: e.revision, body: "旧修改" }))).status).toBe(409);
     const deleted = await PATCH(request("PATCH", user, { action: "delete", id: e.id, revision: e.revision+1 }));
     expect(deleted.status).toBe(200);
-    expect((await deleted.json()).memory).toMatchObject({ entries: [], historyCutoff: expect.any(String) });
+    expect((await deleted.json()).memory).toMatchObject({ entries: [], deletedEntries: [expect.objectContaining({ id: e.id })], historyCutoff: expect.any(String) });
   });
 });

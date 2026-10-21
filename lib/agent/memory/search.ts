@@ -19,7 +19,7 @@ import { getPool } from "@/lib/pg";
 import { creditsFromEmbeddingTokens } from "@/lib/account/plan";
 import { EmbeddingUnavailableError, embedQuery, embeddingMode, embeddingModel } from "@/lib/agent/memory/embedding";
 import { bigramTokens, ensureIndexIdentity } from "./index-db";
-import { readMemoryScope, requireMemoryAccess, VISIBLE_HISTORY } from "./memory-db";
+import { requireMemoryAccess, VISIBLE_HISTORY } from "./memory-db";
 
 export const VECTOR_WEIGHT = 0.7;
 export const TEXT_WEIGHT = 0.3;
@@ -44,7 +44,7 @@ export class MemoryUnavailableError extends Error {
 
 export type MemoryHit = {
   id: string;
-  source: "dream" | "active" | "episodic";
+  source: "episodic";
   text: string;
   score: number;
   observedAt: Date;
@@ -139,19 +139,7 @@ async function searchMemoryImpl(userId: string, query: string, productionId: str
     if (score < MIN_SCORE) continue;
     hits.push({ id: row.id, source: row.source, text: row.text, score, observedAt: new Date(row.observed_at) });
   }
-  // 常驻条目量小，直接按关键词检索正文；不再建立长期记忆的第二份索引副本。
   metrics.stages.scoring = performance.now() - scoringStarted;
-  const scopeStarted = performance.now();
-  const scopes = [await readMemoryScope(userId, null)];
-  if (productionId) scopes.push(await readMemoryScope(userId, productionId));
-  for (const scope of scopes) for (const e of scope.entries) {
-    const words = new Set(bigramTokens(e.body));
-    const score = qtokens.length ? qtokens.filter(t => words.has(t)).length / qtokens.length : 0;
-    metrics.candidateCount = (metrics.candidateCount ?? 0) + 1;
-    metrics.scores.push({ id: e.id, source: e.source, score, vector: null, lexical: score });
-    if (score >= MIN_SCORE) hits.push({ id: e.id, source: e.source, text: `${e.userEdited ? "[用户编辑]" : "[AI 记录，未经用户确认]"} ${e.body}`, score, observedAt: new Date(e.updatedAt) });
-  }
-  metrics.stages.resident = performance.now() - scopeStarted;
   hits.sort((a,b) => b.score-a.score);
   const top = hits.slice(0, MAX_RESULTS);
 
@@ -197,7 +185,7 @@ export function formatSearchResult(result: MemorySearchResult, query: string): s
   } else {
     lines.push(`与「${query}」相关的记忆（按相关度排序）：`);
     for (const h of result.hits) {
-      const kind = h.source === "episodic" ? "对话记录" : h.source === "dream" ? "自动整理记忆" : "主动记录记忆";
+      const kind = "历史对话记录（不代表当前有效约定）";
       const when = h.observedAt.toISOString().slice(0, 10);
       const text = h.text.length > SNIPPET_MAX_CHARS ? `${h.text.slice(0, SNIPPET_MAX_CHARS)}…` : h.text;
       lines.push(`\n【${kind} · ${when} · 相关度 ${h.score.toFixed(2)}】\n${text}`);
