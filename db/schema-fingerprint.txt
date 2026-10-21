@@ -75,13 +75,30 @@ COL|agent_memory_embedding_cache|created_at|timestamp with time zone|timestamptz
 COL|agent_memory_embedding_cache|embedding|USER-DEFINED|vector|NO|
 COL|agent_memory_embedding_cache|model|text|text|NO|
 COL|agent_memory_entry|body|text|text|NO|
+COL|agent_memory_entry|brief|text|text|NO|
+COL|agent_memory_entry|created_at|timestamp with time zone|timestamptz|NO|clock_timestamp()
+COL|agent_memory_entry|deleted_at|timestamp with time zone|timestamptz|YES|
+COL|agent_memory_entry|embedding_model|text|text|YES|
+COL|agent_memory_entry|embedding_revision|bigint|int8|YES|
+COL|agent_memory_entry|embedding|USER-DEFINED|vector|YES|
+COL|agent_memory_entry|group_id|text|text|YES|
 COL|agent_memory_entry|id|text|text|NO|
-COL|agent_memory_entry|input_count|integer|int4|NO|0
+COL|agent_memory_entry|organization_checked_at|timestamp with time zone|timestamptz|YES|
+COL|agent_memory_entry|organized_revision|bigint|int8|NO|'-1'::integer
 COL|agent_memory_entry|revision|bigint|int8|NO|0
 COL|agent_memory_entry|scope_id|text|text|NO|
 COL|agent_memory_entry|source|text|text|NO|
 COL|agent_memory_entry|updated_at|timestamp with time zone|timestamptz|NO|now()
 COL|agent_memory_entry|user_edited|boolean|bool|NO|false
+COL|agent_memory_group|context_chars|integer|int4|NO|0
+COL|agent_memory_group|id|text|text|NO|
+COL|agent_memory_group|in_cache|boolean|bool|NO|true
+COL|agent_memory_group|last_touched_at|timestamp with time zone|timestamptz|NO|clock_timestamp()
+COL|agent_memory_group|member_count|integer|int4|NO|1
+COL|agent_memory_group|revision|bigint|int8|NO|0
+COL|agent_memory_group|scope_id|text|text|NO|
+COL|agent_memory_group|summary_revision|bigint|int8|YES|
+COL|agent_memory_group|summary|text|text|YES|
 COL|agent_memory_index_meta|dim|integer|int4|NO|
 COL|agent_memory_index_meta|id|smallint|int2|NO|1
 COL|agent_memory_index_meta|model|text|text|NO|
@@ -91,8 +108,16 @@ COL|agent_memory_recall_log|created_at|timestamp with time zone|timestamptz|NO|n
 COL|agent_memory_recall_log|id|bigint|int8|NO|
 COL|agent_memory_recall_log|query_hash|text|text|NO|
 COL|agent_memory_recall_log|user_id|uuid|uuid|NO|
-COL|agent_memory_scope|consumed_seq|bigint|int8|NO|0
-COL|agent_memory_scope|dream_project_ids|ARRAY|_text|NO|'{}'::text[]
+COL|agent_memory_relation|created_at|timestamp with time zone|timestamptz|NO|clock_timestamp()
+COL|agent_memory_relation|id|text|text|NO|
+COL|agent_memory_relation|kind|text|text|NO|
+COL|agent_memory_relation|left_entry_id|text|text|NO|
+COL|agent_memory_relation|left_revision|bigint|int8|NO|
+COL|agent_memory_relation|reason|text|text|NO|
+COL|agent_memory_relation|resolved_at|timestamp with time zone|timestamptz|YES|
+COL|agent_memory_relation|right_entry_id|text|text|NO|
+COL|agent_memory_relation|right_revision|bigint|int8|NO|
+COL|agent_memory_relation|scope_id|text|text|NO|
 COL|agent_memory_scope|history_cutoff|timestamp with time zone|timestamptz|YES|
 COL|agent_memory_scope|id|text|text|NO|
 COL|agent_memory_scope|production_id|text|text|YES|
@@ -1291,14 +1316,31 @@ CON|agent_memory_chunk|agent_memory_chunk_session_kind_check|CHECK ((session_kin
 CON|agent_memory_chunk|agent_memory_chunk_source_check|CHECK ((source = ANY (ARRAY['curated'::text, 'episodic'::text])))
 CON|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|PRIMARY KEY (model, content_hash)
 CON|agent_memory_entry|agent_memory_entry_body_check|CHECK (((length(body) >= 1) AND (length(body) <= 1000)))
-CON|agent_memory_entry|agent_memory_entry_input_count_check|CHECK ((input_count >= 0))
+CON|agent_memory_entry|agent_memory_entry_brief_check|CHECK (((length(brief) >= 1) AND (length(brief) <= 300)))
+CON|agent_memory_entry|agent_memory_entry_group_fk|FOREIGN KEY (scope_id, group_id) REFERENCES agent_memory_group(scope_id, id)
+CON|agent_memory_entry|agent_memory_entry_live_group_check|CHECK (((deleted_at IS NULL) = (group_id IS NOT NULL)))
 CON|agent_memory_entry|agent_memory_entry_pkey|PRIMARY KEY (id)
 CON|agent_memory_entry|agent_memory_entry_scope_id_fkey|FOREIGN KEY (scope_id) REFERENCES agent_memory_scope(id) ON DELETE CASCADE
-CON|agent_memory_entry|agent_memory_entry_source_check|CHECK ((source = ANY (ARRAY['dream'::text, 'active'::text])))
+CON|agent_memory_entry|agent_memory_entry_scope_id_id_key|UNIQUE (scope_id, id)
+CON|agent_memory_entry|agent_memory_entry_source_check|CHECK ((source = 'active'::text))
+CON|agent_memory_group|agent_memory_group_context_chars_check|CHECK ((context_chars >= 0))
+CON|agent_memory_group|agent_memory_group_member_count_check|CHECK ((member_count >= 0))
+CON|agent_memory_group|agent_memory_group_pkey|PRIMARY KEY (id)
+CON|agent_memory_group|agent_memory_group_scope_id_fkey|FOREIGN KEY (scope_id) REFERENCES agent_memory_scope(id) ON DELETE CASCADE
+CON|agent_memory_group|agent_memory_group_scope_id_id_key|UNIQUE (scope_id, id)
+CON|agent_memory_group|agent_memory_group_summary_check|CHECK ((length(summary) <= 4000))
 CON|agent_memory_index_meta|agent_memory_index_meta_id_check|CHECK ((id = 1))
 CON|agent_memory_index_meta|agent_memory_index_meta_pkey|PRIMARY KEY (id)
 CON|agent_memory_recall_log|agent_memory_recall_log_chunk_id_fkey|FOREIGN KEY (chunk_id) REFERENCES agent_memory_chunk(id) ON DELETE CASCADE
 CON|agent_memory_recall_log|agent_memory_recall_log_pkey|PRIMARY KEY (id)
+CON|agent_memory_relation|agent_memory_relation_check|CHECK ((left_entry_id < right_entry_id))
+CON|agent_memory_relation|agent_memory_relation_kind_check|CHECK ((kind = ANY (ARRAY['duplicate'::text, 'conflict'::text])))
+CON|agent_memory_relation|agent_memory_relation_pkey|PRIMARY KEY (id)
+CON|agent_memory_relation|agent_memory_relation_reason_check|CHECK (((length(reason) >= 1) AND (length(reason) <= 500)))
+CON|agent_memory_relation|agent_memory_relation_scope_id_fkey|FOREIGN KEY (scope_id) REFERENCES agent_memory_scope(id) ON DELETE CASCADE
+CON|agent_memory_relation|agent_memory_relation_scope_id_left_entry_id_fkey|FOREIGN KEY (scope_id, left_entry_id) REFERENCES agent_memory_entry(scope_id, id) ON DELETE CASCADE
+CON|agent_memory_relation|agent_memory_relation_scope_id_left_entry_id_right_entry_id_key|UNIQUE (scope_id, left_entry_id, right_entry_id)
+CON|agent_memory_relation|agent_memory_relation_scope_id_right_entry_id_fkey|FOREIGN KEY (scope_id, right_entry_id) REFERENCES agent_memory_entry(scope_id, id) ON DELETE CASCADE
 CON|agent_memory_scope|agent_memory_scope_pkey|PRIMARY KEY (id)
 CON|agent_memory_scope|agent_memory_scope_production_id_fkey|FOREIGN KEY (production_id) REFERENCES production(id) ON DELETE CASCADE
 CON|agent_memory_scope|agent_memory_scope_user_id_fkey|FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
@@ -1953,11 +1995,21 @@ IDX|agent_memory_chunk|agent_memory_chunk_pkey|CREATE UNIQUE INDEX agent_memory_
 IDX|agent_memory_chunk|agent_memory_chunk_scope_idx|CREATE INDEX agent_memory_chunk_scope_idx ON public.agent_memory_chunk USING btree (scope_type, scope_id, source)
 IDX|agent_memory_chunk|agent_memory_chunk_scope_type_scope_id_source_content_hash_key|CREATE UNIQUE INDEX agent_memory_chunk_scope_type_scope_id_source_content_hash_key ON public.agent_memory_chunk USING btree (scope_type, scope_id, source, content_hash)
 IDX|agent_memory_embedding_cache|agent_memory_embedding_cache_pkey|CREATE UNIQUE INDEX agent_memory_embedding_cache_pkey ON public.agent_memory_embedding_cache USING btree (model, content_hash)
+IDX|agent_memory_entry|agent_memory_entry_embedding_idx|CREATE INDEX agent_memory_entry_embedding_idx ON public.agent_memory_entry USING hnsw (embedding vector_cosine_ops) WHERE (deleted_at IS NULL)
+IDX|agent_memory_entry|agent_memory_entry_group_idx|CREATE INDEX agent_memory_entry_group_idx ON public.agent_memory_entry USING btree (scope_id, group_id, id) WHERE (deleted_at IS NULL)
+IDX|agent_memory_entry|agent_memory_entry_pending_idx|CREATE INDEX agent_memory_entry_pending_idx ON public.agent_memory_entry USING btree (scope_id, updated_at, id) WHERE ((deleted_at IS NULL) AND (organized_revision <> revision))
 IDX|agent_memory_entry|agent_memory_entry_pkey|CREATE UNIQUE INDEX agent_memory_entry_pkey ON public.agent_memory_entry USING btree (id)
+IDX|agent_memory_entry|agent_memory_entry_scope_id_id_key|CREATE UNIQUE INDEX agent_memory_entry_scope_id_id_key ON public.agent_memory_entry USING btree (scope_id, id)
 IDX|agent_memory_entry|agent_memory_entry_scope_idx|CREATE INDEX agent_memory_entry_scope_idx ON public.agent_memory_entry USING btree (scope_id)
+IDX|agent_memory_group|agent_memory_group_lru_idx|CREATE INDEX agent_memory_group_lru_idx ON public.agent_memory_group USING btree (scope_id, last_touched_at, id) WHERE in_cache
+IDX|agent_memory_group|agent_memory_group_pkey|CREATE UNIQUE INDEX agent_memory_group_pkey ON public.agent_memory_group USING btree (id)
+IDX|agent_memory_group|agent_memory_group_scope_id_id_key|CREATE UNIQUE INDEX agent_memory_group_scope_id_id_key ON public.agent_memory_group USING btree (scope_id, id)
 IDX|agent_memory_index_meta|agent_memory_index_meta_pkey|CREATE UNIQUE INDEX agent_memory_index_meta_pkey ON public.agent_memory_index_meta USING btree (id)
 IDX|agent_memory_recall_log|agent_memory_recall_log_chunk_idx|CREATE INDEX agent_memory_recall_log_chunk_idx ON public.agent_memory_recall_log USING btree (chunk_id, created_at)
 IDX|agent_memory_recall_log|agent_memory_recall_log_pkey|CREATE UNIQUE INDEX agent_memory_recall_log_pkey ON public.agent_memory_recall_log USING btree (id)
+IDX|agent_memory_relation|agent_memory_relation_pkey|CREATE UNIQUE INDEX agent_memory_relation_pkey ON public.agent_memory_relation USING btree (id)
+IDX|agent_memory_relation|agent_memory_relation_right_idx|CREATE INDEX agent_memory_relation_right_idx ON public.agent_memory_relation USING btree (scope_id, right_entry_id)
+IDX|agent_memory_relation|agent_memory_relation_scope_id_left_entry_id_right_entry_id_key|CREATE UNIQUE INDEX agent_memory_relation_scope_id_left_entry_id_right_entry_id_key ON public.agent_memory_relation USING btree (scope_id, left_entry_id, right_entry_id)
 IDX|agent_memory_scope|agent_memory_scope_pkey|CREATE UNIQUE INDEX agent_memory_scope_pkey ON public.agent_memory_scope USING btree (id)
 IDX|agent_memory_scope|agent_memory_scope_user_id_scope_key_key|CREATE UNIQUE INDEX agent_memory_scope_user_id_scope_key_key ON public.agent_memory_scope USING btree (user_id, scope_key)
 IDX|agent_mutation|agent_mutation_pkey|CREATE UNIQUE INDEX agent_mutation_pkey ON public.agent_mutation USING btree (id)

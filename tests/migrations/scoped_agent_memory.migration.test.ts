@@ -14,8 +14,8 @@ describe("schema verification", () => {
 });
 describe("integrity verification", () => {
   it("条目必须归属真实范围，不能写模型声称的来源类型", async () => {
-    await expect(getPool().query("INSERT INTO agent_memory_entry(id,scope_id,source,body) VALUES('bad-memory','missing','dream','正文')")).rejects.toThrow(/foreign key/);
-    await expect(getPool().query("INSERT INTO agent_memory_entry(id,scope_id,source,body) VALUES('bad-source','missing','verified','正文')")).rejects.toThrow(/check constraint/);
+    await expect(getPool().query("INSERT INTO agent_memory_entry(id,scope_id,source,body,brief,deleted_at) VALUES('bad-memory','missing','active','正文','正文',now())")).rejects.toThrow(/foreign key/);
+    await expect(getPool().query("INSERT INTO agent_memory_entry(id,scope_id,source,body,brief,deleted_at) VALUES('bad-source','missing','verified','正文','正文',now())")).rejects.toThrow(/check constraint/);
   });
 });
 describe("invariance verification", () => {

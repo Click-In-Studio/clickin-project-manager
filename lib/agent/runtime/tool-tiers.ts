@@ -15,7 +15,7 @@ import { TOOL_CATALOG, toolRecall } from "@/lib/agent/tools/tool-catalog";
 const HOT_PERSONAL = [
   "model_list",
   ...SUBAGENT_TOOL_NAMES,
-  "my.productions", "my.memory_search", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
+  "my.productions", "my.memory_search", "my.memory_read", "my.memory_write", "my.memory_touch", "my.memory_find", "my.memory_resolve", "my.call_times", "my.events", "my.milestones", "my.tech_reqs", "ask_user", "find_tools", "web.search", "web.fetch",
 ];
 
 /** #1019：常驻入口仅提供发现面，实际调用后才展开所属族及依赖。 */
@@ -29,7 +29,7 @@ const CALL_ACTIVATED_FAMILIES = new Set(["production.script", "production.dramat
 const HOT_PRODUCTION = [
   "model_list",
   ...SUBAGENT_TOOL_NAMES,
-  "my.productions", "my.memory_search", "my.call_times",
+  "my.productions", "my.memory_search", "my.memory_read", "my.memory_write", "my.memory_touch", "my.memory_find", "my.memory_resolve", "my.call_times",
   "production.info", "production.my_role", "production.notifications",
   "production.contact_list", "production.department_list",
   ...FAMILY_ENTRIES,
@@ -97,6 +97,7 @@ const WARM_BY_PAGE: Record<string, string[]> = {
 /** 依赖闭包：激活某工具时必须连带激活的上游 id 供给工具。 */
 const CLOSURE: Record<string, string[]> = {
   "my.memory_write": ["my.memory_read"],
+  "my.memory_resolve": ["my.memory_read"],
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],

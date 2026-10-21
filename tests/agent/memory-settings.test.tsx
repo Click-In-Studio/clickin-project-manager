@@ -26,7 +26,7 @@ describe("我的长期记忆管理", () => {
     vi.stubGlobal("fetch", fetchMock);
     await act(async () => root.render(<MemorySettings />));
     expect(container.textContent).toContain("未经用户确认");
-    expect(container.textContent).toContain("不代表逐条证据");
+    expect(container.textContent).toContain("记录于");
     await act(async () => input("先给结论再说明"));
     await act(async () => button("保存修改").click());
     expect(container.querySelector("textarea")!.value).toBe("先给结论再说明");
@@ -45,7 +45,7 @@ describe("我的长期记忆管理", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     confirm.mockReturnValue(true);
     await act(async () => button("删除").click());
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("其他已有条目会保留"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("可在已删除列表恢复"));
     expect(container.querySelector('textarea[aria-label="记忆内容"]')).toBeNull();
     expect(container.textContent).toContain("旧历史不会再");
   });

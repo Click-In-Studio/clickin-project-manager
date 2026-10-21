@@ -81,7 +81,7 @@ export interface RuntimeToolDef extends RuntimeTool {
   unattended?: "allow" | "deny";
   /** 自写域（#47 导入日志）：交互会话免确认卡；约束见 Def.selfScribe 注释 */
   selfScribe?: true;
-  /** 可在短宽限期内由用户恢复的低风险写；只跳过交互确认，不开放无人值守。 */
+  /** 用户可恢复的个人低风险写（附件及本人记忆）；只跳过交互确认，不开放无人值守。 */
   reversibleNoConfirm?: true;
 }
 
@@ -191,7 +191,7 @@ export const DEFS: ToolDefinition[] = [
     async (uid) => (await import("@/lib/agent/tools/my-tools")).myProductions(uid)),
   {
     mcpName: "my.memory_search",
-    description: `检索当前用户的长期记忆与历史对话记录（语义+关键词混合检索）。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——只检索当前仍有资格访问且未被历史截断排除的材料。项目会话限定当前项目；个人会话可主动查可访问项目的历史。`,
+    description: `检索当前用户的历史对话记录（语义+关键词混合检索，历史不代表当前有效事实）；有效长期记忆用my.memory_find。当用户提到过去讨论过的事、之前的决定、或你需要回忆更早的上下文时使用——只检索当前仍有资格访问且未被历史截断排除的材料。项目会话限定当前项目；个人会话可主动查可访问项目的历史。`,
     parameters: Type.Object({ query: Type.String({ minLength: 1, description: "检索词（自然语言即可，支持语义匹配；也可用人名/项目名/关键词精确检索）" }) }),
     readOnly: true,
     execute: async (ctx, args) => {

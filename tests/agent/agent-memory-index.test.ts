@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { shortId } from "../_support/factories";
+import { searchMemoryGroups } from "@/lib/agent/memory/memory-search-db";
 import { mutateMemoryEntry } from "@/lib/agent/memory/memory-db";
 import { getPool } from "@/lib/pg";
 import {
@@ -17,7 +18,7 @@ import {
   indexEpisodicRun,
   embedMissing,
 } from "@/lib/agent/memory/index-db";
-import { searchMemory, MemoryUnavailableError, MIN_SCORE } from "@/lib/agent/memory/search";
+import { searchMemory, MemoryUnavailableError } from "@/lib/agent/memory/search";
 import { embeddingModel } from "@/lib/agent/memory/embedding";
 
 let userA: string;
@@ -117,10 +118,9 @@ describe("searchMemory", () => {
   });
 
   it("当前条目通过关键词检索，不依赖模型评分", async () => {
-    const { hits } = await searchMemory(userB, "网关 loopback 配置");
-    expect(hits.length).toBeGreaterThan(0);
-    // importance=9 → 乘子 1.2；关键词强命中 × 1.2 应显著高于 MIN_SCORE
-    expect(hits[0].score).toBeGreaterThan(MIN_SCORE);
+    const groups = await searchMemoryGroups(userB, null, "网关 loopback 配置");
+    expect(groups.flatMap(g => g.entries).some(e => e.brief.includes("loopback"))).toBe(true);
+
   });
 
   it("不相关查询过不了 minScore", async () => {

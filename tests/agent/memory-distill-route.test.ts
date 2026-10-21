@@ -4,10 +4,10 @@ import { NextRequest } from "next/server";
 // /api/internal/memory-distill 的守卫与 happy path（distill 逻辑 mock，
 // 管线本体的测试在 agent-memory.test.ts）。
 
-vi.mock("@/lib/agent/memory/distill", () => ({
-  distillAllUsers: vi.fn(async () => [
-    { userId: "u1", status: "distilled", entries: 3 },
-    { userId: "u2", status: "no-new-data" },
+vi.mock("@/lib/agent/memory/organize", () => ({
+  organizeAllMemories: vi.fn(async () => [
+    { userId: "u1", status: "organized", entries: 3 },
+    { userId: "u2", status: "empty" },
   ]),
 }));
 
@@ -44,6 +44,6 @@ describe("POST /api/internal/memory-distill", () => {
     const res = await POST(makeReq(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { summary: { distilled: number; noNewData: number; errors: unknown[] } };
-    expect(body.summary).toEqual({ distilled: 1, noNewData: 1, shrunk: 0, skipped: [], errors: [] });
+    expect(body.summary).toEqual({ organized: 1, empty: 1, errors: 0 });
   });
 });

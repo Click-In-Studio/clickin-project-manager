@@ -7,7 +7,11 @@ import { buildProductionContextMarkdown } from "@/lib/agent/tools/production-con
 import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import { buildInstructionsBlock } from "@/lib/agent/agent-instructions";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
-import { readMemoryScope, requireMemoryAccess } from "./memory-db";
+import { requireMemoryAccess } from "./memory-access-db";
+import { readMemoryGroups } from "./memory-group-db";
+import { searchMemoryGroups } from "./memory-search-db";
+import { MEMORY_GUIDANCE, formatMemoryGroup } from "./memory-prompt";
+import { MEMORY_INJECTION_MAX } from "./memory-types";
 import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/agent/tools/tool-catalog";
 import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent/tools/wiki-link-syntax";
 import { pageLabelFor } from "@/lib/agent/agent-page-context";
@@ -128,8 +132,7 @@ export async function buildInjectContext(
 
   const userContext = await cachedUserContext(userId);
   const productionContext = productionId ? await cachedProductionContext(userId, productionId).catch(() => null) : null;
-  const generalMemory = await readMemoryScope(userId, null);
-  const projectMemory = productionId ? await readMemoryScope(userId, productionId).catch(() => null) : null;
+
 
   // 制作级指令借「当前制作」段的成员校验结果做门（productionContext 非 null
   // = 实时成员校验已通过），不重复查询；查询失败按"无指令"降级——指令注入
@@ -147,14 +150,29 @@ export async function buildInjectContext(
   const sections: string[] = [UI_CONTEXT_RULE];
   if (userContext) sections.push(neutralizeInjectionTags(userContext)); // 自带 "## 当前用户" 标题
   if (productionContext) sections.push(neutralizeInjectionTags(productionContext)); // 自带 "## 当前制作" 标题
-  sections.push("## 记忆使用边界\n记忆仅供参考。当前用户指令和当前业务事实优先；AI 整理与主动记录不代表用户确认。旧做法不能自动成为当前项目要求。需要及时记录明确的持续要求时，用 find_tools 寻找记忆读写工具，先读已有条目后再按范围新建或更新，不把单项目要求扩大为个人通用。");
-  for (const [label, scope] of [["个人通用", generalMemory], ["当前项目中的个人", projectMemory]] as const) {
-    if (!scope) continue;
-    for (const source of ["dream", "active"] as const) {
-      const entries = scope.entries.filter(e => e.source === source);
-      if (!entries.length) continue;
-      const body = entries.map(e => `- ${e.userEdited ? "[用户编辑] " : "[AI记录，未确认] "}${e.body}`).join("\n");
-      sections.push(`## ${label}记忆 · ${source === "dream" ? "自动整理" : "主动记录"}\n${neutralizeInjectionTags(body).replace(/^#{1,2}(?=\s)/gm, "###")}`);
+  sections.push(`## 记忆使用边界\n${MEMORY_GUIDANCE}`);
+  let memoryChars = 0;
+  for (const [label, pid] of [["个人通用", null], ["当前项目中的个人", productionId]] as const) {
+    if (pid === undefined) continue;
+    try {
+      const cached = await readMemoryGroups(userId, pid);
+      const recalled = prompt?.trim() ? await searchMemoryGroups(userId, pid, prompt).catch(() => {
+        sections.push(`## ${label}记忆检索状态\n自动检索暂不可用；这不表示没有记忆，可按需主动读取。`);
+        return [];
+      }) : [];
+      const groups = [...new Map([...cached, ...recalled].map(g => [g.id, g])).values()];
+      const shown: string[] = [];
+      for (const group of groups) {
+        const text = formatMemoryGroup(group);
+        if (memoryChars + text.length > MEMORY_INJECTION_MAX) {
+          shown.push(`组${group.id}（${group.memberCount}条）因整组预算未加载；不能据此认为不存在，按需检索/读取。`);
+          continue;
+        }
+        shown.push(text); memoryChars += text.length;
+      }
+      if (shown.length) sections.push(`## ${label}记忆\n${neutralizeInjectionTags(shown.join("\n\n"))}`);
+    } catch {
+      sections.push(`## ${label}记忆状态\n该范围当前不可读取；不可推测内容或借用其他项目记忆。`);
     }
   }
 
@@ -164,7 +182,7 @@ export async function buildInjectContext(
   const knowledge = wikiFocused ? DIALECT_KNOWLEDGE : null;
   let dialectDelivered = wikiFocused;
 
-  // 工具召回：不再根据 prompt 自动召回记忆。
+  // 工具召回独立组装；记忆的联合检索已在上面的分域记忆段完成。
   let recall: string | null = null;
   if (prompt?.trim()) {
     const recallParts: string[] = [];

@@ -23,16 +23,18 @@ export async function PATCH(req: NextRequest) {
   if (!session) return Response.json({ error: "unauthorized" }, { status: 401 });
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return Response.json({ error: "无效请求" }, { status: 400 }); }
-  if (!body || !["create", "update", "delete"].includes(String(body.action))
+  if (!body || !["create", "update", "delete", "restore"].includes(String(body.action))
     || (body.productionId != null && typeof body.productionId !== "string")
-    || (body.action !== "delete" && (typeof body.body !== "string" || !body.body.trim() || body.body.length > 1000))
+    || (!["delete", "restore"].includes(String(body.action)) && (typeof body.body !== "string" || !body.body.trim() || body.body.length > 1000))
     || (body.action !== "create" && (typeof body.id !== "string" || !Number.isSafeInteger(body.revision)))) {
     return Response.json({ error: "无效记忆内容" }, { status: 400 });
   }
   try {
     const productionId = typeof body.productionId === "string" && body.productionId ? body.productionId : null;
-    await mutateMemoryEntry(session.userId, productionId, { action: body.action as "create" | "update" | "delete",
+    await mutateMemoryEntry(session.userId, productionId, { action: body.action as "create" | "update" | "delete" | "restore",
       id: body.id as string | undefined, body: body.body as string | undefined, revision: body.revision as number | undefined, actor: "user" });
+    try { await (await import("@/lib/agent/memory/organize")).maintainMemoryCache(session.userId, productionId); }
+    catch { console.warn("[memories] 记忆已保存，缓存整理待重试"); }
     return Response.json({ memory: await readMemoryScope(session.userId, productionId) });
   } catch (err) { return errorResponse(err); }
 }

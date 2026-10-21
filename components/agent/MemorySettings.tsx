@@ -5,26 +5,26 @@ import OverflowSafeSelect from "@/components/ui/OverflowSafeSelect";
 import { MEMORY_ENTRY_MAX, type MemoryEntry, type MemoryScopeView } from "@/lib/agent/memory/memory-types";
 import styles from "./memory-settings.module.css";
 
-type Mutation = { action: "create" | "update" | "delete"; id?: string; body?: string; revision?: number };
+type Mutation = { action: "create" | "update" | "delete" | "restore"; id?: string; body?: string; revision?: number };
 function MemoryEditor({ entry, busy, onChange }: { entry: MemoryEntry; busy: boolean; onChange: (change: Mutation) => Promise<boolean> }) {
   const [draft, setDraft] = useState(entry.body);
   useEffect(() => { setDraft(entry.body); }, [entry.body]);
   return <li className={styles.entry}>
     <div className={styles.meta}>
-      <span>{entry.source === "dream" ? "自动整理" : "主动记录"}</span>
+      <span>{entry.deletedAt ? "已删除" : "协作记忆"}</span>
       <span>{entry.userEdited ? "用户编辑" : "AI 记录 · 未经用户确认"}</span>
-      {entry.inputCount > 0 && <span>整理时使用 {entry.inputCount} 条历史摘要 · 不代表逐条证据</span>}
+      <span>记录于 {new Date(entry.createdAt).toLocaleString("zh-CN")}</span>
     </div>
-    <textarea aria-label="记忆内容" value={draft} maxLength={MEMORY_ENTRY_MAX} disabled={busy}
+    <textarea aria-label="记忆内容" value={draft} maxLength={MEMORY_ENTRY_MAX} disabled={busy || !!entry.deletedAt}
       onChange={e => setDraft(e.target.value)} rows={3} />
     <div className={styles.actions}>
-      <button type="button" disabled={busy || !draft.trim() || draft === entry.body}
+      <button type="button" disabled={busy || !!entry.deletedAt || !draft.trim() || draft === entry.body}
         onClick={() => void onChange({ action: "update", id: entry.id, body: draft, revision: entry.revision })}>保存修改</button>
-      <button type="button" disabled={busy} onClick={() => {
-        if (window.confirm("删除这条记忆？该范围此前的历史将不再用于整理或检索，该范围其他已有条目会保留；用过此项目历史的通用自动摘要也会退出，用户编辑和主动条目保留。请开启新对话形成新记忆；原会话仍可聊天，但不再作为此范围的记忆来源。")) {
+      {entry.deletedAt ? <button type="button" disabled={busy} onClick={() => void onChange({ action: "restore", id: entry.id, revision: entry.revision })}>恢复</button> : <button type="button" disabled={busy} onClick={() => {
+        if (window.confirm("删除这条记忆？后续不再作为有效记忆使用，可在已删除列表恢复。此前历史退出本范围检索，请开启新对话形成新的记忆。")) {
           void onChange({ action: "delete", id: entry.id, revision: entry.revision });
         }
-      }}>删除</button>
+      }}>删除</button>}
     </div>
   </li>;
 }
@@ -77,20 +77,19 @@ export default function MemorySettings() {
         {projects.map(p => <option key={p.id} value={p.id}>{p.name} · 我的项目记忆</option>)}
       </OverflowSafeSelect>
     </label>
-    <p className={styles.explanation}>修改或删除会让该范围此前的历史退出整理和检索，该范围其他已有记忆会保留；若通用自动摘要用过此项目历史，那组未编辑的摘要也会退出，用户编辑和主动条目保留。开启新对话后，重新表达的要求仍可被记住；原会话不再作为此范围的记忆来源。</p>
+    <p className={styles.explanation}>助理会主动维护个人记忆，无需逐条确认。近期记忆默认提醒，久未使用的仍可查找；重复和分歧会一起核对。你修改的条目不会被 AI 覆盖，删除后可以恢复。</p>
     {error && <div><p role="alert">{error}</p><button type="button" disabled={busy} onClick={() => setReload(n => n + 1)}>重新加载</button></div>}
     {notice && <p role="status">{notice}</p>}
     {loading && <p role="status">正在加载记忆…</p>}
     {memory && <>
       {memory.historyCutoff && <p className={styles.explanation}>此前历史已于 {new Date(memory.historyCutoff).toLocaleString("zh-CN")} 退出此范围的记忆。</p>}
-      {(["dream", "active"] as const).map(source => <section key={source}>
-        <h3>{source === "dream" ? "自动整理" : "主动记录"}</h3>
-        <p>{source === "dream" ? "AI 从历史摘要整理出的持续偏好和要求。" : "及时记录的协作要求，自动整理不会覆盖这些条目。"}</p>
-        <ul className={styles.list}>
-          {memory.entries.filter(e => e.source === source).map(e => <MemoryEditor key={e.id} entry={e} busy={busy} onChange={mutate} />)}
-        </ul>
-        {!memory.entries.some(e => e.source === source) && <p>暂无条目</p>}
-      </section>)}
+      <ul className={styles.list}>
+        {memory.entries.map(e => <MemoryEditor key={e.id} entry={e} busy={busy} onChange={mutate} />)}
+      </ul>
+      {!memory.entries.length && <p>暂无条目</p>}
+      {!!memory.deletedEntries?.length && <details><summary>已删除的记忆</summary><ul className={styles.list}>
+        {memory.deletedEntries.map(e => <MemoryEditor key={e.id} entry={e} busy={busy} onChange={mutate} />)}
+      </ul></details>}
       <label className={styles.add}>添加我的要求
         <textarea aria-label="新增记忆内容" value={draft} onChange={e => setDraft(e.target.value)} disabled={busy} maxLength={MEMORY_ENTRY_MAX} rows={3} />
       </label>

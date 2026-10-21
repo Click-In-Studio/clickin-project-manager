@@ -645,7 +645,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       const g: GateInput = { runId, sessionId, userId, productionId, tool, toolCallId: event.toolCallId, args: event.input, publisher, signal: abort.signal, isDetached: () => detached };
       if (schedule) return unattendedGate(g, schedule.allowedTools);
       if (tool.readOnly) return undefined;
-      // 仅限带短恢复宽限期的附件释放：交互会话可直行；无人值守仍由上面的
+      // 仅限可恢复的个人附件/记忆维护：交互会话可直行；无人值守仍由上面的
       // unattended 交集门缺省拒绝，重启恢复也不会把它当 readOnly 盲重放。
       if (tool.reversibleNoConfirm) return undefined;
       // 自写域（Def.selfScribe）：AI 工作记录类工具免卡直行——目标自证/权限
