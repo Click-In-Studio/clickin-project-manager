@@ -7,6 +7,8 @@ import type { MemoryEntry } from "./memory-types";
 /** 当前 text-embedding-v4 构造样本：同义约0.77—0.81，无关约0.25—0.37。
  * 仅作为候选下限，不把语义相近直接认定为重复或冲突。 */
 export const ORGANIZE_VECTOR_MIN = 0.5;
+/** 短关键词按覆盖率，长句改写允许分散命中；单个常见词不能给长句凑名额。 */
+export const ORGANIZE_LEXICAL_MIN = 0.2;
 
 export async function readOrganizeSeeds(userId: string, productionId: string | null): Promise<MemoryEntry[]> {
   return memoryTransaction(userId, productionId, async (c, s) => {
@@ -48,12 +50,17 @@ export async function readOrganizeCandidates(
            CASE WHEN seed.embedding IS NOT NULL AND seed.embedding_revision=seed.revision AND seed.embedding_model=$5
              AND e.embedding IS NOT NULL AND e.embedding_revision=e.revision AND e.embedding_model=$5
              THEN 1-(e.embedding<=>seed.embedding) ELSE 0 END AS vector_score,
-           COALESCE((SELECT avg((strpos(lower(e.brief||' '||e.body),t)>0)::int) FROM unnest($4::text[]) t),0) AS lexical_score
+           lexical.score AS lexical_score,lexical.hits AS lexical_hits
          FROM agent_memory_entry e JOIN agent_memory_entry seed ON seed.id=$2 AND seed.scope_id=e.scope_id
+         CROSS JOIN LATERAL (
+           SELECT COALESCE(avg((strpos(lower(e.brief||' '||e.body),t)>0)::int),0) AS score,
+             count(*) FILTER (WHERE strpos(lower(e.brief||' '||e.body),t)>0) AS hits
+           FROM unnest($4::text[]) t
+         ) lexical
          WHERE e.scope_id=$1 AND e.deleted_at IS NULL AND NOT(e.id=ANY($3::text[])))
-         SELECT * FROM scored WHERE lexical_score>0 OR vector_score>$6
+         SELECT * FROM scored WHERE lexical_score>=$7 OR lexical_hits>=2 OR vector_score>$6
          ORDER BY GREATEST(vector_score,lexical_score) DESC,updated_at DESC,id LIMIT 4`,
-        [s.id, seed.id, changed.map(e => e.id), words, embeddingModel(), ORGANIZE_VECTOR_MIN],
+        [s.id, seed.id, changed.map(e => e.id), words, embeddingModel(), ORGANIZE_VECTOR_MIN, ORGANIZE_LEXICAL_MIN],
       )).rows;
       for (const entry of related) entries.set(entry.id, entry);
     }

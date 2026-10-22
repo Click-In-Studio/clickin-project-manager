@@ -151,6 +151,27 @@ describe("整理候选", () => {
     expect(new Set((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id))).toEqual(new Set([seed, ids[0], ids[3]]));
   });
 
+  it("长句只命中项目或采用时不占候选名额，至少两个不同词元仍可召回", async () => {
+    const weak = await Promise.all(["项目预算待审核", "采用周末休息安排", "项目付款等待签字", "采用电子报销单"].map(body => create(body)));
+    const useful = await create("舞美与芦苇");
+    await markOrganized(uid, pid, (await readMemoryScope(uid, pid)).entries);
+    const seed = await create("项目采用蒹葭寻找意象并以舞美表达芦苇空间的疏密关系");
+    const candidates = (await readOrganizeCandidates(uid, pid)).entries.map(e => e.id);
+    expect(candidates).toContain(seed);
+    expect(candidates).toContain(useful);
+    expect(candidates.filter(id => weak.includes(id))).toEqual([]);
+  });
+
+  it("重复出现同一常见词不算多个命中，20%覆盖率边界可召回短关键词", async () => {
+    const weak = await create("项目项目项目");
+    const atBoundary = await create("蒹葭");
+    await markOrganized(uid, pid, (await readMemoryScope(uid, pid)).entries);
+    const seed = await create("蒹葭意象空间");
+    expect((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id)).toContain(atBoundary);
+    await mutateMemoryEntry(uid, pid, { action: "update", actor: "agent", id: seed, revision: 0, body: "项目采用全新舞台设计方案", brief: "项目采用全新舞台设计方案" });
+    expect((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id)).not.toContain(weak);
+  });
+
   it("索引积压时优先嵌入本轮seed，第一轮即可召回无词面重叠的记忆", async () => {
     const old = await create("harp arrangement");
     for (let i = 0; i < 12; i++) await create(`积压旧条目${i}`);
