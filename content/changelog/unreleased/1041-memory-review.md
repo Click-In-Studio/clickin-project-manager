@@ -2,7 +2,7 @@
 kind: fixed
 title: 记忆保存不再等待整理，大量待核对内容可持续处理
 page: ai/assistant/chat
-pr: 1039
+pr: 1041
 order: 1
 ---
 
