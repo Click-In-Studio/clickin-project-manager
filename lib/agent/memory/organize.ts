@@ -7,7 +7,7 @@ import {
   readGroupPage,
   type RelationInput,
 } from "./memory-group-db";
-import { readOrganizeCandidates, markOrganized } from "./memory-organize-db";
+import { readOrganizeCandidates, readOrganizeSeeds, markOrganized } from "./memory-organize-db";
 import { cachePressure, indexMemoryEntries } from "./memory-search-db";
 import { ORGANIZE_RULES, SUMMARY_RULES } from "./memory-prompt";
 import { readSummaryProgress, saveSummaryProgress } from "./memory-summary-db";
@@ -125,7 +125,13 @@ export async function organizeMemoryScope(
   userId: string,
   productionId: string | null,
 ): Promise<{ status: "organized" | "empty"; relations: number }> {
-  const snapshot = await readOrganizeCandidates(userId, productionId);
+  const seeds = await readOrganizeSeeds(userId, productionId);
+  try {
+    await indexMemoryEntries(userId, productionId, seeds.map(e => e.id));
+  } catch (error) {
+    console.error("[memory] 整理前嵌入失败，本轮使用已有向量和词法候选", error);
+  }
+  const snapshot = await readOrganizeCandidates(userId, productionId, seeds);
   if (!snapshot.entries.length) {
     await enqueuePendingSummaries(userId, productionId);
     return { status: "empty", relations: 0 };
@@ -156,8 +162,9 @@ export async function organizeMemoryScope(
 export async function maintainMemoryCache(
   userId: string,
   productionId: string | null,
+  forceOrganize = false,
 ): Promise<void> {
-  if ((await cachePressure(userId, productionId)) < MEMORY_CACHE_TRIGGER) {
+  if (!forceOrganize && (await cachePressure(userId, productionId)) < MEMORY_CACHE_TRIGGER) {
     await indexMemoryEntries(userId, productionId);
     await enqueuePendingSummaries(userId, productionId);
     return;

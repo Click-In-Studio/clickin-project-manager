@@ -221,7 +221,7 @@ export async function linkInTx(
   const chars =
     groups.reduce((n, g) => n + g.context_chars, 0) + input.reason.length + 200;
   await client.query(
-    "UPDATE agent_memory_group SET member_count=$3,context_chars=$4,revision=revision+1,summary=NULL,summary_revision=NULL,in_cache=true,last_touched_at=clock_timestamp() WHERE scope_id=$1 AND id=$2",
+    "UPDATE agent_memory_group SET member_count=$3,context_chars=$4,revision=revision+1,summary=NULL,summary_revision=NULL,summary_progress=NULL,in_cache=true,last_touched_at=clock_timestamp() WHERE scope_id=$1 AND id=$2",
     [scopeId, target, members, chars],
   );
   return true;
@@ -268,7 +268,7 @@ export async function addMemoryRelations(
   });
 }
 
-/** 高水位由调用方先安排整理，整理后再按整组回落；touch 不改变内容修订。 */
+/** 高水位按整组回落；调用方独立保留后台整理信号，touch 不改变内容修订。 */
 export async function evictInTx(
   client: PoolClient,
   scopeId: string,

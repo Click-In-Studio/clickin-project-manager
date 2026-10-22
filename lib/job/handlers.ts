@@ -17,14 +17,18 @@ const handlers = new Map<string, JobHandlerDef>();
 // 个人记忆整理不生成新事实；摘要任务每批保存检查点，再派发下一批。
 for (const kind of ["memory_maintenance", "memory_summary"]) {
   registerJobHandler(kind, {
-    async run(payload) {
+    async run(payload, job) {
       const { userId, productionId, groupId, revision } = payload;
       if (typeof userId !== "string" || (productionId !== null && typeof productionId !== "string"))
         throw new TerminalJobError("记忆任务缺少用户或作用域");
       const { MemoryAccessError, MemoryConflictError } = await import("@/lib/agent/memory/memory-access-db");
       const { maintainMemoryCache, summarizeMemoryGroup } = await import("@/lib/agent/memory/organize");
       try {
-        if (kind === "memory_maintenance") await maintainMemoryCache(userId, productionId);
+        if (kind === "memory_maintenance") {
+          const { beginMemoryMaintenance } = await import("@/lib/agent/memory/memory-maintenance-db");
+          const forceOrganize = await beginMemoryMaintenance(userId, productionId, job.id);
+          await maintainMemoryCache(userId, productionId, forceOrganize);
+        }
         else {
           if (typeof groupId !== "string" || !Number.isSafeInteger(revision)) throw new TerminalJobError("摘要任务缺少组修订");
           await summarizeMemoryGroup(userId, productionId, groupId, Number(revision));

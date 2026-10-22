@@ -145,11 +145,11 @@ export const MEMORY_DEFS: ToolDefinition[] = [
         ctx.run?.runId,
       );
       try {
-        await enqueueMemoryMaintenance(ctx.userId, production(ctx, args));
+        await enqueueMemoryMaintenance(ctx.userId, production(ctx, args), true);
       } catch {
         return "已touch；缓存整理待重试，正文和事实时间未改变。";
       }
-      return "已touch对应记忆组；正文和事实时间未改变，缓存整理已安排在后台。";
+      return "已touch对应记忆组；正文和事实时间未改变。";
     },
   },
   {
