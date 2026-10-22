@@ -94,7 +94,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "my.productions", family: "my.account", scope: "personal", oneliner: "查询我参与的全部制作与角色",
     triggers: ["我参与", "哪些制作", "哪些项目", "我的项目"], en: "my productions projects roles",
     examples: ["我参与了哪些制作", "我在哪些项目里", "我在每个项目里是什么角色"] },
-  { name: "my.memory_read", family: "my.account", scope: "personal", oneliner: "查看个人通用或当前项目的记忆组概览，按组分页核对正文",
+  { name: "my.memory_read", family: "my.account", scope: "personal", oneliner: "查看个人通用或当前项目的记忆组概览，按组分页核对正文与关系，分别沿返回游标续读",
     triggers: ["我的记忆", "长期记忆"], en: "read my memory", examples: ["你记住了哪些关于我的要求"] },
   { name: "my.memory_write", family: "my.account", scope: "personal", oneliner: "主动维护用户明确确认的个人记忆；不得自行补充，缺信息先问，免逐条确认",
     triggers: ["记住", "以后都", "记录这个决定"], en: "write update my memory", examples: ["记住这个项目的音效约束"] },

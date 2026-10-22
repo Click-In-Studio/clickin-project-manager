@@ -14,6 +14,7 @@ import { MEMORY_GUIDANCE, formatMemoryGroup } from "./memory-prompt";
 import { MEMORY_INJECTION_MAX } from "./memory-types";
 import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/agent/tools/tool-catalog";
 import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent/tools/wiki-link-syntax";
+import { stripUiContext } from "@/lib/agent/agent-ui-context";
 import { pageLabelFor } from "@/lib/agent/agent-page-context";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户
@@ -156,7 +157,7 @@ export async function buildInjectContext(
     if (pid === undefined) continue;
     try {
       const cached = await readMemoryGroups(userId, pid);
-      const recalled = prompt?.trim() ? await searchMemoryGroups(userId, pid, prompt).catch(() => {
+      const recalled = prompt?.trim() ? await searchMemoryGroups(userId, pid, stripUiContext(prompt)).catch(() => {
         sections.push(`## ${label}记忆检索状态\n自动检索暂不可用；这不表示没有记忆，可按需主动读取。`);
         return [];
       }) : [];

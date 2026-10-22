@@ -166,7 +166,7 @@ export async function mutateMemoryEntry(
     );
     if (input.actor === "user" && input.action !== "create")
       await c.query(
-        "DELETE FROM agent_memory_chunk WHERE scope_type='user' AND scope_id=$1 AND source='episodic' AND ($2::text IS NULL OR production_id=$2)",
+        "DELETE FROM agent_memory_chunk WHERE scope_type='user' AND scope_id=$1 AND source='episodic' AND production_id IS NOT DISTINCT FROM $2::text",
         [userId, productionId],
       );
     return id;
@@ -179,7 +179,7 @@ export const VISIBLE_HISTORY = `c.scope_type='user' AND c.scope_id=$1 AND c.sour
   AND (c.production_id IS NULL OR EXISTS(SELECT 1 FROM production p WHERE p.id=c.production_id
     AND (p.owner_id=$1::uuid OR EXISTS(SELECT 1 FROM production_member m WHERE m.production_id=p.id AND m.user_id=$1::uuid AND m.status='active'))))
   AND NOT EXISTS(SELECT 1 FROM agent_memory_scope s WHERE s.user_id=$1::uuid
-    AND (s.scope_key=COALESCE(c.production_id,'') OR ($2::text IS NULL AND s.scope_key=''))
+    AND s.scope_key=COALESCE(c.production_id,'')
     AND s.history_cutoff IS NOT NULL AND c.observed_at<=s.history_cutoff)`;
 
 export async function readMemoryAuditEntries(

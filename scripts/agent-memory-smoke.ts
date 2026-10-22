@@ -594,20 +594,9 @@ async function main() {
         process.argv.includes(arg),
       )
     ) {
-      try {
-        if (process.argv.includes("--selection")) await selectionSmoke();
-        else if (process.argv.includes("--confirmation"))
-          await confirmationSmoke();
-        else await semanticSmoke();
-      } finally {
-        console.log(
-          JSON.stringify(
-            { model: model.id, semanticReviewRequired: true, reports },
-            null,
-            2,
-          ),
-        );
-      }
+      if (process.argv.includes("--selection")) await selectionSmoke();
+      else if (process.argv.includes("--confirmation")) await confirmationSmoke();
+      else await semanticSmoke();
       return;
     }
     const first = await turn(
@@ -668,8 +657,8 @@ async function main() {
     });
     if (!adopted.calls.includes("my.memory_resolve"))
       throw new Error("已有依据但未进入组核对维护");
-    console.log(JSON.stringify({ model: model.id, reports }, null, 2));
   } finally {
+    console.log(JSON.stringify({ model: model.id, semanticReviewRequired: true, reports }, null, 2));
     await getPool().query("DELETE FROM agent_session WHERE user_id=$1", [uid]);
     await getPool().query("DELETE FROM agent_memory_scope WHERE user_id=$1", [
       uid,

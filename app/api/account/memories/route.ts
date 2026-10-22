@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest) {
     const productionId = typeof body.productionId === "string" && body.productionId ? body.productionId : null;
     await mutateMemoryEntry(session.userId, productionId, { action: body.action as "create" | "update" | "delete" | "restore",
       id: body.id as string | undefined, body: body.body as string | undefined, revision: body.revision as number | undefined, actor: "user" });
-    try { await (await import("@/lib/agent/memory/organize")).maintainMemoryCache(session.userId, productionId); }
+    try { await (await import("@/lib/agent/memory/memory-jobs")).enqueueMemoryMaintenance(session.userId, productionId); }
     catch { console.warn("[memories] 记忆已保存，缓存整理待重试"); }
     return Response.json({ memory: await readMemoryScope(session.userId, productionId) });
   } catch (err) { return errorResponse(err); }

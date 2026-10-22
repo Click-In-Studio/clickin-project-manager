@@ -11,7 +11,7 @@ import {
   type MemoryResolution,
 } from "@/lib/agent/memory/memory-resolve-db";
 import { searchMemoryGroups } from "@/lib/agent/memory/memory-search-db";
-import { maintainMemoryCache } from "@/lib/agent/memory/organize";
+import { enqueueMemoryMaintenance } from "@/lib/agent/memory/memory-jobs";
 import { neutralizeInjectionTags } from "@/lib/agent/agent-injection-safety";
 
 const scope = Type.Union([Type.Literal("general"), Type.Literal("project")]);
@@ -35,13 +35,14 @@ export const MEMORY_DEFS: ToolDefinition[] = [
     mcpName: "my.memory_read",
     readOnly: true,
     description:
-      "读取个人通用/当前项目记忆的组概览，命中任一条目共同返回整组brief/时间/疑似关系，超限组返回防偏摘要。需要正文时传groupId、groupRevision和offset进入组核对分页（每页5条，返回nextOffset），partial不能作为完整依据。无关组不必核对。",
+      "读取个人通用/当前项目记忆的组概览，命中任一条目共同返回整组brief/时间/疑似关系，超限组返回防偏摘要。需要正文时传groupId、groupRevision和offset进入组核对分页（每页5条，返回nextOffset；关系未读完时同时按nextRelationAfter续读），partial不能作为完整依据。无关组不必核对。",
     parameters: Type.Object({
       scope,
       ids: Type.Optional(ids),
       groupId: Type.Optional(Type.String()),
       groupRevision: Type.Optional(Type.Integer({ minimum: 0 })),
       offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      relationAfter: Type.Optional(Type.String()),
     }),
     execute: async (ctx, args) => {
       const pid = production(ctx, args);
@@ -52,10 +53,11 @@ export const MEMORY_DEFS: ToolDefinition[] = [
           String(args.groupId),
           Number(args.groupRevision),
           Number(args.offset ?? 0),
+          typeof args.relationAfter === "string" ? args.relationAfter : null,
         );
         return text({
           ...page,
-          partial: page.nextOffset !== null || Number(args.offset ?? 0) > 0,
+          partial: page.nextOffset !== null || Number(args.offset ?? 0) > 0 || !!args.relationAfter,
           note: "正在核对整组。先核对相关各方，再resolve或问用户；不能偏取单方作为确定事实。",
         });
       }
@@ -72,7 +74,7 @@ export const MEMORY_DEFS: ToolDefinition[] = [
     mcpName: "my.memory_write",
     ...ownWrite,
     description:
-      "主动维护用户明确确认的个人协作信息，免逐条确认。用户自然明确交代的事实/要求或明确采纳的方案可按需记录；助手提议和模型推断不算确认。正文和brief不得添加信息，必须补充时先问用户，得到明确答复再写入。项目内容scope=project。create写body和独立完整brief；update/delete需已有id/revision，不能覆盖用户编辑。疑似重复/冲突组用memory_resolve维护，不制造矛盾副本。删除只移出有效记忆，用户可恢复。",
+      "主动维护用户明确确认的个人协作信息，免逐条确认。用户明确交代后续要用的资料入口、持续要求或采用约定应主动写入，不要只口头说记住了；其他自然明确交代的事实可按需记录。助手提议和模型推断不算确认。正文和brief不得添加信息，必须补充时先问用户，得到明确答复再写入。项目内容scope=project。create写body和独立完整brief；update/delete需已有id/revision，不能覆盖用户编辑。疑似重复/冲突组用memory_resolve维护，不制造矛盾副本。删除只移出有效记忆，用户可恢复。",
     parameters: Type.Object({
       scope,
       action: Type.Optional(
@@ -110,11 +112,11 @@ export const MEMORY_DEFS: ToolDefinition[] = [
         actor: "agent",
         runId: ctx.run?.runId,
       });
-      let note = "";
+      let note = "缓存整理已安排在后台。";
       try {
-        await maintainMemoryCache(ctx.userId, pid);
+        await enqueueMemoryMaintenance(ctx.userId, pid);
       } catch {
-        note = "缓存整理暂未完成；记忆已保存，未把失败当作已整理。";
+        note = "记忆已保存，但后台整理未能入队，稍后需重试。";
       }
       return text({
         id,
@@ -143,11 +145,11 @@ export const MEMORY_DEFS: ToolDefinition[] = [
         ctx.run?.runId,
       );
       try {
-        await maintainMemoryCache(ctx.userId, production(ctx, args));
+        await enqueueMemoryMaintenance(ctx.userId, production(ctx, args));
       } catch {
         return "已touch；缓存整理待重试，正文和事实时间未改变。";
       }
-      return "已touch对应记忆组；正文和事实时间未改变。";
+      return "已touch对应记忆组；正文和事实时间未改变，缓存整理已安排在后台。";
     },
   },
   {
@@ -202,6 +204,11 @@ export const MEMORY_DEFS: ToolDefinition[] = [
         args as unknown as MemoryResolution,
         ctx.run?.runId,
       );
+      try {
+        await enqueueMemoryMaintenance(ctx.userId, production(ctx, args));
+      } catch {
+        return "已按核对结果维护记忆并重算连通组；后台整理未能入队，稍后需重试。";
+      }
       return "已按核对结果维护记忆并重算连通组。";
     },
   },

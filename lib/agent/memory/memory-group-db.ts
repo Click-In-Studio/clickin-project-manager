@@ -55,6 +55,12 @@ export type GroupRow = {
   revision: string;
   summary: string | null;
   summary_revision: string | null;
+  summary_progress: SummaryProgress | null;
+};
+export type SummaryProgress = {
+  offset: number;
+  relationAfter: string | null;
+  summary: string;
 };
 export type RelationRow = {
   id: string;
@@ -102,7 +108,7 @@ export async function refreshGroup(
     ).rows[0].chars,
   );
   await client.query(
-    "UPDATE agent_memory_group SET member_count=$3,context_chars=$4,revision=revision+1,summary=NULL,summary_revision=NULL WHERE scope_id=$1 AND id=$2",
+    "UPDATE agent_memory_group SET member_count=$3,context_chars=$4,revision=revision+1,summary=NULL,summary_revision=NULL,summary_progress=NULL WHERE scope_id=$1 AND id=$2",
     [scopeId, groupId, stats.n, stats.chars + edgeSize],
   );
 }
@@ -285,10 +291,8 @@ export async function evictInTx(
   if (groups.reduce((n, g) => n + g.member_count, 0) < trigger) return [];
   let count = 0;
   const evicted: string[] = [];
-  let full = false;
   for (const group of groups) {
-    if (full || count + group.member_count > safe) {
-      full = true;
+    if (count + group.member_count > safe) {
       evicted.push(group.id);
     } else count += group.member_count;
   }
@@ -421,7 +425,8 @@ export async function readGroupPage(
   groupId: string,
   revision: number,
   offset: number,
-): Promise<{ group: MemoryGroup; nextOffset: number | null; total: number }> {
+  relationAfter: string | null = null,
+): Promise<{ group: MemoryGroup; nextOffset: number | null; nextRelationAfter: string | null; total: number }> {
   if (
     !Number.isSafeInteger(revision) ||
     revision < 0 ||
@@ -447,21 +452,19 @@ export async function readGroupPage(
     ).rows;
     const relations = (
       await c.query<RelationRow>(
-        "SELECT * FROM agent_memory_relation WHERE scope_id=$1 AND resolved_at IS NULL AND (left_entry_id=ANY($2::text[]) OR right_entry_id=ANY($2::text[])) ORDER BY id LIMIT 101",
-        [s.id, page.map((e) => e.id)],
+        "SELECT * FROM agent_memory_relation WHERE scope_id=$1 AND resolved_at IS NULL AND (left_entry_id=ANY($2::text[]) OR right_entry_id=ANY($2::text[])) AND ($3::text IS NULL OR id>$3) ORDER BY id LIMIT 101",
+        [s.id, page.map((e) => e.id), relationAfter],
       )
     ).rows;
-    if (relations.length > 100)
-      throw new MemoryValidationError(
-        "本页关联过多，请先分批整理该组；未返回孤立事实",
-      );
+    const nextRelationAfter = relations.length > 100 ? relations[99].id : null;
     const group = (await readGroupsInTx(c, s.id, [groupId]))[0];
     group.entries = page.map(memoryEntry);
-    group.relations = relations.map(memoryRelation);
+    group.relations = relations.slice(0, 100).map(memoryRelation);
     return {
       group,
       nextOffset:
-        offset + page.length < g.member_count ? offset + page.length : null,
+        nextRelationAfter ? offset : offset + page.length < g.member_count ? offset + page.length : null,
+      nextRelationAfter,
       total: g.member_count,
     };
   });
@@ -482,7 +485,7 @@ export async function commitGroupSummary(
     async (c, s) =>
       (
         await c.query(
-          "UPDATE agent_memory_group SET summary=$4,summary_revision=revision WHERE scope_id=$1 AND id=$2 AND revision=$3",
+          "UPDATE agent_memory_group SET summary=$4,summary_revision=revision,summary_progress=NULL WHERE scope_id=$1 AND id=$2 AND revision=$3",
           [s.id, groupId, revision, summary],
         )
       ).rowCount === 1,
