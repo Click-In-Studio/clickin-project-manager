@@ -261,6 +261,7 @@ export async function abortRun(
   const pending = pendingExecutions.get(sessionId);
   pending?.abort.abort();
   run?.abort.abort();
+  const harnessStopped = run?.abortHarness();
   await (
     await import("./subagents")
   ).stopSubagent(sessionId, undefined, reason);
@@ -288,7 +289,7 @@ export async function abortRun(
     return Boolean(pending || cancelled.rowCount);
   }
   await cancelQuestionRows([...new Set([run.runId,pending?.runId].filter((id): id is string => !!id))]);
-  await run.abortHarness();
+  await harnessStopped;
   return true;
 }
 
@@ -785,8 +786,12 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       if (abort.signal.aborted) break;
     }
     // SDK 的模型失败以终态消息返回，不一定抛异常；与 SSE 的最终结果同源记账。
-    const terminal = terminalLine as Extract<StreamLine, { type: "final" | "aborted" | "error" }> | null;
-    if (terminal?.type === "error") {
+    let terminal = terminalLine as Extract<StreamLine, { type: "final" | "aborted" | "error" }> | null;
+    // 宿主可能在 harness 建立内部取消控制器前停止；准备阶段的错误不能覆盖用户取消。
+    if (abort.signal.aborted) {
+      status = "aborted";
+      terminal = { type: "aborted", text: terminal && "text" in terminal ? terminal.text : "" };
+    } else if (terminal?.type === "error") {
       status = "failed";
       error = terminal.error;
     }

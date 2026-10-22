@@ -7,7 +7,48 @@ import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { createNewSessionKey } from "@/lib/agent/tools/session-identity";
 import { abortRun, runtimeOverrides, startRun, waitForIdle } from "@/lib/agent/runtime/service";
 import { readEventsSince } from "@/lib/agent/runtime/events";
+import { getHistoryPage } from "@/lib/agent/runtime/chat-history-db";
 import { cleanupProduction, makeProduction, setProductionTier, shortId } from "../_support/factories";
+import { Session } from "../../vendor/openclaw/packages/agent-core/src/harness/session/session";
+import { InMemorySessionStorage } from "../../vendor/openclaw/packages/agent-core/src/harness/session/memory-storage";
+import type { ExecutionEnv } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
+
+describe("执行器准备阶段取消", () => {
+  it.each(["prompt", "continueTurn"] as const)("%s 保留提前取消，下一轮仍可正常回复", async (mode) => {
+    const session = new Session(new InMemorySessionStorage());
+    if (mode === "continueTurn") await session.appendMessage({ role: "user", content: "待续任务", timestamp: Date.now() });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const buildContext = session.buildContext.bind(session);
+    vi.spyOn(session, "buildContext").mockImplementationOnce(async () => {
+      entered.resolve();
+      await release.promise;
+      return buildContext();
+    });
+    const provider = vi.fn(() => {
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => stream.push({ type: "done", reason: "stop", message: {
+        role: "assistant", api: CHAT_MODEL.api, provider: CHAT_MODEL.provider, model: CHAT_MODEL.id,
+        content: [{ type: "text", text: "下一轮正常回复" }], timestamp: Date.now(), stopReason: "stop",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      } }));
+      return stream;
+    });
+    const harness = new CoreAgentHarness({ env: {} as ExecutionEnv, session, tools: [], model: CHAT_MODEL,
+      runtime: { streamSimple: provider, completeSimple: async () => { throw new Error("unused"); } } });
+    const turn = mode === "prompt" ? harness.prompt("待停止任务") : harness.continueTurn();
+    await entered.promise;
+    const stopping = harness.abort();
+    release.resolve();
+    const result = await turn;
+    await stopping;
+    expect(result.stopReason).toBe("aborted");
+    expect(provider).not.toHaveBeenCalled();
+    expect((await harness.prompt("继续新任务")).stopReason).toBe("stop");
+    expect(provider).toHaveBeenCalledOnce();
+  });
+});
 
 describe("主任务取消终态", () => {
   let userId: string;
@@ -48,6 +89,7 @@ describe("主任务取消终态", () => {
       this.on("before_agent_start", async () => {
         entered.resolve();
         await release.promise;
+        return undefined;
       });
       return prompt.apply(this, args);
     });
@@ -74,6 +116,12 @@ describe("主任务取消终态", () => {
       const lines = (await readEventsSince(sessionId, 0)).map(event => event.line);
       expect(lines.at(-1)?.type).toBe("aborted");
       expect(lines.some(line => line.type === "error")).toBe(false);
+      expect((await getHistoryPage(sessionId)).messages.some(message => message.role === "notice")).toBe(false);
+      const saved = await getPool().query(
+        "SELECT payload->'message'->>'stopReason' AS reason FROM agent_session_entry WHERE session_id=$1 AND payload->'message'->>'role'='assistant' ORDER BY seq DESC LIMIT 1",
+        [sessionId],
+      );
+      expect(saved.rows[0]?.reason).toBe("aborted");
     } finally {
       release.resolve();
       promptSpy.mockRestore();
@@ -83,7 +131,7 @@ describe("主任务取消终态", () => {
     }
   });
 
-  it("未取消的真实模型错误仍记为失败并发出错误终态", async () => {
+  it("未取消时模型错误仍记为失败并发出错误终态", async () => {
     runtimeOverrides.streamFn = () => {
       const stream = createAssistantMessageEventStream();
       queueMicrotask(() => stream.push({ type: "error", reason: "error", error: {
