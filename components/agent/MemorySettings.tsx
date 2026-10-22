@@ -12,7 +12,7 @@ function MemoryEditor({ entry, busy, onChange }: { entry: MemoryEntry; busy: boo
   return <li className={styles.entry}>
     <div className={styles.meta}>
       <span>{entry.deletedAt ? "已删除" : "协作记忆"}</span>
-      <span>{entry.userEdited ? "用户编辑" : "AI 记录 · 未经用户确认"}</span>
+      <span>{entry.userEdited ? "用户编辑" : "AI 记录"}</span>
       <span>记录于 {new Date(entry.createdAt).toLocaleString("zh-CN")}</span>
     </div>
     <textarea aria-label="记忆内容" value={draft} maxLength={MEMORY_ENTRY_MAX} disabled={busy || !!entry.deletedAt}

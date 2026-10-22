@@ -169,7 +169,7 @@ export async function indexEpisodicRun(userId: string, rec: RunRecord, options: 
         origin_class,session_kind,observed_at,author_user_id,production_id,scope_known)
        SELECT 'user',$1::text,'episodic',$2::text,$3::text,$4::text,'owner','interactive',$5::timestamptz,$1::text::uuid,$6::text,true
        WHERE NOT EXISTS(SELECT 1 FROM agent_memory_scope WHERE user_id=$1::text::uuid
-         AND scope_key IN ('',COALESCE($6,'')) AND history_cutoff IS NOT NULL AND ($5::timestamptz<=history_cutoff OR $7::timestamptz<=history_cutoff))
+         AND scope_key=COALESCE($6,'') AND history_cutoff IS NOT NULL AND ($5::timestamptz<=history_cutoff OR $7::timestamptz<=history_cutoff))
        ON CONFLICT(scope_type,scope_id,source,content_hash) DO UPDATE
        SET production_id=EXCLUDED.production_id,scope_known=true,observed_at=EXCLUDED.observed_at RETURNING id`,
       [userId, text, tokensText(text), sha256(text), observedAt, productionId, sourceStartedAt]);

@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import MemorySettings from "@/components/agent/MemorySettings";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const entry = { id: "m1", body: "先给结论", source: "dream", userEdited: false, revision: 0, inputCount: 3, updatedAt: new Date().toISOString() };
+const entry = { id: "m1", body: "先给结论", source: "active", brief: "先给结论", groupId: "g1", userEdited: false, revision: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), deletedAt: null };
 const memory = { productionId: null, revision: 0, historyCutoff: null, entries: [entry] };
 let container: HTMLDivElement;
 let root: Root;
@@ -19,13 +19,14 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("我的长期记忆管理", () => {
-  it("显示AI未确认与批次边界，用户编辑保留失败草稿并可重试", async () => {
+  it("显示记录来源与时间，用户编辑保留失败草稿并可重试", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ memory, projects: [] }) })
       .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "记忆已变化" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ memory: { ...memory, entries: [{ ...entry, body: "先给结论再说明", userEdited: true, revision: 1 }] } }) });
     vi.stubGlobal("fetch", fetchMock);
     await act(async () => root.render(<MemorySettings />));
-    expect(container.textContent).toContain("未经用户确认");
+    expect(container.textContent).toContain("AI 记录");
+    expect(container.textContent).not.toContain("未经用户确认");
     expect(container.textContent).toContain("记录于");
     await act(async () => input("先给结论再说明"));
     await act(async () => button("保存修改").click());

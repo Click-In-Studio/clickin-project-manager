@@ -4083,3 +4083,6 @@ CREATE INDEX agent_memory_relation_right_idx ON agent_memory_relation(scope_id,r
 ALTER TABLE agent_memory_scope DROP COLUMN consumed_seq;
 ALTER TABLE agent_memory_scope DROP COLUMN dream_project_ids;
 COMMENT ON TABLE agent_memory_scope IS '个人通用或个人项目长期记忆；内容修订与历史截断由服务端维护。';
+
+-- 分页摘要检查点；组内容变化时失效，不参与有效记忆注入。
+ALTER TABLE agent_memory_group ADD COLUMN summary_progress JSONB;

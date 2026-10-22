@@ -4,13 +4,14 @@ import {
   commitGroupSummary,
   evictMemoryCache,
   listMemoryScopes,
-  readMemoryGroups,
   readGroupPage,
   type RelationInput,
 } from "./memory-group-db";
 import { readOrganizeCandidates, markOrganized } from "./memory-organize-db";
 import { cachePressure, indexMemoryEntries } from "./memory-search-db";
 import { ORGANIZE_RULES, SUMMARY_RULES } from "./memory-prompt";
+import { readSummaryProgress, saveSummaryProgress } from "./memory-summary-db";
+import { enqueuePendingSummaries } from "./memory-jobs";
 import { MEMORY_CACHE_TRIGGER } from "./memory-types";
 
 export function parseRelations(raw: string): RelationInput[] {
@@ -71,19 +72,24 @@ export async function summarizeMemoryGroup(
   groupId: string,
   revision: number,
 ): Promise<boolean> {
-  let offset = 0;
-  let summary: string | null = null;
-  for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
+  const saved = await readSummaryProgress(userId, productionId, groupId, revision);
+  if (saved.complete) return true;
+  let progress = saved.progress;
+  let offset = progress?.offset ?? 0;
+  let relationAfter = progress?.relationAfter ?? null;
+  let summary: string | null = progress?.summary ?? null;
+  for (let pageIndex = 0; pageIndex < 8; pageIndex++) {
     const page = await readGroupPage(
       userId,
       productionId,
       groupId,
       revision,
       offset,
+      relationAfter,
     );
     const materials = [
       ...(summary
-        ? [{ previousSummary: summary, previousCoveredEntries: offset }]
+        ? [{ previousSummary: summary, previousCoveredEntries: relationAfter ? Math.min(offset + 5, page.total) : offset }]
         : []),
       {
         entries: page.group.entries,
@@ -94,6 +100,7 @@ export async function summarizeMemoryGroup(
           coveredEntries: offset + page.group.entries.length,
           totalEntries: page.total,
           complete: page.nextOffset === null,
+          ...(relationAfter || page.nextRelationAfter ? { relationAfter, nextRelationAfter: page.nextRelationAfter } : {}),
         },
       },
     ];
@@ -106,16 +113,23 @@ export async function summarizeMemoryGroup(
         revision,
         summary,
       );
-    offset = page.nextOffset;
+    const next = { offset: page.nextOffset, relationAfter: page.nextRelationAfter, summary };
+    if (!await saveSummaryProgress(userId, productionId, groupId, revision, progress, next)) return false;
+    progress = next;
+    offset = next.offset;
+    relationAfter = next.relationAfter;
   }
-  throw new Error("本次摘要达到200条上限，整组仍未解决，未提交残缺摘要");
+  return false;
 }
 export async function organizeMemoryScope(
   userId: string,
   productionId: string | null,
 ): Promise<{ status: "organized" | "empty"; relations: number }> {
   const snapshot = await readOrganizeCandidates(userId, productionId);
-  if (!snapshot.entries.length) return { status: "empty", relations: 0 };
+  if (!snapshot.entries.length) {
+    await enqueuePendingSummaries(userId, productionId);
+    return { status: "empty", relations: 0 };
+  }
   const generated = await chat(
     [
       { role: "system", content: ORGANIZE_RULES },
@@ -135,19 +149,7 @@ export async function organizeMemoryScope(
     snapshot.entries.filter((e) => snapshot.checked.includes(e.id)),
   );
   await indexMemoryEntries(userId, productionId);
-  const groups = await readMemoryGroups(
-    userId,
-    productionId,
-    snapshot.entries.map((e) => e.id),
-  );
-  for (const group of groups)
-    if (group.summaryPending)
-      await summarizeMemoryGroup(
-        userId,
-        productionId,
-        group.id,
-        group.revision,
-      );
+  await enqueuePendingSummaries(userId, productionId);
   await evictMemoryCache(userId, productionId);
   return { status: "organized", relations: generated.value.length };
 }
@@ -157,6 +159,7 @@ export async function maintainMemoryCache(
 ): Promise<void> {
   if ((await cachePressure(userId, productionId)) < MEMORY_CACHE_TRIGGER) {
     await indexMemoryEntries(userId, productionId);
+    await enqueuePendingSummaries(userId, productionId);
     return;
   }
   try {

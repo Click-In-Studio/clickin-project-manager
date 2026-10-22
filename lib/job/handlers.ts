@@ -14,6 +14,33 @@ export interface JobHandlerDef {
 
 const handlers = new Map<string, JobHandlerDef>();
 
+// 个人记忆整理不生成新事实；摘要任务每批保存检查点，再派发下一批。
+for (const kind of ["memory_maintenance", "memory_summary"]) {
+  registerJobHandler(kind, {
+    async run(payload) {
+      const { userId, productionId, groupId, revision } = payload;
+      if (typeof userId !== "string" || (productionId !== null && typeof productionId !== "string"))
+        throw new TerminalJobError("记忆任务缺少用户或作用域");
+      const { MemoryAccessError, MemoryConflictError } = await import("@/lib/agent/memory/memory-access-db");
+      const { maintainMemoryCache, summarizeMemoryGroup } = await import("@/lib/agent/memory/organize");
+      try {
+        if (kind === "memory_maintenance") await maintainMemoryCache(userId, productionId);
+        else {
+          if (typeof groupId !== "string" || !Number.isSafeInteger(revision)) throw new TerminalJobError("摘要任务缺少组修订");
+          await summarizeMemoryGroup(userId, productionId, groupId, Number(revision));
+          const { enqueuePendingSummaries } = await import("@/lib/agent/memory/memory-jobs");
+          await enqueuePendingSummaries(userId, productionId, groupId);
+        }
+      } catch (error) {
+        // 旧修订任务不能覆盖新内容；当前修订由写入任务或谷区整理重新安排。
+        if (error instanceof MemoryAccessError || error instanceof MemoryConflictError) return { stale: true };
+        throw error;
+      }
+      return { maintained: true };
+    },
+  });
+}
+
 export function registerJobHandler(kind: string, def: JobHandlerDef): void {
   handlers.set(kind, def);
 }

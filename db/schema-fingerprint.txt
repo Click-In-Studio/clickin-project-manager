@@ -97,6 +97,7 @@ COL|agent_memory_group|last_touched_at|timestamp with time zone|timestamptz|NO|c
 COL|agent_memory_group|member_count|integer|int4|NO|1
 COL|agent_memory_group|revision|bigint|int8|NO|0
 COL|agent_memory_group|scope_id|text|text|NO|
+COL|agent_memory_group|summary_progress|jsonb|jsonb|YES|
 COL|agent_memory_group|summary_revision|bigint|int8|YES|
 COL|agent_memory_group|summary|text|text|YES|
 COL|agent_memory_index_meta|dim|integer|int4|NO|

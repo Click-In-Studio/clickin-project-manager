@@ -98,10 +98,10 @@ export async function checkMemoryOrigin(
   if (origin?.production_id)
     await requireMemoryAccess(userId, origin.production_id, client);
   const { rows } = await client.query<{ blocked: boolean }>(
-    `SELECT EXISTS(SELECT 1 FROM agent_memory_scope s WHERE s.user_id=$1 AND s.scope_key IN ('',$2,$4)
+    `SELECT EXISTS(SELECT 1 FROM agent_memory_scope s WHERE s.user_id=$1 AND s.scope_key IN ($2,$4)
       AND s.history_cutoff IS NOT NULL AND NOT EXISTS(SELECT 1 FROM agent_run r JOIN agent_session a ON a.id=r.session_id
       WHERE r.id=$3 AND a.user_id=$1 AND r.started_at>s.history_cutoff AND a.created_at>s.history_cutoff)) AS blocked`,
-    [userId, productionId ?? "", runId ?? null, origin?.production_id ?? ""],
+    [userId, productionId ?? "", runId ?? null, origin ? origin.production_id ?? "" : productionId ?? ""],
   );
   if (rows[0].blocked)
     throw new MemoryConflictError(
