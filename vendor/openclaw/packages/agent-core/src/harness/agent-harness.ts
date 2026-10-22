@@ -223,6 +223,8 @@ export class CoreAgentHarness<
   private session: Session;
   private phase: AgentHarnessPhase = "idle";
   private runAbortController?: AbortController;
+  // 本地补丁 #8：准备阶段的取消也须交给随后创建的控制器。
+  private abortRequested = false;
   private runPromise?: Promise<void>;
   private pendingSessionWrites: PendingSessionWrite[] = [];
   private model: Model;
@@ -380,6 +382,7 @@ export class CoreAgentHarness<
   }
 
   private startRunPromise(): () => void {
+    this.abortRequested = false;
     let finish = () => {};
     this.runPromise = new Promise<void>((resolve) => {
       finish = resolve;
@@ -692,6 +695,7 @@ export class CoreAgentHarness<
       activeTurnState = nextTurnState;
     };
     this.runAbortController = abortController;
+    if (this.abortRequested) abortController.abort();
     const runResultPromise = (async () => {
       try {
         return await runAgentLoop(
@@ -799,6 +803,7 @@ export class CoreAgentHarness<
       activeTurnState = nextTurnState;
     };
     this.runAbortController = abortController;
+    if (this.abortRequested) abortController.abort();
     const runResultPromise = (async () => {
       try {
         return await runAgentLoopContinue(
@@ -1270,6 +1275,7 @@ export class CoreAgentHarness<
   }
 
   async abort(): Promise<AbortResult> {
+    this.abortRequested = true;
     const clearedSteer = [...this.steerQueue];
     const clearedFollowUp = [...this.followUpQueue];
     this.steerQueue = [];
