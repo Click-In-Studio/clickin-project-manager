@@ -8,6 +8,7 @@ import type {
 import type { AgentCoreRuntimeDeps } from "../../../vendor/openclaw/packages/agent-core/src/runtime-deps";
 import type {
   Context,
+  ImageContent,
   MediaContent,
   Model,
   SimpleStreamOptions,
@@ -46,11 +47,10 @@ function serializeMedia(
               : media.mimeType.split("/")[1],
       },
     };
-  if (media.type === "video") return { type: "video_url", video_url: { url } };
-  return { type: "image_url", image_url: { url } };
+  return { type: "video_url", video_url: { url } };
 }
 
-/** SDK 处理工具、思考和用量；此边界负责原件序列化，不让媒体标记漏入请求。 */
+/** 图片交给 SDK 按 provider 处理；此边界补充其余原件序列化，不让媒体标记漏入请求。 */
 function prepareSdkRequest(
   model: Model,
   context: Context,
@@ -61,15 +61,26 @@ function prepareSdkRequest(
   const budget = mediaBudget(model, requestMedia(context.messages));
   if (!budget.fits) throw new Error(budget.reasons.join("；"));
   const translate = (content: Array<TextContent | MediaContent>) =>
-    content.map((part): TextContent => {
+    content.map((part): TextContent | ImageContent => {
       if (part.type === "text") return part;
-      const marker = `clickin-media:${nonce}:${parts.size}`;
+      if (part.type === "image") {
+        if (!part.data) throw new Error("原生媒体尚未准备，不能丢弃媒体后继续请求");
+        return { type: "image", mimeType: part.mimeType, data: part.data };
+      }
       const serialized = serializeMedia(model, part);
+      const marker = `clickin-media:${nonce}:${parts.size}`;
       parts.set(marker, serialized);
       return { type: "text", text: marker };
     });
   const messages: SdkContext["messages"] = [];
+  const pendingToolMedia: SdkContext["messages"] = [];
+  const flushToolMedia = () => {
+    messages.push(...pendingToolMedia);
+    pendingToolMedia.length = 0;
+  };
   for (const message of context.messages) {
+    // 同批工具响应保持连续；到下一条非工具消息前（或遍历结束时）才补入非图片媒体。
+    if (message.role !== "toolResult") flushToolMedia();
     if (message.role === "assistant") {
       messages.push(message);
       continue;
@@ -81,17 +92,21 @@ function prepareSdkRequest(
     if (message.role === "toolResult") {
       messages.push({
         ...message,
-        content: message.content.filter(
-          (part): part is TextContent => part.type === "text",
-        ),
+        content: translate(message.content.filter(
+          (part) => part.type === "text" || part.type === "image",
+        )),
       });
       const media = message.content.filter(
-        (part): part is MediaContent => part.type !== "text",
+        (part): part is MediaContent => part.type !== "text" && part.type !== "image",
       );
       if (media.length)
-        messages.push({
+        // 非图片媒体也必须等同批工具响应收齐后补入，不能打断 SDK 的批次处理。
+        pendingToolMedia.push({
           role: "user",
-          content: translate(media),
+          content: [
+            { type: "text", text: `工具 ${message.toolName}（调用 ${message.toolCallId}）返回的媒体：` },
+            ...translate(media),
+          ],
           timestamp: message.timestamp,
         });
     } else
@@ -104,6 +119,7 @@ function prepareSdkRequest(
         ),
       });
   }
+  flushToolMedia();
   const sdkModel: SdkModel = {
     ...model,
     input: model.input.filter(
