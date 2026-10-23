@@ -129,4 +129,18 @@ describe("#1050 工具媒体的真实 SDK 请求顺序", () => {
     expect(JSON.stringify(payload.contents!.slice(2))).toContain(pdf.data);
     expect(JSON.stringify(payload)).toContain("application/pdf");
   });
+
+  it.each(["deepseek-flash", "resonance", "inspiration"] as const)("%s：图片原件未恢复时停止请求，不向 SDK 发送空数据", async (key) => {
+    const model = resolveModel(key);
+    const fetch = vi.fn(() => { throw new Error("请求不得联网"); });
+    const onPayload = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const reply = await llmRuntime().completeSimple(model, {
+      messages: batch(model, [[{ ...media(), data: undefined }]]),
+    }, { apiKey: "fixture-key", onPayload });
+    expect(reply.stopReason).toBe("error");
+    expect(reply.errorMessage).toContain("原生媒体尚未准备");
+    expect(onPayload).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

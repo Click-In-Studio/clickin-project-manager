@@ -47,8 +47,7 @@ function serializeMedia(
               : media.mimeType.split("/")[1],
       },
     };
-  if (media.type === "video") return { type: "video_url", video_url: { url } };
-  return { type: "image_url", image_url: { url } };
+  return { type: "video_url", video_url: { url } };
 }
 
 /** 图片交给 SDK 按 provider 处理；此边界补充其余原件序列化，不让媒体标记漏入请求。 */
@@ -64,9 +63,11 @@ function prepareSdkRequest(
   const translate = (content: Array<TextContent | MediaContent>) =>
     content.map((part): TextContent | ImageContent => {
       if (part.type === "text") return part;
+      if (part.type === "image") {
+        if (!part.data) throw new Error("原生媒体尚未准备，不能丢弃媒体后继续请求");
+        return { type: "image", mimeType: part.mimeType, data: part.data };
+      }
       const serialized = serializeMedia(model, part);
-      if (part.type === "image")
-        return { type: "image", mimeType: part.mimeType, data: part.data! };
       const marker = `clickin-media:${nonce}:${parts.size}`;
       parts.set(marker, serialized);
       return { type: "text", text: marker };
@@ -78,6 +79,7 @@ function prepareSdkRequest(
     pendingToolMedia.length = 0;
   };
   for (const message of context.messages) {
+    // 同批工具响应保持连续；到下一条非工具消息前（或遍历结束时）才补入非图片媒体。
     if (message.role !== "toolResult") flushToolMedia();
     if (message.role === "assistant") {
       messages.push(message);
