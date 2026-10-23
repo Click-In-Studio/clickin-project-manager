@@ -543,6 +543,44 @@ describe("agent-runtime service", () => {
     } finally { complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; vi.stubGlobal("fetch", oldFetch); }
   });
 
+  it("#1052 同批四个原件读取触发压缩时全部成功，下一次请求保留全部新图", async () => {
+    const key = newKey();
+    await seedHistory(key);
+    const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: "blue" } }).png().toBuffer();
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const attachment = await createPendingAttachment({ sessionId: key, userId, fileName: `新图${i}.png`, mimeType: "image/png", mediaKind: "image", fileSize: bytes.length });
+      await markAttachmentReady(attachment.id, key, userId, bytes.length);
+      ids.push(attachment.id);
+    }
+    const oldFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(bytes))));
+    let pressure = false;
+    runtimeOverrides.shouldCompactFn = () => pressure;
+    const complete = vi.spyOn(llmRuntime(), "completeSimple").mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      pressure = false;
+      return { ...base(), content: [{ type: "text", text: "旧资料已整理，继续读取本批新图。" }], stopReason: "stop" };
+    });
+    const { streamFn, seen } = scripted([
+      { before: () => { pressure = true; }, calls: ids.map((id, i) => ({ type: "toolCall", id: `parallel-media-${i}`, name: exposedName("my.attachment_read"), arguments: { attachmentId: id } })) },
+      { text: "本批原件全部读到" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    try {
+      await startRun({ sessionId: key, userId, message: "同时读取四张附件原件。" });
+      expect((await collectUntilTerminal(key)).at(-1)).toEqual({ type: "final", text: "本批原件全部读到" });
+      await waitForIdle(key);
+      const results = (seen[1].messages as import("../../vendor/openclaw/packages/llm-core/src/types").Context["messages"]).filter(message => message.role === "toolResult");
+      expect(results).toHaveLength(4);
+      expect(results.every(result => !result.isError)).toBe(true);
+      expect(results.flatMap(result => result.content.filter(part => part.type === "image").map(part => part.attachmentId))).toEqual(ids);
+      expect(complete).toHaveBeenCalledOnce();
+      expect(JSON.stringify(complete.mock.calls[0][1].messages)).not.toContain(bytes.toString("base64"));
+      expect((await getPool().query("SELECT status FROM agent_run WHERE session_id=$1", [key])).rows[0].status).toBe("completed");
+    } finally { complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; vi.stubGlobal("fetch", oldFetch); }
+  });
+
   it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {
     const { streamFn } = scripted([{ thinking: "先检查已有信息", text: "可以开始" }]);
     runtimeOverrides.streamFn = streamFn;
