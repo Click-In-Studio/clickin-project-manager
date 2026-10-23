@@ -6,7 +6,6 @@ import AgentPopout from "@/components/agent/AgentPopout";
 
 const router = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => router }));
-vi.mock("@/components/ui/Markdown", () => ({ default: ({ content }: { content: string }) => <p>{content}</p> }));
 vi.mock("@/components/agent/AgentModelPicker", () => ({ default: () => null }));
 vi.mock("@/components/agent/VoiceRecordButton", () => ({ default: () => null }));
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Markdown from "@/components/ui/Markdown";
+import WikiMarkdown from "@/components/wiki/WikiMarkdown";
+import { parseSessionIdentity } from "@/lib/agent/tools/session-identity-parse";
 import ChevronIcon from "@/components/ui/ChevronIcon";
 import type { SubagentView } from "@/lib/agent/runtime/subagent-types";
 
@@ -228,7 +229,7 @@ export default function SubagentPanel({
                   关闭
                 </button>
               </div>
-              {trace.view.result && <Markdown content={trace.view.result} />}
+              {trace.view.result && <WikiMarkdown content={trace.view.result} productionId={parseSessionIdentity(sessionKey)?.productionId} className="prose-sm" />}
               {trace.entries.map(({ seq, payload }) => {
                 const message = payload.message;
                 const text = message?.content

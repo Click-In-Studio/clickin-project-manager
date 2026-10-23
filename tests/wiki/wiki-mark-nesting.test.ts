@@ -252,9 +252,12 @@ describe("remark 侧 CJK 规则", () => {
 // ── ④ 接线 ───────────────────────────────────────────────────────────────────
 
 describe("接线（mock 遮不住的那一层）", () => {
-  it("两个 tiptap 编辑器都挂了 CjkMarkdown", () => {
+  it("编辑器挂了 CjkMarkdown，聊天正文与子任务详情统一走 WikiMarkdown", () => {
     expect(readFileSync("components/editor/SmartTextarea.tsx", "utf8")).toMatch(/markdownExt,\s*CjkMarkdown/);
-    expect(readFileSync("components/ui/Markdown.tsx", "utf8")).toContain("CjkMarkdown");
+    expect(readFileSync("components/agent/AgentPopout.tsx", "utf8")).toContain("<ChatMarkdown");
+    expect(readFileSync("components/agent/ChatMarkdown.tsx", "utf8")).toContain("<StreamingWikiMarkdown");
+    expect(readFileSync("components/wiki/StreamingWikiMarkdown.tsx", "utf8")).toContain("<WikiMarkdown");
+    expect(readFileSync("components/agent/SubagentPanel.tsx", "utf8")).toContain("<WikiMarkdown");
   });
   it("四处 remark 都挂了 REMARK_CJK_PLUGINS，且排在 remarkGfm 之后", () => {
     expect(readFileSync("components/wiki/WikiMarkdown.tsx", "utf8")).toMatch(/remarkPlugins=\{\[remarkGfm, \.\.\.REMARK_CJK_PLUGINS,/);
