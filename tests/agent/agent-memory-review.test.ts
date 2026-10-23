@@ -5,10 +5,10 @@ import { upsertFeishuUser } from "@/lib/account/db-feishu";
 import { getPool } from "@/lib/pg";
 import { memoryTransaction, memoryId } from "@/lib/agent/memory/memory-access-db";
 import { mutateMemoryEntry, readMemoryScope } from "@/lib/agent/memory/memory-db";
-import { evictMemoryCache, readGroupPage, readMemoryGroups, refreshGroup } from "@/lib/agent/memory/memory-group-db";
+import { addMemoryRelations, commitGroupSummary, evictMemoryCache, readGroupPage, readMemoryGroups, refreshGroup } from "@/lib/agent/memory/memory-group-db";
 import { readOrganizeCandidates, markOrganized } from "@/lib/agent/memory/memory-organize-db";
 import { readSummaryProgress, saveSummaryProgress } from "@/lib/agent/memory/memory-summary-db";
-import { summarizeMemoryGroup } from "@/lib/agent/memory/organize";
+import { organizeMemoryScope, summarizeMemoryGroup } from "@/lib/agent/memory/organize";
 import { indexEpisodicRun } from "@/lib/agent/memory/index-db";
 import { searchMemory } from "@/lib/agent/memory/search";
 import { buildInjectContext } from "@/lib/agent/memory/inject";
@@ -17,6 +17,9 @@ import { enqueueMemoryMaintenance } from "@/lib/agent/memory/memory-jobs";
 import { getJobHandlerDef } from "@/lib/job/handlers";
 import { checkMemoryOrigin } from "@/lib/agent/memory/memory-access-db";
 import { PgSessionStorage } from "@/lib/agent/runtime/pg-session-storage";
+import * as embedding from "@/lib/agent/memory/embedding";
+import { beginMemoryMaintenance } from "@/lib/agent/memory/memory-maintenance-db";
+import { claimJobById, completeJob, getJob, waitForJob, stopJobListenerForTests } from "@/lib/job/queue";
 import { embeddingModel } from "@/lib/agent/memory/embedding";
 
 const llm = vi.fn();
@@ -35,6 +38,7 @@ beforeEach(async () => {
   llm.mockReset().mockResolvedValue({ value: "各方说法尚待核对" });
 });
 afterAll(async () => {
+  await stopJobListenerForTests();
   await getPool().query("DELETE FROM agent_session WHERE user_id=$1", [uid]);
   await getPool().query("DELETE FROM job WHERE payload->>'userId'=$1", [uid]);
   await getPool().query("DELETE FROM agent_memory_chunk WHERE scope_id=$1", [uid]);
@@ -136,6 +140,71 @@ describe("整理候选", () => {
     expect((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id)).toEqual([seed]);
   });
 
+  it("过滤弱正余弦，保留强语义候选与无向量的词法命中", async () => {
+    const ids = await Promise.all(["harp", "invoice", "strings", "舞美采用蒹葭"].map(body => create(body)));
+    await getPool().query("UPDATE agent_memory_entry SET organized_revision=revision,organization_checked_at=now() WHERE id=ANY($1)", [ids]);
+    const seed = await create("蒹葭意象");
+    for (const [id, cosine] of [[ids[0], 0.8], [ids[1], 0.1], [ids[2], 0.5], [seed, 1]] as const) {
+      const vector = Array(1024).fill(0); vector[0] = cosine; vector[1] = Math.sqrt(1-cosine*cosine);
+      await getPool().query("UPDATE agent_memory_entry SET embedding=$2::vector,embedding_revision=revision,embedding_model=$3 WHERE id=$1", [id, JSON.stringify(vector), embeddingModel()]);
+    }
+    expect(new Set((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id))).toEqual(new Set([seed, ids[0], ids[3]]));
+  });
+
+  it("长句只命中项目或采用时不占候选名额，至少两个不同词元仍可召回", async () => {
+    const weak = await Promise.all(["项目预算待审核", "采用周末休息安排", "项目付款等待签字", "采用电子报销单"].map(body => create(body)));
+    const useful = await create("舞美与芦苇");
+    await markOrganized(uid, pid, (await readMemoryScope(uid, pid)).entries);
+    const seed = await create("项目采用蒹葭寻找意象并以舞美表达芦苇空间的疏密关系");
+    const candidates = (await readOrganizeCandidates(uid, pid)).entries.map(e => e.id);
+    expect(candidates).toContain(seed);
+    expect(candidates).toContain(useful);
+    expect(candidates.filter(id => weak.includes(id))).toEqual([]);
+  });
+
+  it("重复出现同一常见词不算多个命中，20%覆盖率边界可召回短关键词", async () => {
+    const weak = await create("项目项目项目");
+    const atBoundary = await create("蒹葭");
+    await markOrganized(uid, pid, (await readMemoryScope(uid, pid)).entries);
+    const seed = await create("蒹葭意象空间");
+    expect((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id)).toContain(atBoundary);
+    await mutateMemoryEntry(uid, pid, { action: "update", actor: "agent", id: seed, revision: 0, body: "项目采用全新舞台设计方案", brief: "项目采用全新舞台设计方案" });
+    expect((await readOrganizeCandidates(uid, pid)).entries.map(e => e.id)).not.toContain(weak);
+  });
+
+  it("索引积压时优先嵌入本轮seed，第一轮即可召回无词面重叠的记忆", async () => {
+    const old = await create("harp arrangement");
+    for (let i = 0; i < 12; i++) await create(`积压旧条目${i}`);
+    await getPool().query("UPDATE agent_memory_entry SET organized_revision=revision,organization_checked_at=now() WHERE scope_id=(SELECT scope_id FROM agent_memory_entry WHERE id=$1)", [old]);
+    const seed = await create("弦乐编配");
+    const vector = Array(1024).fill(0); vector[0] = 1;
+    await getPool().query("UPDATE agent_memory_entry SET embedding=$2::vector,embedding_revision=revision,embedding_model=$3 WHERE id=$1", [old, JSON.stringify(vector), embeddingModel()]);
+    process.env.EMBEDDING_PROVIDER = "fake";
+    const embed = vi.spyOn(embedding, "embedDocuments").mockImplementation(async texts => ({ embeddings: texts.map(() => vector), totalTokens: 0 }));
+    llm.mockResolvedValue({ value: [] });
+    try {
+      await organizeMemoryScope(uid, pid);
+      expect(embed.mock.calls[0][0]).toEqual(["弦乐编配\n弦乐编配"]);
+      expect(JSON.parse(llm.mock.calls[0][0][1].content).map((e: { id: string }) => e.id)).toEqual(expect.arrayContaining([seed, old]));
+    } finally { embed.mockRestore(); }
+  });
+
+  it("seed嵌入失败仍用词法完成关系判断", async () => {
+    const old = await create("舞美采用蒹葭");
+    await markOrganized(uid, pid, (await readMemoryScope(uid, pid)).entries);
+    await create("导演采用蒹葭意象");
+    process.env.EMBEDDING_PROVIDER = "fake";
+    const vector = Array(1024).fill(0); vector[0] = 1;
+    const embed = vi.spyOn(embedding, "embedDocuments").mockRejectedValueOnce(new Error("临时故障")).mockImplementation(async texts => ({ embeddings: texts.map(() => vector), totalTokens: 0 }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    llm.mockResolvedValue({ value: [] });
+    try {
+      await organizeMemoryScope(uid, pid);
+      expect(JSON.parse(llm.mock.calls[0][0][1].content).map((e: { id: string }) => e.id)).toContain(old);
+      expect(log).toHaveBeenCalled();
+    } finally { embed.mockRestore(); log.mockRestore(); }
+  });
+
   it("中文改写能找到旧条目，不因多个新条目共用八个名额遗漏", async () => {
     const old = await create("诗经舞美采用蒹葭意象");
     for (let i = 0; i < 12; i++) await create(`机械控制协议编号${i}`);
@@ -201,6 +270,22 @@ describe("大组摘要可持续推进", () => {
     expect((await readSummaryProgress(uid, pid, g.groupId, g.revision + 1)).progress).toBeNull();
   });
 
+  it.each([false, true])("加边后旧检查点失效（跨组=%s），新摘要从第一页开始", async (merge) => {
+    const g = await makeGroup(6);
+    const next = { offset: 5, relationAfter: null, summary: "旧组前五条" };
+    await saveSummaryProgress(uid, pid, g.groupId, g.revision, null, next);
+    const right = merge ? await create("新加入的条件") : g.ids[2];
+    await addMemoryRelations(uid, pid, [{ leftId: g.ids[0], rightId: right, kind: "conflict", reason: "新关系" }]);
+    await expect(readSummaryProgress(uid, pid, g.groupId, g.revision)).rejects.toThrow(/已变化/);
+    expect(await saveSummaryProgress(uid, pid, g.groupId, g.revision, next, next)).toBe(false);
+    expect(await commitGroupSummary(uid, pid, g.groupId, g.revision, "旧摘要")).toBe(false);
+    expect((await readSummaryProgress(uid, pid, g.groupId, g.revision + 1)).progress).toBeNull();
+    await summarizeMemoryGroup(uid, pid, g.groupId, g.revision + 1);
+    expect(JSON.parse(llm.mock.calls[0][0][1].content)[0].coverage.offset).toBe(0);
+    const covered = llm.mock.calls.flatMap(call => JSON.parse(call[0][1].content).at(-1).entries.map((e: { id: string }) => e.id));
+    expect(new Set(covered)).toEqual(new Set(merge ? [...g.ids, right] : g.ids));
+  });
+
   it("摘要中途失败保留已完成页，下次从检查点恢复", async () => {
     const g = await makeGroup(16);
     llm.mockResolvedValueOnce({ value: "前五条" }).mockRejectedValueOnce(new Error("模型暂时不可用"));
@@ -223,15 +308,72 @@ describe("后台执行接线", () => {
     expect((await readMemoryGroups(uid, pid, [g.ids[0]]))[0].summaryPending).toBe(false);
   });
 
-  it("高水位保存只入持久队列，不同步调用LLM；工作任务仍负责整理再淘汰", async () => {
+  it("不同revision合并为一个待执行任务；低水位touch及完成后touch不制造空任务", async () => {
+    await create("初始条件");
+    await enqueueMemoryMaintenance(uid, pid, true);
+    expect((await getPool().query("SELECT id FROM job WHERE payload->>'userId'=$1", [uid])).rows).toHaveLength(0);
+    await enqueueMemoryMaintenance(uid, pid);
+    await create("新条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    const jobs = (await getPool().query("SELECT id FROM job WHERE payload->>'userId'=$1", [uid])).rows;
+    expect(jobs).toHaveLength(1);
+    await getPool().query("UPDATE job SET run_after=now() WHERE id=$1", [jobs[0].id]);
+    const running = (await claimJobById(jobs[0].id, "test"))!;
+    await getJobHandlerDef("memory_maintenance")!.run(running.payload, running);
+    await completeJob(running.id, "test", null);
+    await enqueueMemoryMaintenance(uid, pid, true);
+    expect((await getPool().query("SELECT id FROM job WHERE payload->>'userId'=$1", [uid])).rows).toHaveLength(1);
+  });
+
+  it("认领后开工前仍读取合并信号；执行期间新增写入保留一个后续任务", async () => {
+    await create("初始条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    const first = (await getPool().query("SELECT id FROM job WHERE payload->>'userId'=$1", [uid])).rows[0];
+    await getPool().query("UPDATE job SET run_after=now() WHERE id=$1", [first.id]);
+    const running = (await claimJobById(first.id, "test"))!;
+    for (let i = 0; i < 35; i++) await create(`新增条件${i}`);
+    await enqueueMemoryMaintenance(uid, pid);
+    expect(running.payload.forceOrganize).toBe(false);
+    expect(await beginMemoryMaintenance(uid, pid, running.id)).toBe(true);
+    process.env.EMBEDDING_PROVIDER = "fake";
+    const freshId = await create("执行期间的新条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    await getPool().query("UPDATE agent_memory_entry SET embedding_revision=revision,embedding_model=$2,embedding=$3::vector WHERE id<>$1 AND scope_id=(SELECT scope_id FROM agent_memory_entry WHERE id=$1)", [freshId, embeddingModel(), JSON.stringify(Array.from({ length: 1024 }, (_, i) => i === 0 ? 1 : 0))]);
+    const secondId = await create("执行期间的又一个条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    const jobs = (await getPool().query("SELECT id,status FROM job WHERE payload->>'userId'=$1", [uid])).rows;
+    expect(jobs.filter(j => j.status === "running")).toHaveLength(1);
+    expect(jobs.filter(j => j.status === "queued")).toHaveLength(1);
+    const followup = (await getJob(jobs.find(j => j.status === "queued").id))!;
+    await getJobHandlerDef("memory_maintenance")!.run(followup.payload, followup);
+    const indexed = (await getPool().query("SELECT id,embedding_revision=revision AS current FROM agent_memory_entry WHERE id=ANY($1::text[])", [[freshId, secondId]])).rows;
+    expect(indexed).toHaveLength(2);
+    expect(indexed.every(e => e.current)).toBe(true);
+  });
+
+  it("无独立worker时提交后派发，延迟窗口内多次保存合并且后台能完成", async () => {
+    delete process.env.JOB_WORKER;
+    await create("本地保存条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    await create("本地追加条件");
+    await enqueueMemoryMaintenance(uid, pid);
+    const jobs = (await getPool().query("SELECT id FROM job WHERE payload->>'userId'=$1", [uid])).rows;
+    expect(jobs).toHaveLength(1);
+    expect((await waitForJob(jobs[0].id, 5000))?.status).toBe("done");
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it("worker停机仍同步回落缓存，后台保留高水位整理信号", async () => {
     for (let i = 0; i < 36; i++) await create(`后台条目${i}`);
     llm.mockResolvedValue({ value: [] });
     await enqueueMemoryMaintenance(uid, pid);
     expect(llm).not.toHaveBeenCalled();
-    const jobs = (await getPool().query("SELECT kind,payload,status FROM job WHERE payload->>'userId'=$1", [uid])).rows;
+    const jobs = (await getPool().query("SELECT id,kind,payload,status FROM job WHERE payload->>'userId'=$1", [uid])).rows;
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ kind: "memory_maintenance", status: "queued" });
-    await getJobHandlerDef("memory_maintenance")!.run(jobs[0].payload, {} as never);
+    expect((await readMemoryGroups(uid, pid)).reduce((n, g) => n + g.memberCount, 0)).toBe(24);
+    expect(jobs[0].payload.forceOrganize).toBe(true);
+    await getJobHandlerDef("memory_maintenance")!.run(jobs[0].payload, jobs[0]);
     expect(llm).toHaveBeenCalledTimes(1);
     expect((await readMemoryGroups(uid, pid)).reduce((n, group) => n + group.memberCount, 0)).toBe(24);
     const registry = readFileSync("lib/job/handlers.ts", "utf8");

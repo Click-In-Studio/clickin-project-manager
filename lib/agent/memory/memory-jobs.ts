@@ -1,17 +1,10 @@
 import { enqueueJob } from "@/lib/job/queue";
-import { memoryTransaction } from "./memory-access-db";
+import { scheduleMemoryMaintenance } from "./memory-maintenance-db";
 import { pendingMemorySummaries } from "./memory-summary-db";
 
-/** 保存路径只等待持久化入队；整理仍先于高水位淘汰执行。 */
-export async function enqueueMemoryMaintenance(userId: string, productionId: string | null): Promise<void> {
-  const revision = await memoryTransaction(userId, productionId, async (_c, s) => s.revision);
-  await enqueueJob({
-    kind: "memory_maintenance",
-    dedupeKey: `memory_maintenance:${userId}:${productionId ?? ""}:${revision}`,
-    payload: { userId, productionId },
-    detachedInline: true,
-    priority: -1,
-  });
+/** 同步回落缓存，只把嵌入、整理及摘要留给后台。 */
+export async function enqueueMemoryMaintenance(userId: string, productionId: string | null, touchOnly = false): Promise<void> {
+  await scheduleMemoryMaintenance(userId, productionId, touchOnly);
 }
 
 export async function enqueuePendingSummaries(userId: string, productionId: string | null, groupId?: string): Promise<void> {

@@ -13,6 +13,7 @@ import type { MemoryGroup } from "./memory-types";
 export async function indexMemoryEntries(
   userId: string,
   productionId: string | null,
+  ids?: string[],
 ): Promise<void> {
   if (embeddingMode() === "none") return;
   const rows = await memoryTransaction(
@@ -26,8 +27,8 @@ export async function indexMemoryEntries(
           body: string;
           revision: string;
         }>(
-          "SELECT id,brief,body,revision FROM agent_memory_entry WHERE scope_id=$1 AND deleted_at IS NULL AND (embedding IS NULL OR embedding_revision<>revision OR embedding_model IS DISTINCT FROM $2) ORDER BY updated_at,id LIMIT 10",
-          [s.id, embeddingModel()],
+          "SELECT id,brief,body,revision FROM agent_memory_entry WHERE scope_id=$1 AND deleted_at IS NULL AND (embedding IS NULL OR embedding_revision<>revision OR embedding_model IS DISTINCT FROM $2) AND ($3::text[] IS NULL OR id=ANY($3)) ORDER BY updated_at,id LIMIT 10",
+          [s.id, embeddingModel(), ids ?? null],
         )
       ).rows,
   );

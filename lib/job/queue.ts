@@ -107,6 +107,16 @@ async function kickInlineJob(row: Raw): Promise<void> {
   timer.unref();
 }
 
+/** 事务中已持久化的任务在提交后唤醒，避免持锁时再占一条池连接。 */
+export async function dispatchQueuedJob(id: string): Promise<void> {
+  if (jobWorkerEnabled()) {
+    await getPool().query(`SELECT pg_notify($1, $2)`, [JOB_NEW_CHANNEL, id]).catch(() => {});
+    return;
+  }
+  const result = await getPool().query<Raw>(`SELECT ${COLS} FROM job WHERE id=$1 AND status='queued'`, [id]);
+  if (result.rows[0]) void kickInlineJob(result.rows[0]).catch(err => console.error(`[job] detached inline job ${id} failed:`, err));
+}
+
 export async function enqueueJob(input: EnqueueInput): Promise<JobRow> {
   const pool = getPool();
   if (input.dedupeKey) {
