@@ -27,6 +27,7 @@ const image: NativeMediaCapability = {
 const deepseekImage: NativeMediaCapability = {
   ...image,
   maxBytes: 32 * 1024 * 1024,
+  // 原件合计 64 MiB 与完整 JSON（含 base64）48 MiB 是两种硬限制；inline 通常先碰后者。
   maxRequestBytes: 64 * 1024 * 1024,
   maxRequestBase64Chars: 48 * 1024 * 1024,
   maxCount: 600,
@@ -45,12 +46,14 @@ const pdf: NativeMediaCapability = {
   ...image,
   kind: "file",
   mimeTypes: ["application/pdf"],
+  maxCount: 8, // 本次只调整图片，非图片沿用既有数量预算。
   maxPages: 100,
   tokenEstimate: { minimum: 3000, perPage: 3000 },
 };
 const audio: NativeMediaCapability = {
   ...image,
   kind: "audio",
+  maxCount: 8,
   mimeTypes: [
     "audio/wav",
     "audio/mpeg",

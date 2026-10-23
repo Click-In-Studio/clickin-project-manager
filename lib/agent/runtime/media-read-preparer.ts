@@ -13,7 +13,8 @@ export function createMediaReadPreparer(input: {
   let tail = Promise.resolve();
   const reserved = new Map<string, MediaContent>();
   return {
-    // harness 已将同批结果收齐到 context；此后以正式请求中的媒体为准。
+    // harness 等同批工具全部完成后才准备下一次模型请求，此时 tail 已排空。
+    // 工具阶段摘要直接走 budgetedComplete，不会调用此入口；此后以正式 context 为准。
     requestStarted() { reserved.clear(); },
     prepare(media: MediaContent): Promise<boolean> {
       const next = tail.then(async () => {

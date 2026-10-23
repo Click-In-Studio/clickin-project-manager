@@ -17,7 +17,7 @@ export function mediaIdentity(part: MediaContent): string {
 /** 以本次执行模型重新估算图片；历史测量值不能把旧模型的 token 规则带过来。 */
 export function imageTokens(capability: NativeMediaCapability, width: number, height: number): number {
   const estimate = capability.tokenEstimate;
-  if (estimate.patchSize) return Math.min(estimate.maximum!, Math.max(estimate.minimum,
+  if (estimate.patchSize) return Math.min(estimate.maximum ?? Infinity, Math.max(estimate.minimum,
     Math.ceil(width / estimate.patchSize) * Math.ceil(height / estimate.patchSize))) + 2;
   return Math.min(estimate.maximum ?? Infinity, Math.max(estimate.minimum,
     Math.ceil(width * height / 1_000_000 * (estimate.perMegapixel ?? 0))));
