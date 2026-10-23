@@ -1,7 +1,7 @@
 import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 // 工具三层（#333 判据，#367 里一行代码的实现）：每轮送给模型的工具列表 =
 //   热层（按会话类型两张表） ∪ 温层（当前页面） ∪ 冷层召回命中（tool-catalog 中文 bigram）
-//   ∪ 依赖闭包（id 供给入口 / 知识节点由 knowledge 通道另送）
+//   ∪ 依赖闭包（id 供给入口；Markdown 方言常驻系统提示）
 //
 // 判据总纲（Skills 分层指南 §2）：热 = 按需机制覆盖不了的（范围锚点、id 供给、高频）；
 // 冷 = 能被页面/触发词覆盖的。分层是可见性与成本，**不是权限**（不变量 2）：工具端
@@ -38,7 +38,6 @@ const HOT_PRODUCTION = [
 
 const WIKI_FAMILY = [
   "production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_backlinks",
-  "production.wiki_dialect_ref",
   "production.wiki_propose_create", "production.wiki_propose_update", "production.wiki_propose_patch", "production.wiki_propose_delete",
   "production.wiki_propose_move", "production.wiki_propose_tag", "production.wiki_set_grant",
 ];
@@ -100,9 +99,9 @@ const CLOSURE: Record<string, string[]> = {
   "my.memory_resolve": ["my.memory_read"],
   "production.wiki_read": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_backlinks": ["production.wiki_tree", "production.wiki_search"],
-  "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
-  "production.wiki_propose_patch": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
-  "production.wiki_propose_update": ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"],
+  "production.wiki_propose_create": ["production.wiki_tree", "production.wiki_search", "production.wiki_read"],
+  "production.wiki_propose_patch": ["production.wiki_tree", "production.wiki_search", "production.wiki_read"],
+  "production.wiki_propose_update": ["production.wiki_tree", "production.wiki_search", "production.wiki_read"],
   "production.wiki_propose_delete": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_move": ["production.wiki_tree", "production.wiki_search"],
   "production.wiki_propose_tag": ["production.wiki_tree", "production.wiki_search"],

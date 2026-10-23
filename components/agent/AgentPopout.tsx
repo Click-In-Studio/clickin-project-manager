@@ -4,7 +4,7 @@ import { AttachmentMedia } from "./AttachmentMedia";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
-import Markdown from "@/components/ui/Markdown";
+import ChatMarkdown from "./ChatMarkdown";
 import {
   applyStreamLine,
   mergeRestoredQuestions,
@@ -1203,7 +1203,7 @@ export default function AgentPopout({
             return (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-zinc-100 px-3.5 py-2 text-sm">
-                  <Markdown content={refs.text} size="sm" />
+                  <ChatMarkdown key={activeKey} content={refs.text} streaming={!!b.streaming} productionId={parseSessionIdentity(activeKey ?? undefined)?.productionId} />
                   {refs.items.map((ref) => {
                     const attachment = knownAttachments.get(ref.id);
                     if (previousIds.has(ref.id)) return null;

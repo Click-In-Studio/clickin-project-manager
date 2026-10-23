@@ -7,7 +7,7 @@ who: 所有成员（项目会话需要专业档项目）
 tier: all
 platform: [desktop, mobile]
 related: [ai/assistant/what-it-is, ai/skills/skills, ai/automation/schedules]
-updated: 2026-10-22
+updated: 2026-10-23
 ---
 
 ## 这是什么
@@ -21,6 +21,12 @@ updated: 2026-10-22
 ![AI 对话内容：宽窗口放在右侧面板，手机占满屏幕](/manual/ai/popout.png)
 
 ## 怎么操作
+
+### 阅读回复
+
+回复支持标题、列表、表格、分栏和提示框，与文档库的排版一致。项目内容的引用会显示实际名称，点引用即可打开；无权查看或内容已删除时会显示对应提示。
+
+回复会边生成边排版。代码示例在生成中先显示文字，完成后再按代码排版；停止生成时也会显示已经收到的完整内容。
 
 ### 忙碌时排队
 

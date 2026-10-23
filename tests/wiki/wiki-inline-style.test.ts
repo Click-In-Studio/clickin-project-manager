@@ -301,7 +301,7 @@ describe("接线（mock 遮不住的那一层）", () => {
   });
   it("只读渲染挂了 remarkInlineStyle、没有 rehype-raw", () => {
     const src = readFileSync("components/wiki/WikiMarkdown.tsx", "utf8");
-    expect(src).toMatch(/remarkPlugins=\{\[.*remarkInlineStyle\]\}/);
+    expect(src).toMatch(/remarkPlugins=\{\[.*remarkInlineStyle.*\]\}/);
     expect(src).not.toMatch(/from ["']rehype-raw["']/);
   });
   it("globals.css 对每个枚举值都有变量与 data-fg / data-bg 规则（hex 只在这一处）", () => {

@@ -188,8 +188,6 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
   { name: "production.wiki_set_grant", family: "production.wiki", scope: "production", oneliner: "修改文档分享设置（需人工确认）",
     triggers: ["分享给", "谁能看", "文档权限", "可见范围"], en: "wiki share grant visibility",
     examples: ["把这篇文档分享给灯光部门", "让某某也能看这篇文档", "这篇文档谁能看"] },
-  { name: "production.wiki_dialect_ref", family: "production.wiki", scope: "production", oneliner: "获取文档正文的私有 Markdown 方言说明",
-    triggers: [], en: "wiki markdown dialect syntax reference" },
   // ── 构作族：场次 + 角色。写工具横跨多把钥匙，权限查询工具是族内的"第一步"
   { name: "production.dramaturgy_permissions", family: "production.dramaturgy", scope: "production", oneliner: "查询我在构作域（场次/角色）能改什么（三态清单）",
     triggers: ["构作权限", "能改哪些", "我能改", "有没有权限改", "场次权限", "角色权限"], en: "my dramaturgy scene character write permissions",
@@ -289,14 +287,6 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
 /** 命中判据与 lib/agent/memory/trigger.ts 对齐（纯词法单路）。 */
 export const TOOL_RECALL_THRESHOLD = 0.72;
 export const TOOL_RECALL_MAX = 3;
-
-/** 需要方言说明的正文读写工具（召回命中时闭包携带方言，#333 T1 冷层通道）。 */
-export const DIALECT_CLOSURE_TOOLS = new Set([
-  "production.wiki_read",
-  "production.wiki_propose_create",
-  "production.wiki_propose_update",
-  "production.wiki_propose_patch",
-]);
 
 function lexicalScore(phrase: string, promptTokens: Set<string>): number {
   const toks = bigramTokens(phrase);

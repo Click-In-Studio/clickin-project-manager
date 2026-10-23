@@ -7,7 +7,7 @@
 // 覆写成 chip；标签经 mention-resolve 逐观看者刷新（§4.1：正文只存 id，
 // label 是编辑期快照，渲染不信任它）。
 
-import { Children, cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
+import { Children, cloneElement, isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -27,9 +27,13 @@ import {
 import { normalizeWikiDialect } from "@/lib/wiki/dialect-migrate";
 import { embedMediaKind } from "@/lib/asset/embed-media";
 import { parseCalloutMarker } from "@/lib/editor/tiptap-callout";
+import MarkdownCodeBlock from "./MarkdownCodeBlock";
+import { remarkCodeFences } from "@/lib/wiki/markdown-stream";
+import { parseMarkdownTree, type MarkdownNode } from "@/lib/editor/table-dialect";
 import { MENTION_CHIP_CLASS, MENTION_SENTINEL, mentionChipView } from "@/lib/editor/mention-display";
 
 type Resolved = { label: string | null; url: string | null; detail: string | null };
+const EMPTY_RESOLVED = new Map<string, Resolved>();
 
 /** displayMode 必须在键里（#689）：同一个 block 以 `?as=scene` 与 `?as=page` 两种
  *  形态出现在同一篇正文里，标签与悬浮都不一样，漏了它后者会覆盖前者。 */
@@ -42,22 +46,28 @@ function attrsKey(a: ContentMentionAttrs): string {
 // 渲染时按标题解析：命中可见文档 → 真链 chip；未命中 → 幻影 chip（Obsidian 语义）。
 // 存储不变（正史仍是存 id 的 /__cm__/wiki/<id> 形态，§4-3 拍板不动摇）。
 
-const RAW_CODE_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
 const RAW_WIKILINK_RE = /\[\[([^\[\]\n|#]+)\]\]/g;
 const RAW_WIKILINK_ESCAPED_RE = /\\\[\\\[([^\[\]\\\n|#]+)\\\]\\\]/g;
 const WT_HREF_PREFIX = "/__wt__";
 
 /** 导出仅供单测：占位符嵌套曾把代码块吞掉，需要回归护栏 */
 export function preprocessRawWikilinks(md: string): { text: string; titles: string[] } {
-  // ⚠️ 顺序要紧：normalizeWikiDialect 必须在**本函数的占位保护之前**跑。
-  // 它内部有自己一套同款 NUL 占位；若先在这里占位再调它，它的 restoreCode 会拿
-  // 自己的空 parts 去"还原"本函数的占位符，把每段代码块直接替换成空串——正文里
-  // 的代码会在渲染时被整个吞掉。
-  // 历史版本正文（wiki_revision 不迁移）与回滚场景的 v1 形态兼容。
-  const normalized = normalizeTableHtml(normalizeWikiDialect(md));
-  // 码内的 [[]] 是语法示例，换占位保护（MindWeave protectCodeSpans 同款）
   const parts: string[] = [];
-  let t = normalized.replace(RAW_CODE_RE, m => { parts.push(m); return `\u0000C${parts.length - 1}\u0000`; });
+  const ranges: Array<{ start: number; end: number }> = [];
+  const protect = (node: MarkdownNode) => {
+    if ((node.type === "code" || node.type === "inlineCode") && node.position) {
+      ranges.push({ start: node.position.start.offset!, end: node.position.end.offset! });
+    } else node.children?.forEach(protect);
+  };
+  if (/[`~]/.test(md)) protect(parseMarkdownTree(md));
+  let offset = 0, protectedSource = "";
+  for (const range of ranges) {
+    protectedSource += md.slice(offset, range.start) + `\u0000WIKI_CODE_${parts.length}\u0000`;
+    parts.push(md.slice(range.start, range.end));
+    offset = range.end;
+  }
+  protectedSource += md.slice(offset);
+  let t = normalizeTableHtml(normalizeWikiDialect(protectedSource));
   const titles = new Set<string>();
   const sub = (_m: string, title: string) => {
     const tt = title.trim();
@@ -67,7 +77,7 @@ export function preprocessRawWikilinks(md: string): { text: string; titles: stri
   };
   t = t.replace(RAW_WIKILINK_ESCAPED_RE, sub);
   t = t.replace(RAW_WIKILINK_RE, sub);
-  t = t.replace(/\u0000C(\d+)\u0000/g, (_m, i) => parts[Number(i)] ?? "");
+  t = t.replace(/\u0000WIKI_CODE_(\d+)\u0000/g, (_m, i) => parts[Number(i)] ?? "");
   return { text: t, titles: [...titles] };
 }
 
@@ -196,29 +206,6 @@ function MemberChip({ name, members }: { name: string; members: MentionMember[] 
   );
 }
 
-// ── 代码高亮（shiki 懒加载，MindWeave 同款思路；亮色主题贴纸面 UI 与打印）────
-
-const shikiCache = new Map<string, string>();
-
-function CodeBlock({ code, lang }: { code: string; lang?: string }) {
-  const cacheKey = `${lang ?? ""} ${code}`;
-  const [html, setHtml] = useState<string | null>(() => shikiCache.get(cacheKey) ?? null);
-  useEffect(() => {
-    if (!lang || shikiCache.has(cacheKey)) return;
-    let alive = true;
-    import("shiki")
-      .then(({ codeToHtml }) => codeToHtml(code, { lang, theme: "github-light" }))
-      .then(h => { shikiCache.set(cacheKey, h); if (alive) setHtml(h); })
-      .catch(() => { /* 未知语言/加载失败 → 保持素排版 */ });
-    return () => { alive = false; };
-  }, [cacheKey, code, lang]);
-
-  if (html) {
-    return <div className="wiki-code [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto text-[13px]" dangerouslySetInnerHTML={{ __html: html }} />;
-  }
-  return <pre className="rounded-lg bg-zinc-50 p-3 overflow-x-auto text-[13px]"><code>{code}</code></pre>;
-}
-
 export type MentionMember = { userId: string; name: string; avatarUrl?: string | null };
 
 /** 块级语义在 inline 变体里降级成纯内容（不吃字）：`<div>` 落进 `<span>` 是非法
@@ -229,12 +216,17 @@ const BLOCK_ELEMENTS = [
   "table", "thead", "tbody", "tr", "th", "td", "colgroup", "col",
 ];
 
-export default function WikiMarkdown({
+const FragmentWrapper = ({ children }: { children?: ReactNode; className?: string }) => <>{children}</>;
+const EMPTY_MEMBERS: MentionMember[] = [];
+
+export default memo(function WikiMarkdown({
   content,
   productionId,
   className = "",
   inline = false,
-  members = [],
+  fragment = false,
+  streaming = false,
+  members = EMPTY_MEMBERS,
   versionId,
   wikiRouteBase,
 }: {
@@ -246,6 +238,10 @@ export default function WikiMarkdown({
   /** 行内变体：输出 `<span>`，块级语义降级为纯内容。用于表格单元格、`<dd>`、
    *  卡片副标题这类只能放行内元素的宿主（原 SmartText 的全部用法）。 */
   inline?: boolean;
+  /** 分块宿主统一提供正文外壳，块本身不再套一层 prose。 */
+  fragment?: boolean;
+  /** 末尾未闭合代码围栏只显示纯文字；结束后按正常 Markdown 渲染。 */
+  streaming?: boolean;
   /** @提及的成员表：命中则 hover 显示头像卡 */
   members?: MentionMember[];
   /** 解析上下文版本：正文里没写 ?v= 的剧本域引用按此版本解析 */
@@ -283,45 +279,51 @@ export default function WikiMarkdown({
   // 收集正文中全部 content mention，批量 resolve 一次
   const mentionAttrs = useMemo(() => {
     const seen = new Map<string, ContentMentionAttrs>();
-    for (const m of processed.matchAll(/\]\((\/__cm__[^)]+)\)/g)) {
-      const attrs = decodeMentionHref(m[1]);
-      if (attrs) seen.set(attrsKey(attrs), attrs);
-    }
+    const visit = (node: MarkdownNode) => {
+      if (node.type === "link" && typeof node.url === "string") {
+        const attrs = decodeMentionHref(node.url);
+        if (attrs) seen.set(attrsKey(attrs), attrs);
+      }
+      node.children?.forEach(visit);
+    };
+    if (processed.includes(CM_HREF_PREFIX)) visit(parseMarkdownTree(processed));
     return [...seen.values()];
   }, [processed]);
 
-  const [resolved, setResolved] = useState<Map<string, Resolved>>(new Map());
+  const [resolution, setResolved] = useState<{ context: string; values: Map<string, Resolved> }>({ context: "", values: new Map() });
+  const resolveContext = `${productionId ?? ""}:${versionId ?? ""}`;
+  const resolved = resolution.context === resolveContext ? resolution.values : EMPTY_RESOLVED;
   const [resolveFailed, setResolveFailed] = useState(false);
-  const attemptedRef = useRef("");
+  const mentionSignature = JSON.stringify(mentionAttrs);
 
   useEffect(() => {
-    if (mentionAttrs.length === 0) return;
+    const mentions = JSON.parse(mentionSignature) as ContentMentionAttrs[];
+    if (mentions.length === 0) return;
     if (!productionId) { setResolveFailed(true); return; } // 无上下文：chip 落「无法解析」态
-    const sig = mentionAttrs.map(attrsKey).join("|");
-    if (attemptedRef.current === sig) return;
-    attemptedRef.current = sig;
     setResolveFailed(false);
+    let alive = true;
     (async () => {
       try {
         const res = await fetch(`${BASE_PATH}/api/production/${productionId}/mention-resolve`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mentions: mentionAttrs, versionId }),
+          body: JSON.stringify({ mentions, versionId }),
         });
-        if (!res.ok) { setResolveFailed(true); return; }
+        if (!res.ok) { if (alive) setResolveFailed(true); return; }
         const data = await res.json() as { labels: (string | null)[]; urls: (string | null)[]; details?: (string | null)[] };
         const next = new Map<string, Resolved>();
-        mentionAttrs.forEach((a, i) => next.set(attrsKey(a), {
+        mentions.forEach((a, i) => next.set(attrsKey(a), {
           label: data.labels[i], url: data.urls[i], detail: data.details?.[i] ?? null,
         }));
-        setResolved(next);
-      } catch { setResolveFailed(true); }
+        if (alive) setResolved({ context: resolveContext, values: next });
+      } catch { if (alive) setResolveFailed(true); }
     })();
-  }, [mentionAttrs, productionId, versionId]);
+    return () => { alive = false; };
+  }, [mentionSignature, productionId, resolveContext, versionId]);
 
   const wikiBase = wikiRouteBase ?? `/production/${productionId}/wiki`;
 
-  const Wrapper = inline ? "span" : "div";
+  const Wrapper = fragment ? FragmentWrapper : inline ? "span" : "div";
   const wrapperClass = inline
     ? `text-sm break-words ${className}`
     : `prose prose-zinc max-w-none ${className}`;
@@ -333,9 +335,9 @@ export default function WikiMarkdown({
         // remarkInlineStyle：字色 / 底色 / 下划线的 HTML 子集方言（#524）——只配对
         // 三种 canonical 标签，不挂 rehype-raw，其余 HTML 照旧显示为文字
         // REMARK_CJK_PLUGINS：紧贴中文的加粗 / 删除线也算定界符，与编辑器同源（#674）
-        remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkTables, remarkBreaks, remarkColumns, remarkInlineStyle]}
+        remarkPlugins={[remarkGfm, ...REMARK_CJK_PLUGINS, remarkTables, remarkBreaks, remarkColumns, remarkInlineStyle, remarkCodeFences]}
         {...(inline ? { disallowedElements: BLOCK_ELEMENTS, unwrapDisallowed: true } : {})}
-        components={{
+        components={useMemo(() => ({
           table: ({ children, className, style }) => <div className="wiki-table-scroll"><table className={className} style={style}>{children}</table></div>,
           ...(inline ? { p: ({ children }: { children?: ReactNode }) => <>{children}</> } : {}),
           blockquote: ({ children }) => {
@@ -367,7 +369,7 @@ export default function WikiMarkdown({
             const cls: string = child?.props?.className ?? "";
             const lang = /language-([\w+-]+)/.exec(cls)?.[1];
             const code = String(child?.props?.children ?? "").replace(/\n$/, "");
-            return <CodeBlock code={code} lang={lang} />;
+            return <MarkdownCodeBlock code={code} lang={lang} pending={streaming && !!child?.props?.["data-open-fence"]} />;
           },
           a: ({ href, children }) => {
             const h = href ?? "";
@@ -420,6 +422,10 @@ export default function WikiMarkdown({
                     </span>
                   );
                 }
+                if (r.label === null || r.label === MENTION_SENTINEL.noAccess || r.label === MENTION_SENTINEL.unknownVersion) {
+                  const view = mentionChipView("wiki", r.label, r.detail, r.label === null);
+                  return <span title={view.title ?? undefined} className={MENTION_CHIP_CLASS.muted}>{view.text}</span>;
+                }
                 const deleted = r.label === MENTION_SENTINEL.deleted;
                 if (deleted) {
                   return (
@@ -465,10 +471,10 @@ export default function WikiMarkdown({
               </a>
             );
           },
-        }}
+        }), [inline, members, productionId, resolveFailed, resolved, streaming, titleMap, wikiBase, wikiRouteBase])}
       >
         {processed}
       </ReactMarkdown>
     </Wrapper>
   );
-}
+});

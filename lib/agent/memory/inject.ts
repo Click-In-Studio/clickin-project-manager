@@ -12,10 +12,8 @@ import { readMemoryGroups } from "./memory-group-db";
 import { searchMemoryGroups } from "./memory-search-db";
 import { MEMORY_GUIDANCE, formatMemoryGroup } from "./memory-prompt";
 import { MEMORY_INJECTION_MAX } from "./memory-types";
-import { toolRecall, DIALECT_CLOSURE_TOOLS } from "@/lib/agent/tools/tool-catalog";
-import { WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent/tools/wiki-link-syntax";
+import { toolRecall } from "@/lib/agent/tools/tool-catalog";
 import { stripUiContext } from "@/lib/agent/agent-ui-context";
-import { pageLabelFor } from "@/lib/agent/agent-page-context";
 
 // 界面上下文的常驻规则（静态 → 不影响 prompt caching）。载荷本身随每条用户
 // 消息走（见 lib/agent/agent-ui-context.ts 的信封），这里只常驻「怎么对待它」这条
@@ -27,28 +25,6 @@ const UI_CONTEXT_RULE = `## 界面上下文说明
 // 各段预算（字符）
 const USER_CONTEXT_MAX = 1000;
 const PRODUCTION_CONTEXT_MAX = 1000;
-// ── 温层知识节点（#333 T1）：方言说明跟页注入 ──────────────────────────────
-// 载荷从 prompt 开头的 <clickin-ui-context> 信封读页面（客户端每条消息都附带
-// 当时的页面快照，同页逐条稳定 → knowledge 段随 appendSystemContext 走
-// prompt cache，只有换页才重算——#333 不变量 3 的语义）。信封可被用户摘除，
-// 摘了就退回冷层通道（召回闭包）与显式通道（dialect_ref），不是安全问题。
-// 从 PAGE_LABELS 单源派生（AI review #366-1：硬编码字符串会在页面改名时
-// 静默漂移——派生后改名即编译期/测试期可见）
-const WIKI_FOCUS_LABELS = [pageLabelFor("prod:wiki"), pageLabelFor("prod:dramaturgy-inspiration")]
-  .filter((l): l is string => l !== null);
-const UI_PAGE_RE = /^<clickin-ui-context>[\s\S]{0,600}?用户此刻位于「(.{1,40}?)」页面/;
-const UI_DOC_RE = /^<clickin-ui-context>[\s\S]{0,800}?正打开文档/;
-
-const DIALECT_KNOWLEDGE =
-  `## 文档库正文的私有 Markdown 方言（编辑/生成文档正文时必须遵守）\n${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`;
-
-function isWikiFocused(prompt: string | undefined): boolean {
-  if (!prompt) return false;
-  const page = UI_PAGE_RE.exec(prompt)?.[1];
-  if (page && WIKI_FOCUS_LABELS.includes(page)) return true;
-  return UI_DOC_RE.test(prompt); // 正打开某篇文档 = 一定在文档语境里
-}
-
 // 用户档案 5min 缓存（DB 查询，相对静态；记忆每次现读）
 const userContextCache = new Map<string, { md: string | null; ts: number }>();
 const USER_CONTEXT_TTL_MS = 300_000;
@@ -105,14 +81,6 @@ export interface InjectContextPayload {
    * prompt cache）；本字段逐轮变化，插件必须走 prependContext——混进
    * system prompt 会把缓存打穿，每轮全量重付 token。 */
   recall: string | null;
-  /** 跟页知识节点（#333 T1 温层）：当前只有文档方言说明。同页逐字稳定
-   * （信封逐消息附带同一页面快照）→ 插件放 appendSystemContext 吃缓存，
-   * 换页才变。 */
-  knowledge: string | null;
-  /** 本轮方言说明是否已经某通道送达（温层 knowledge 或冷层召回闭包）。
-   * 插件据此覆写 wiki_dialect_ref 的 _dialect_injected（幂等标志），
-   * 已送达时该工具返回"已在语境中"而非再付一遍全文。 */
-  dialectDelivered: boolean;
 }
 
 export async function buildInjectContext(
@@ -177,12 +145,6 @@ export async function buildInjectContext(
     }
   }
 
-  // 温层知识节点：用户在文档库/灵感文档页面（或正开着一篇文档）→ 方言说明
-  // 随 knowledge 段注入（appendSystemContext，同页吃缓存）。
-  const wikiFocused = isWikiFocused(prompt);
-  const knowledge = wikiFocused ? DIALECT_KNOWLEDGE : null;
-  let dialectDelivered = wikiFocused;
-
   // 工具召回独立组装；记忆的联合检索已在上面的分域记忆段完成。
   let recall: string | null = null;
   if (prompt?.trim()) {
@@ -201,15 +163,9 @@ export async function buildInjectContext(
       recallParts.push(
         `以下工具与本条消息可能相关，本轮可直接调用（按需，不必全用）：\n${toolLines.join("\n")}`,
       );
-      // 冷层闭包（#333 T1）：命中正文读写工具而温层没送方言 → 说明书随召回
-      // 一起出，模型不用再跑一轮 dialect_ref。
-      if (!dialectDelivered && toolHits.some((t) => DIALECT_CLOSURE_TOOLS.has(t.name))) {
-        recallParts.push(DIALECT_KNOWLEDGE);
-        dialectDelivered = true;
-      }
     }
     if (recallParts.length > 0) recall = recallParts.join("\n\n");
   }
 
-  return { instructions, memory: sections.join("\n\n"), recall, knowledge, dialectDelivered };
+  return { instructions, memory: sections.join("\n\n"), recall };
 }
