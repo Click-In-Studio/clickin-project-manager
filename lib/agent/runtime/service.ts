@@ -441,7 +441,7 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
 
     if (input.systemOnly && !(await (await import("./subagent-events-db")).appendSubagentEvents(storage,sessionId,runId))) return;
 
-    // 注入链：与插件 before_prompt_build 同一份后端组装（instructions/memory/knowledge
+    // 注入链：与插件 before_prompt_build 同一份后端组装（instructions/memory
     // 进 system prompt；recall 逐轮临时插入，不落 transcript）
     // 工具召回（tool-index：词法+向量）先算——提示块与工具面共用同一份命中。
     // 恢复模式没有本轮 prompt，用 transcript 最后一条用户消息做召回输入。
@@ -462,7 +462,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
 
     const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
     const recall = recallBlock(inject.recall);
-    const dialectDelivered = inject.dialectDelivered;
     const attachmentLifecycle = await buildAttachmentLifecycleBlock({ sessionId, userId, productionId });
 
     // 工具三层（#333）：热 ∪ 温(页面) ∪ 召回命中 ∪ 闭包。
@@ -654,14 +653,6 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       if (tool.selfScribe) return undefined;
       return approvalGate(g);
     });
-
-    // 方言幂等：本轮已送达方言说明时，dialect_ref 只回指引不重付全文
-    if (dialectDelivered) {
-      harness.on("tool_result", (event) => {
-        if (bareName(event.toolName) !== "production-wiki_dialect_ref") return undefined;
-        return { content: [{ type: "text", text: "方言说明已在当前语境中（见 <clickin-knowledge> 块或本轮召回内容），无需重复获取，直接按其文法写作即可。" }] };
-      });
-    }
 
     // 事件 → 前端行协议 → agent_event/NOTIFY；顺带记账与 episodic 抽取
     let terminalLine: Extract<StreamLine, { type: "final" | "aborted" | "error" }> | null = null;

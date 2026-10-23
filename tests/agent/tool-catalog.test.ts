@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TOOL_MCP_NAMES, RUNTIME_ONLY_TOOLS } from "@/lib/agent/runtime/tools";
-import { TOOL_CATALOG, TOOL_FAMILIES, toolRecall, TOOL_RECALL_MAX, DIALECT_CLOSURE_TOOLS } from "@/lib/agent/tools/tool-catalog";
+import { TOOL_CATALOG, TOOL_FAMILIES, toolRecall, TOOL_RECALL_MAX } from "@/lib/agent/tools/tool-catalog";
 
 // #333 P2 工具目录：中文发现面（CJK bigram 召回）+ 与 MCP 注册清单双向防漂移。
 
@@ -16,9 +16,8 @@ describe("tool-catalog 防漂移", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("方言闭包集合里的名字都在目录里", () => {
-    const names = new Set(TOOL_CATALOG.map((e) => e.name));
-    for (const n of DIALECT_CLOSURE_TOOLS) expect(names.has(n), n).toBe(true);
+  it("统一文法常驻后不再注册文档方言获取工具", () => {
+    expect(TOOL_CATALOG.some(entry => entry.name === "production.wiki_dialect_ref")).toBe(false);
   });
 });
 
@@ -57,7 +56,7 @@ describe("toolRecall：中文词法召回", () => {
     expect(hits.length).toBeLessThanOrEqual(TOOL_RECALL_MAX);
   });
 
-  it("空触发词条目（dialect_ref）永不参与召回", () => {
+  it("已退役的文档方言工具不参与召回", () => {
     const hits = toolRecall("文档的 markdown 方言语法说明", { hasProduction: true });
     expect(hits.map((h) => h.name)).not.toContain("production.wiki_dialect_ref");
   });

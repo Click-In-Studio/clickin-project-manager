@@ -7,7 +7,6 @@ import type { Bubble } from "@/lib/agent/chat/stream-reducer";
 
 const router = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => router }));
-vi.mock("@/components/ui/Markdown", () => ({ default: ({ content }: { content: string }) => <p>{content}</p> }));
 vi.mock("@/components/agent/AgentModelPicker", () => ({ default: () => null }));
 vi.mock("@/components/agent/VoiceRecordButton", () => ({ default: () => null }));
 // 本文件验证分页合并的数据语义；真实虚拟布局与锚点另有浏览器验收。

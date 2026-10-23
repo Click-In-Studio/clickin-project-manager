@@ -25,17 +25,17 @@ describe("tool tiers", () => {
     expect(r.active.some((n) => n.startsWith("production.wiki_"))).toBe(false);
   });
 
-  it("文档库页面：温层带出整个 wiki 族（含 dialect_ref 与 set_grant 闭包的 id 供给）", () => {
+  it("文档库页面：温层带出整个 wiki 族（含 set_grant 闭包的 id 供给）", () => {
     const r = tieredToolNames({ hasProduction: true, pageKey: "prod:wiki", prompt: "你好", available: ALL });
     expect(r.warm).toContain("production.wiki_propose_update");
-    expect(r.active).toContain("production.wiki_dialect_ref");
+    expect(r.active).not.toContain("production.wiki_dialect_ref");
     expect(r.active).toContain("production.wiki_set_grant");
   });
 
-  it("非文档页面但中文消息命中 wiki 工具 → 召回带出它及闭包（tree/search/read/dialect_ref）", () => {
+  it("非文档页面但中文消息命中 wiki 工具 → 召回带出它及闭包（tree/search/read）", () => {
     const r = tieredToolNames({ hasProduction: true, pageKey: "prod:home", prompt: "帮我修改文档，把会议结论补充进去", available: ALL });
     expect(r.recalled).toContain("production.wiki_propose_update");
-    for (const n of ["production.wiki_tree", "production.wiki_search", "production.wiki_read", "production.wiki_dialect_ref"]) {
+    for (const n of ["production.wiki_tree", "production.wiki_search", "production.wiki_read"]) {
       expect(r.active, n).toContain(n);
     }
   });

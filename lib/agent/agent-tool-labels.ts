@@ -36,7 +36,6 @@ export const TOOL_LABELS: Record<string, string> = {
   "production-wiki_backlinks": "查询文档链接关系",
   "production-wiki_read": "阅读文档",
   "production-wiki_search": "搜索文档",
-  "production-wiki_dialect_ref": "获取文档语法说明",
   "production-wiki_propose_create": "提议新建文档",
   "production-wiki_propose_patch": "提议局部修改文档",
   "production-wiki_propose_update": "提议修改文档",

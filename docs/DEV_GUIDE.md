@@ -93,7 +93,7 @@
 | `mmp/` | MMP 多模态感知服务（自建 broker）的客户端、`ocr.structured` 封装、GPU 用量记账（#453 / #618）；只在服务端用 | — | `agent/` |
 | `help/` | 手册加载器、frontmatter、搜索索引 / 打分、bug 报告、更新日志 | 帮助中心顶栏、左树、正文渲染、搜索、BugReportModal | `help/` |
 | `admin/` | — | 13 个 `Admin*Client` + AdminActivationGate、Danger/Migration 段、BulkInvite / TransferOwner / ProductionPlan 卡片、InviteModal | `perm/` `ops/` |
-| `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput Markdown MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
+| `ui/` | — | 通用原语：Badge ChevronIcon DropdownPicker DurationInput MarkdownEditor OverflowSafeSelect PageHeader PageSkeleton SmartText TreePickerModal AdminModal（通用弹窗，名字是历史）`my-pages.module.css` | `platform/` |
 | `shell/` | — | 应用外壳：AppShell（子件与纯函数在 `app-shell/` 族目录）ProductionTopMenu SearchBar ManualSaveNotice WatermarkOverlay `watermark-tile` | `platform/` |
 | 根 | 纯基建白名单：`pg` `r2` `server-cache` `tz` `money` `duration` `lex-order` `z-index` `base-path` `server-url` `request-json` `sse-keepalive` `nav-pending` `search-db` | 不放文件 | `platform/` |
 

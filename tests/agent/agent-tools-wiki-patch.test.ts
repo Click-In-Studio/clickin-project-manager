@@ -64,7 +64,7 @@ describe("确定性局部修改", () => {
     expect(def.unattended).toBe("deny");
     expect(readFileSync("lib/agent/runtime/service.ts", "utf8")).toContain('bare === "production-wiki_propose_patch"');
     const tier = tieredToolNames({ hasProduction: true, pageKey: "prod:home", prompt: null, recalled: [def.mcpName], available: DEFS.map(d => d.mcpName) });
-    expect(tier.active).toEqual(expect.arrayContaining(["production.wiki_read", "production.wiki_search", "production.wiki_dialect_ref"]));
+    expect(tier.active).toEqual(expect.arrayContaining(["production.wiki_read", "production.wiki_search"]));
   });
 });
 

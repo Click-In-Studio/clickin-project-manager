@@ -18,7 +18,7 @@ import { SUBAGENT_TOOL_NAMES } from "./subagent-types";
 import { Type, type TSchema } from "typebox";
 import type { AgentToolResult } from "../../../vendor/openclaw/packages/agent-core/src/types";
 import { INSTRUCTIONS_MAX_LEN } from "@/lib/agent/agent-instructions";
-import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ, WIKI_LINK_SYNTAX_NOTE, WIKI_DIALECT_NOTE } from "@/lib/agent/tools/wiki-link-syntax";
+import { WIKI_DIALECT_POINTER_WRITE, WIKI_DIALECT_POINTER_READ } from "@/lib/agent/tools/wiki-link-syntax";
 import { toolLabel } from "@/lib/agent/agent-tool-labels";
 import type { StreamLine, QuestionItem } from "@/lib/agent/chat/stream-reducer";
 import type { RuntimeTool } from "./resume";
@@ -344,13 +344,6 @@ export const DEFS: ToolDefinition[] = [
       const { query, ...options } = args;
       return (await import("@/lib/agent/tools/wiki-tools")).wikiSearch(ctx.userId, ctx.productionId, String(query), options);
     },
-  },
-  {
-    mcpName: "production.wiki_dialect_ref",
-    description: "获取文档库正文的私有 Markdown 方言完整说明（链接/嵌入/布局/锚点文法）（EN: wiki markdown dialect syntax reference）。写作或改写文档正文前，语境中没有方言说明时必须先调用本工具。",
-    parameters: NONE, readOnly: true,
-    // 幂等标志（方言已在语境中）由 service 的 tool_result 钩子按本轮送达结论改写结果
-    execute: async () => `${WIKI_LINK_SYNTAX_NOTE}\n\n${WIKI_DIALECT_NOTE}`,
   },
   {
     mcpName: "production.wiki_propose_create",
