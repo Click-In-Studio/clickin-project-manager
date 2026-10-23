@@ -67,6 +67,25 @@ function expectCompleteToolBatches(messages: WireMessage[]) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("#1050 工具媒体的真实 SDK 请求顺序", () => {
+  it("#1052 十三个图片工具在同一次实际序列化请求中提供全部原图", async () => {
+    const model = resolveModel("deepseek-flash");
+    const pictures = Array.from({ length: 13 }, (_, i) => media("image", i));
+    const payload = await capture(model, batch(model, pictures.map(picture => [picture])));
+    expectCompleteToolBatches(payload.messages!);
+    for (const picture of pictures) expect(JSON.stringify(payload)).toContain(`data:${picture.mimeType};base64,${picture.data}`);
+    expect(payload.messages!.filter(message => message.role === "user")).toHaveLength(1);
+  });
+
+  it("#1052 发送边界校验 SDK 序列化后的完整体积，超限时不联网", async () => {
+    const model = { ...resolveModel("deepseek-flash"), maxRequestBytes: 100 };
+    const fetch = vi.fn(() => { throw new Error("不得联网"); });
+    vi.stubGlobal("fetch", fetch);
+    const reply = await llmRuntime().completeSimple(model, { messages: batch(model, [[media()]]) }, { apiKey: "fixture-key" });
+    expect(reply.stopReason).toBe("error");
+    expect(reply.errorMessage).toContain("完整请求体超过");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each(["deepseek-flash", "resonance"] as const)("%s：四个图片工具的响应连续，图片原件完整", async (key) => {
     const model = resolveModel(key);
     const pictures = Array.from({ length: 4 }, (_, i) => media("image", i));

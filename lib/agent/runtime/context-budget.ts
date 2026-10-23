@@ -5,7 +5,7 @@ import type {
 } from "../../../vendor/openclaw/packages/llm-core/src/types";
 import type { CompactionSettings } from "../../../vendor/openclaw/packages/agent-core/src/harness/compaction/compaction";
 import { normalOutputTokens } from "./config";
-import { mediaBudget, requestMedia } from "./media-budget";
+import { imageTokens, mediaBudget, nativeCapability, requestMedia } from "./media-budget";
 
 export const CONTEXT_PRESSURE_RATIO = 0.8;
 export function estimateTextTokens(text: string): number {
@@ -45,7 +45,9 @@ export function estimateRequestBudget(
           part.budget.estimatedTokens < 0
         )
           throw new Error("媒体缺少已测量预算，不能按文件名估算后请求");
-        mediaTokens += part.budget.estimatedTokens;
+        const capability = part.type === "image" ? nativeCapability(model, part.mimeType, "image") : undefined;
+        mediaTokens += capability && part.budget.width && part.budget.height
+          ? imageTokens(capability, part.budget.width, part.budget.height) : part.budget.estimatedTokens;
         mediaCount++;
         return { type: part.type, mimeType: part.mimeType };
       }),
@@ -70,6 +72,10 @@ export function estimateRequestBudget(
     effectiveContextWindow - outputReserveTokens,
   );
   const media = mediaBudget(model, requestMedia(context.messages));
+  // 原件 base64 与文字、工具定义合计；JSON 元数据也计入，发送边界再检查真实序列化体积。
+  const estimatedRequestBytes = Buffer.byteLength(JSON.stringify({ systemPrompt: context.systemPrompt, tools: context.tools, messages }))
+    + media.base64Chars;
+  const requestFits = model.maxRequestBytes === undefined || estimatedRequestBytes <= model.maxRequestBytes;
   const textFits = estimatedInputTokens + outputReserveTokens <= effectiveContextWindow;
   return {
     systemTokens,
@@ -87,7 +93,9 @@ export function estimateRequestBudget(
     textFits,
     mediaFits: media.fits,
     mediaReasons: media.reasons,
-    fits: textFits && media.fits,
+    estimatedRequestBytes,
+    requestFits,
+    fits: textFits && media.fits && requestFits,
     basis:
       calibration > 1
         ? "文本字符及实测模态预算；本 run 已发送请求的 provider input usage 校准"

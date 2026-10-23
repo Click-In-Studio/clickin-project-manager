@@ -1,4 +1,3 @@
-import { estimateRequestBudget } from "./context-budget";
 import { assertModelSelection, sessionModelSelection, runModelSelection } from "./model-settings-db";
 import { resolveModel, modelApiKey, normalOutputTokens } from "./config";
 import { prepareModelAttachments } from "./model-attachments";
@@ -73,7 +72,8 @@ import {
 import { buildMmpToolSurface } from "./mmp-tools";
 import { focusedMmpToolNames, mmpAttachmentToolNamesFor } from "./mmp-tool-focus";
 import { buildAttachmentLifecycleBlock } from "@/lib/agent/attachment-lifecycle";
-import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
+import { compactRequestContext } from "./request-compaction";
+import { createMediaReadPreparer } from "./media-read-preparer";
 
 import { assertAiQuota, chargeExtraCredits, getQuotaStatus, paidFromOf, quotaOwnerOf, type PaidFrom } from "@/lib/agent/ai-quota";
 import { usdOfUsage } from "./billing";
@@ -498,8 +498,9 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
       };
       return [...messages.slice(0, idx), injected, ...messages.slice(idx)];
     };
-    const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) =>
-      compactRequestContext({
+    const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent[]) => {
+      if (!pendingMedia) mediaReads.requestStarted();
+      return compactRequestContext({
         session,
         context,
         model,
@@ -548,24 +549,21 @@ async function executeBody(input: ExecuteInput & { storage: PgSessionStorage }):
           usage.compactionModels.set(key, { modelId: cost.model.id, tokens: previous.tokens + cost.tokens, usd: previous.usd + cost.usd });
         },
       });
-
-    runHandle.prepareMediaRead = async (media) => {
-      const current = await session.buildContext();
-      const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
-      const pending = { role: "user" as const, timestamp: 0, content: [media] };
-      const context = { systemPrompt: buildSystemPrompt(inject, mmpSurface.catalog),
-        tools: tools.filter((tool) => activeToolNames.has(tool.name)).map(({ name, description, parameters }) => ({ name, description, parameters })),
-        messages: convertToLlm([...withInjectedNote(current.messages), pending]) };
-      // 即使清空所有历史也放不下，就不发起无效摘要；改走既有非原生读取。
-      if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }, { maxTokens: normalOutputTokens(selectedModel) }).fits) return false;
-      try {
-        const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, media);
-        return estimateRequestBudget(selectedModel, prepared, { maxTokens: normalOutputTokens(selectedModel) }).fits;
-      } catch (error) {
-        if (error instanceof CompactionBudgetError) return false;
-        throw error;
-      }
     };
+
+    const mediaReads = createMediaReadPreparer({
+      model: selectedModel, signal: abort.signal,
+      buildContext: async (pending) => {
+        const current = await session.buildContext();
+        const inject = await buildInjectContext(userId, sessionId, message, { toolFamilies: families });
+        return { systemPrompt: buildSystemPrompt(inject, mmpSurface.catalog),
+          tools: tools.filter((tool) => activeToolNames.has(tool.name)).map(({ name, description, parameters }) => ({ name, description, parameters })),
+          messages: convertToLlm([...withInjectedNote(current.messages), { role: "user", timestamp: 0, content: pending }]) };
+      },
+      prepareRequest: (context, pending) => prepareRequest({ model: selectedModel, context,
+        options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, pending),
+    });
+    runHandle.prepareMediaRead = mediaReads.prepare;
 
     const harness = new CoreAgentHarness({
       env: NO_ENV,

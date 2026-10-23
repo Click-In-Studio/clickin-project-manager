@@ -270,11 +270,13 @@ export interface NativeMediaCapability {
   maxBytes: number;
   maxRequestBytes: number;
   maxRequestBase64Chars: number;
-  maxCount: number;
+  maxCount?: number;
   maxPixels?: number;
+  maxDimension?: number;
+  highCountMaxDimension?: { count: number; dimension: number };
   maxPages?: number;
   maxDurationSeconds?: number;
-  tokenEstimate: { perMegapixel?: number; perPage?: number; perSecond?: number; minimum: number };
+  tokenEstimate: { perMegapixel?: number; perPage?: number; perSecond?: number; minimum: number; maximum?: number; patchSize?: number };
 }
 
 /** Normalized assistant tool call emitted by providers or repaired from text. */
@@ -640,6 +642,8 @@ export interface Model<TApi extends Api = Api> {
   thinkingLevelMap?: ThinkingLevelMap;
   input: ("text" | MediaKind)[];
   nativeMedia?: NativeMediaCapability[];
+  /** 完整序列化请求体的 provider 硬上限（字节）。 */
+  maxRequestBytes?: number;
   cost: {
     input: number; // $/million tokens
     output: number; // $/million tokens

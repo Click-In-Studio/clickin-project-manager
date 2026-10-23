@@ -168,7 +168,10 @@ function prepareSdkRequest(
         }
         if (replaced.size !== parts.size)
           throw new Error("provider 序列化未保留全部媒体块，请求已停止");
-        return (await options?.onPayload?.(adapted, model)) ?? adapted;
+        const final = (await options?.onPayload?.(adapted, model)) ?? adapted;
+        if (model.maxRequestBytes !== undefined && Buffer.byteLength(JSON.stringify(final)) > model.maxRequestBytes)
+          throw new Error("完整请求体超过目标模型的传输上限");
+        return final;
       },
     },
   };

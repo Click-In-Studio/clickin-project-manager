@@ -121,7 +121,7 @@ describe("#967 附件与素材同构读取", () => {
   });
 
   it("原件本身超限时直接 MMP，不为了不可能的原生输入反复压缩", async () => {
-    state.attachment = { ...(state.attachment as object), fileSize: 30 * 1024 * 1024 };
+    state.attachment = { ...(state.attachment as object), fileSize: 33 * 1024 * 1024 };
     const result = await readModelMedia(context, { attachmentId: "att" });
     expect(result.content.every((part) => part.type === "text")).toBe(true);
     expect(state.preflight).toHaveBeenCalledOnce();

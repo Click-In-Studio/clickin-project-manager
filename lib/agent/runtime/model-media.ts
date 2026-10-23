@@ -14,7 +14,7 @@ import {
 import { parsePdf } from "@/lib/doc-extract/pdf";
 import { presignedGet } from "@/lib/r2";
 import type { MediaContent, Model } from "../../../vendor/openclaw/packages/llm-core/src/types";
-import { nativeCapability, mediaBudget } from "./media-budget";
+import { nativeCapability, mediaBudget, imageTokens } from "./media-budget";
 import { normalOutputTokens } from "./config";
 
 export interface MediaResource {
@@ -83,7 +83,8 @@ export async function prepareNativeMedia(attachment: MediaResource, input: Nativ
       if (
         !dimensions.width ||
         !dimensions.height ||
-        dimensions.width * dimensions.height > capability.maxPixels!
+        capability.maxPixels !== undefined && dimensions.width * dimensions.height > capability.maxPixels ||
+        capability.maxDimension !== undefined && Math.max(dimensions.width ?? 0, dimensions.height ?? 0) > capability.maxDimension
       )
         throw new NativeLimit("无法读取图片尺寸或超过像素限制");
       const detectedMime =
@@ -92,13 +93,7 @@ export async function prepareNativeMedia(attachment: MediaResource, input: Nativ
         throw new Error("原件图片格式与记录不符");
       budget.width = dimensions.width;
       budget.height = dimensions.height;
-      budget.estimatedTokens = Math.max(
-        budget.estimatedTokens,
-        Math.ceil(
-          ((dimensions.width * dimensions.height) / 1_000_000) *
-            capability.tokenEstimate.perMegapixel!,
-        ),
-      );
+      budget.estimatedTokens = imageTokens(capability, dimensions.width, dimensions.height);
     } else if (capability.kind === "file") {
       const doc = await parsePdf(data);
       budget.pages = doc.stats.pageCount;
