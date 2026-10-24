@@ -19,20 +19,41 @@ const image: NativeMediaCapability = {
   maxBytes: 20 * 1024 * 1024,
   maxRequestBytes: 20 * 1024 * 1024,
   maxRequestBase64Chars: 28_000_000,
-  maxCount: 8,
   maxPixels: 12_000_000,
   tokenEstimate: { minimum: 1200, perMegapixel: 1600 },
+};
+// 数量只表达 provider 硬限制；日常整理由完整请求的 token 与体积决定。
+// https://api-docs.deepseek.com/guides/vision/
+const deepseekImage: NativeMediaCapability = {
+  ...image,
+  maxBytes: 32 * 1024 * 1024,
+  // 原件合计 64 MiB 与完整 JSON（含 base64）48 MiB 是两种硬限制；inline 通常先碰后者。
+  maxRequestBytes: 64 * 1024 * 1024,
+  maxRequestBase64Chars: 48 * 1024 * 1024,
+  maxCount: 600,
+  maxPixels: undefined,
+  maxDimension: 8192,
+  highCountMaxDimension: { count: 15, dimension: 4096 },
+  // 官方只给出缩放区间与上限，使用每张 1024 的保守上界，不随原始像素无界增长。
+  tokenEstimate: { minimum: 1024, maximum: 1024 },
+};
+// https://www.alibabacloud.com/help/en/model-studio/qwen-omni
+const omniImage: NativeMediaCapability = {
+  ...image, maxCount: 250,
+  tokenEstimate: { minimum: 24, maximum: 1280, patchSize: 32 },
 };
 const pdf: NativeMediaCapability = {
   ...image,
   kind: "file",
   mimeTypes: ["application/pdf"],
+  maxCount: 8, // 本次只调整图片，非图片沿用既有数量预算。
   maxPages: 100,
   tokenEstimate: { minimum: 3000, perPage: 3000 },
 };
 const audio: NativeMediaCapability = {
   ...image,
   kind: "audio",
+  maxCount: 8,
   mimeTypes: [
     "audio/wav",
     "audio/mpeg",
@@ -70,6 +91,8 @@ const GOOGLE_INLINE_BASE64_CHARS = 95_000_000;
 const GOOGLE_INLINE_BYTES = (GOOGLE_INLINE_BASE64_CHARS / 4) * 3;
 const googleMedia = [image, pdf, audio, video].map((capability) => ({
   ...capability,
+  // https://ai.google.dev/gemini-api/docs/image-understanding
+  ...(capability.kind === "image" ? { maxCount: 3600 } : {}),
   maxBytes: capability.kind === "audio" ? GOOGLE_INLINE_BYTES : 14 * 1024 * 1024,
   maxRequestBytes: GOOGLE_INLINE_BYTES,
   maxRequestBase64Chars: GOOGLE_INLINE_BASE64_CHARS,
@@ -103,7 +126,8 @@ const entries: Entry[] = [
       baseUrl: "https://api.deepseek.com/v1",
       reasoning: true,
       input: ["text", "image"],
-      nativeMedia: [image],
+      nativeMedia: [deepseekImage],
+      maxRequestBytes: 48 * 1024 * 1024,
       contextWindow: 1_000_000,
       maxTokens: 384_000,
       cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
@@ -156,7 +180,7 @@ const entries: Entry[] = [
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
       reasoning: true,
       input: ["text", "image", "audio", "video"],
-      nativeMedia: [image, omniAudio, omniVideo],
+      nativeMedia: [omniImage, omniAudio, omniVideo],
       contextWindow: 1_000_000,
       maxTokens: 131_072,
       cost: { input: 0.113, output: 0.382, cacheRead: 0.014, cacheWrite: 0 },
@@ -183,6 +207,7 @@ const entries: Entry[] = [
       reasoning: true,
       input: ["text", "image", "file", "audio", "video"],
       nativeMedia: googleMedia,
+      maxRequestBytes: 100_000_000,
       contextWindow: 1_048_576,
       maxTokens: 65_536,
       // 优惠结束后按正式价格登记，不移动历史计价与 credit 锚点。

@@ -35,7 +35,7 @@ export interface RequestCompactionOptions {
   maxTokens?: number;
   calibration?: number;
   /** 显式读取还未落工具结果，摘要只处理持久旧前缀。 */
-  pendingMedia?: MediaContent;
+  pendingMedia?: MediaContent[];
   completeSimple: AgentCoreCompletionRuntimeDeps["completeSimple"];
   compactFn?: typeof compact;
   shouldCompact?: (tokens: number, threshold: number) => boolean;
@@ -120,7 +120,7 @@ export async function compactRequestContext(
     { maxTokens: options.maxTokens },
     options.calibration,
   );
-  const mediaAdaptation = !originalBudget.mediaFits;
+  const mediaAdaptation = !originalBudget.mediaFits || !originalBudget.requestFits;
   const triggered =
     mediaAdaptation ||
     options.trigger === "context-overflow" ||
@@ -352,7 +352,7 @@ export async function compactRequestContext(
       details: result.value.details,
     };
     const messages = await input.prepareMessages(
-      [...buildSessionContext([...path, candidate]).messages, ...(input.pendingMedia ? [{ role: "user" as const, timestamp: 0, content: [input.pendingMedia] }] : [])],
+      [...buildSessionContext([...path, candidate]).messages, ...(input.pendingMedia ? [{ role: "user" as const, timestamp: 0, content: input.pendingMedia }] : [])],
     );
     const candidateContext = { ...input.context, messages: convertToLlm(messages) };
     const next = input.refreshContext ? await input.refreshContext(candidateContext) : candidateContext;

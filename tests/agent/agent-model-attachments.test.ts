@@ -164,7 +164,7 @@ describe("原件准备与恢复", () => {
       bytes: bytes.length,
       width: 30,
       height: 20,
-      estimatedTokens: 1200,
+      estimatedTokens: 1024,
     });
     expect(result.media[0].source?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(state.preflight.mock.calls[0][0]).toEqual([]);
@@ -233,7 +233,7 @@ describe("原件准备与恢复", () => {
       prepareModelAttachments("读图片", ["picture"], input),
     ).rejects.toThrow("不属于该会话");
     expect(fetch).not.toHaveBeenCalled();
-    state.rows = [attachment(30 * 1024 * 1024)];
+    state.rows = [attachment(33 * 1024 * 1024)];
     expect((await prepareModelAttachments("读图片", ["picture"], input)).media).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
     expect(state.preflight).toHaveBeenCalledWith([expect.objectContaining({ attachmentId: "picture" })], expect.anything());

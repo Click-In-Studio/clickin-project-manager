@@ -35,8 +35,8 @@ import { repairAndClassify } from "./resume";
 import * as db from "./subagent-db";
 import type { SubagentSource } from "./subagent-types";
 import { assistantFailureReason } from "./stream-lines";
-import { compactRequestContext, CompactionBudgetError } from "./request-compaction";
-import { estimateRequestBudget } from "./context-budget";
+import { compactRequestContext } from "./request-compaction";
+import { createMediaReadPreparer } from "./media-read-preparer";
 import { readModelMedia } from "./model-read";
 
 const TIMEOUT_MS = 30 * 60_000;
@@ -295,7 +295,8 @@ async function executeBody(
       } }, { ...(args as Record<string, unknown>), attachmentId: id } as Parameters<typeof readModelMedia>[1], _call);
     } });
   setToolObservationSources({ resident: tools.map(t => t.name) });
-  const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => {
+  const prepareRequest = async ({ model, context, options, trigger, signal, calibration }: Parameters<PrepareAdmittedRequest>[0], pendingMedia?: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent[]) => {
+    if (!pendingMedia) mediaReads.requestStarted();
     const serviceRuntime = (await import("./service")).runtimeOverrides;
     return compactRequestContext({
       session,
@@ -331,21 +332,19 @@ async function executeBody(
       },
     });
   };
-  const prepareMediaRead = async (media: import("../../../vendor/openclaw/packages/llm-core/src/types").MediaContent) => {
-    const pending = { role: "user" as const, timestamp: 0, content: [media] };
-    const current = await session.buildContext();
-    const context = { systemPrompt: SYSTEM,
-      tools: tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-      messages: convertToLlm([...current.messages, pending]) };
-    if (!estimateRequestBudget(selectedModel, { ...context, messages: [pending] }).fits) return false;
-    try {
-      const prepared = await prepareRequest({ model: selectedModel, context, options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, media);
-      return estimateRequestBudget(selectedModel, prepared).fits;
-    } catch (error) {
-      if (error instanceof CompactionBudgetError) return false;
-      throw error;
-    }
-  };
+  const mediaReads = createMediaReadPreparer({
+    model: selectedModel, signal: abort.signal,
+    buildContext: async (pending) => {
+      const current = await session.buildContext();
+      return { systemPrompt: SYSTEM,
+        tools: tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        messages: convertToLlm([...current.messages, { role: "user", timestamp: 0, content: pending }]) };
+    },
+    prepareRequest: (context, pending) => prepareRequest({ model: selectedModel, context,
+      options: { maxTokens: normalOutputTokens(selectedModel) }, trigger: "pressure", signal: abort.signal }, pending),
+  });
+  const prepareMediaRead = mediaReads.prepare;
+
   const harness = new CoreAgentHarness<Skill, PromptTemplate, RuntimeToolDef>({
     env: {} as ExecutionEnv,
     session,

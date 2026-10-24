@@ -48,6 +48,17 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("#967 附件与素材同构读取", () => {
+  it.each(["deepseek-flash", "resonance", "inspiration"])("#1052 %s 的十三张小图按内容预算保留，不因超过八张而拒绝", async (key) => {
+    state.modelKey = key;
+    const result = await readModelMedia(context, { assetId: "asset" });
+    const image = result.content.find(part => part.type === "image")!;
+    const budget = estimateRequestBudget(resolveModel(key as Parameters<typeof resolveModel>[0]), {
+      messages: [{ role: "user", timestamp: 0, content: Array.from({ length: 13 }, () => image) }],
+    });
+    expect(budget.fits).toBe(true);
+    if (key === "deepseek-flash") expect(budget.mediaTokens).toBeLessThanOrEqual(13 * 1024);
+  });
+
   it("超过旧 1 MiB 的曲谱仍可流式回查末尾，保留准确字符位置", async () => {
     state.textBody = "甲".repeat(400_000) + "🎵尾声";
     state.attachment = { ...(state.attachment as object), mimeType: "text/plain", fileName: "score.txt", mediaKind: null,
@@ -110,7 +121,7 @@ describe("#967 附件与素材同构读取", () => {
   });
 
   it("原件本身超限时直接 MMP，不为了不可能的原生输入反复压缩", async () => {
-    state.attachment = { ...(state.attachment as object), fileSize: 30 * 1024 * 1024 };
+    state.attachment = { ...(state.attachment as object), fileSize: 33 * 1024 * 1024 };
     const result = await readModelMedia(context, { attachmentId: "att" });
     expect(result.content.every((part) => part.type === "text")).toBe(true);
     expect(state.preflight).toHaveBeenCalledOnce();

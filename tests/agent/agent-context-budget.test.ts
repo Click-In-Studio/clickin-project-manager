@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AssistantMessage, Context, Model } from "../../vendor/openclaw/packages/llm-core/src/types";
+import type { AssistantMessage, Context, MediaContent, Model } from "../../vendor/openclaw/packages/llm-core/src/types";
 import type { AgentMessage } from "../../vendor/openclaw/packages/agent-core/src/types";
 import {
   compact,
@@ -67,6 +67,40 @@ describe("压缩控制指令与用户意图隔离", () => {
 });
 
 describe("模型请求上下文预算", () => {
+  function image(width = 100, height = 100, bytes = 3): MediaContent {
+    return { type: "image", mimeType: "image/png", budget: { bytes, base64Chars: 4 * Math.ceil(bytes / 3),
+      width, height, estimatedTokens: 99_999, basis: "历史模型测量" } };
+  }
+
+  it("#1052 图片预算使用当前模型的预处理规则，DeepSeek 大图不按原始像素无界增长", () => {
+    const messages: Context["messages"] = [{ role: "user", timestamp: 0, content: [image(5000, 5000)] }];
+    expect(estimateRequestBudget(resolveModel("deepseek-flash"), { messages }).mediaTokens).toBe(1024);
+    expect(estimateRequestBudget(resolveModel("resonance"), { messages }).mediaTokens).toBe(1282);
+    expect(estimateRequestBudget(resolveModel("resonance"), { messages: [{ role: "user", timestamp: 0, content: [image()] }] }).mediaTokens).toBe(26);
+  });
+
+  it("#1052 图像数量只受 provider 硬限制；第十五张采用相应边长限制", () => {
+    const model = resolveModel("deepseek-flash");
+    const budget = (parts: MediaContent[]) => estimateRequestBudget(model, { messages: [{ role: "user", timestamp: 0, content: parts }] });
+    expect(budget(Array.from({ length: 600 }, () => image())).fits).toBe(true);
+    expect(budget(Array.from({ length: 601 }, () => image())).mediaFits).toBe(false);
+    expect(budget(Array.from({ length: 14 }, () => image(5000, 100))).mediaFits).toBe(true);
+    expect(budget(Array.from({ length: 15 }, () => image(5000, 100))).mediaFits).toBe(false);
+    expect(budget([image(8193, 100)]).mediaFits).toBe(false);
+  });
+
+  it("#1052 张数很少也会因体积或上下文超限；完整请求计入文字和工具", () => {
+    const model = resolveModel("deepseek-flash");
+    const messages: Context["messages"] = [{ role: "user", timestamp: 0, content: [image(100, 100, 40 * 1024 * 1024)] }];
+    expect(estimateRequestBudget(model, { messages }).fits).toBe(false);
+    const small = { ...model, maxRequestBytes: 1000 };
+    const content: Context = { messages: [{ role: "user", timestamp: 0, content: [image()] }] };
+    expect(estimateRequestBudget(small, content).requestFits).toBe(true);
+    expect(estimateRequestBudget(small, { ...content, systemPrompt: "系统材料".repeat(100) }).requestFits).toBe(false);
+    expect(estimateRequestBudget(small, { ...content, tools: [{ name: "read", description: "工具说明".repeat(100), parameters: {} }] }).requestFits).toBe(false);
+    expect(estimateRequestBudget({ ...model, contextWindow: 1100, maxTokens: 100 }, content).textFits).toBe(false);
+  });
+
   it.each([
     ["deepseek-flash", 256_000, 1_000_000],
     ["deepseek-pro", 256_000, 1_000_000],

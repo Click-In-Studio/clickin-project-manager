@@ -3,6 +3,7 @@ import type { Capability, MmpClient } from "@mmp/client";
 import { saveModelSelection } from "@/lib/agent/runtime/model-settings-db";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import sharp from "sharp";
+import { createHash } from "node:crypto";
 import { createAssistantMessageEventStream } from "@openclaw/ai/event-stream";
 import { CompactionError } from "../../vendor/openclaw/packages/agent-core/src/harness/types";
 import type { AssistantMessage, StreamFn, ToolCall } from "../../vendor/openclaw/packages/llm-core/src/types";
@@ -541,6 +542,63 @@ describe("agent-runtime service", () => {
       const entries = (await getPool().query("SELECT type,payload FROM agent_session_entry WHERE session_id=$1 ORDER BY seq", [key])).rows;
       expect(entries.findIndex((entry) => entry.type === "compaction")).toBeLessThan(entries.findIndex((entry) => entry.payload.message?.toolCallId === "native-read-with-compaction"));
     } finally { complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; vi.stubGlobal("fetch", oldFetch); }
+  });
+
+  it.each(["context", "media"])("#1052 已有八张后同批读取四张，%s 压力下不丢新图", async (mode) => {
+    const key = newKey();
+    await seedHistory(key);
+    const bytes = await sharp({ create: { width: 10, height: 10, channels: 3, background: "blue" } }).png().toBuffer();
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const attachment = await createPendingAttachment({ sessionId: key, userId, fileName: `新图${i}.png`, mimeType: "image/png", mediaKind: "image", fileSize: bytes.length });
+      await markAttachmentReady(attachment.id, key, userId, bytes.length);
+      ids.push(attachment.id);
+    }
+    const oldMedia: import("../../vendor/openclaw/packages/llm-core/src/types").MediaContent[] = [];
+    for (let i = 0; i < 8; i++) {
+      const attachment = await createPendingAttachment({ sessionId: key, userId, fileName: `旧图${i}.png`, mimeType: "image/png", mediaKind: "image", fileSize: bytes.length });
+      await markAttachmentReady(attachment.id, key, userId, bytes.length);
+      oldMedia.push({ type: "image", attachmentId: attachment.id, mimeType: "image/png", data: bytes.toString("base64"),
+        source: { kind: "attachment", sha256: createHash("sha256").update(bytes).digest("hex") },
+        budget: { bytes: bytes.length, base64Chars: bytes.toString("base64").length, estimatedTokens: 1024, width: 10, height: 10, basis: "测试原件实测" } });
+    }
+    const history = new Session((await PgSessionStorage.load(key))!);
+    await history.appendMessage({ role: "user", timestamp: 1, content: oldMedia });
+    await history.appendMessage({ ...base(), content: [{ type: "text", text: "八张旧图已分析。" }], stopReason: "stop" });
+    const oldFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(bytes))));
+    let pressure = false;
+    runtimeOverrides.shouldCompactFn = () => pressure;
+    const complete = vi.spyOn(llmRuntime(), "completeSimple").mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      pressure = false;
+      return { ...base(), content: [{ type: "text", text: "旧资料已整理，继续读取本批新图。" }], stopReason: "stop" };
+    });
+    const { streamFn, seen } = scripted([
+      { before: () => { pressure = true; }, calls: ids.map((id, i) => ({ type: "toolCall", id: `parallel-media-${i}`, name: exposedName("my.attachment_read"), arguments: { attachmentId: id } })) },
+      { text: "本批原件全部读到" },
+    ]);
+    runtimeOverrides.streamFn = streamFn;
+    const capability = resolveModel("deepseek-flash").nativeMedia![0];
+    const originalBytes = capability.maxRequestBytes;
+    // 用体积触发真实媒体适配；数量仍使用 provider 的 600 张硬上限。
+    if (mode === "media") capability.maxRequestBytes = bytes.length * 8;
+    try {
+      await startRun({ sessionId: key, userId, message: "同时读取四张附件原件。" });
+      expect((await collectUntilTerminal(key)).at(-1)).toEqual({ type: "final", text: "本批原件全部读到" });
+      await waitForIdle(key);
+      const results = (seen[1].messages as import("../../vendor/openclaw/packages/llm-core/src/types").Context["messages"]).filter(message => message.role === "toolResult");
+      expect(results).toHaveLength(4);
+      expect(results.every(result => !result.isError)).toBe(true);
+      expect(results.flatMap(result => result.content.flatMap(part => part.type === "image" ? [part.attachmentId] : []))).toEqual(ids);
+      expect(complete).toHaveBeenCalledOnce();
+      const summaryMediaIds = complete.mock.calls[0][1].messages.flatMap(message =>
+        message.role !== "assistant" && Array.isArray(message.content)
+          ? message.content.flatMap(part => part.type !== "text" ? [part.attachmentId] : []) : []);
+      for (const id of ids) expect(summaryMediaIds).not.toContain(id);
+      if (mode === "media") for (const old of oldMedia) expect(summaryMediaIds).toContain(old.attachmentId);
+      expect((await getPool().query("SELECT status FROM agent_run WHERE session_id=$1", [key])).rows[0].status).toBe("completed");
+    } finally { capability.maxRequestBytes = originalBytes; complete.mockRestore(); delete runtimeOverrides.shouldCompactFn; vi.stubGlobal("fetch", oldFetch); }
   });
 
   it("thinking 写入 transcript、历史可恢复，run 结束后累计事件被清理", async () => {
